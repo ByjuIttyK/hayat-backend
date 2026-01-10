@@ -1,6 +1,7 @@
 ///https://www.js-tutorials.com/nodejs-tutorial/node-js-rest-api-add-edit-delete-record-mysql-using-express/
 
 //https://www.youtube.com/watch?v=LmIsbzt-S_E
+require('dotenv').config();
 const cors = require("cors");
 var http = require("http");
 var express = require("express");
@@ -10,9 +11,12 @@ var mysql = require("mysql2");  // Import MySQL client
 // 👇 new version for async/await queries
 const mysqlPromise = require("mysql2/promise");
 
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+
 var bodyParser = require("body-parser");
 const { error } = require("console");
-
+const JWT_SECRET = process.env.JWT_SECRET;
 //const express = require('express');
 //const app = express();
 
@@ -68,7 +72,64 @@ var server = app.listen(3001, dbIp, function () {
 
   console.log("Server listening at http://%s:%s", host, port);
 });
+const authMiddleware = require("./middleware/authMiddleware");
 
+/* Public API (NO token required) */
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body;
+
+  connection.query(
+    "SELECT * FROM users WHERE username = ? AND is_active = 1",
+    [username],
+    async (err, rows) => {
+
+      if (err) {
+        console.error("DB Error:", err);
+        return res.status(500).json({ message: "Database error" });
+      }
+
+      if (rows.length === 0) {
+        return res
+          .status(401)
+          .json({ message: "Invalid username or password" });
+      }
+
+      const user = rows[0];
+    //  console.log("user =", user);
+
+      try {
+        const match = await bcrypt.compare(password, user.password_hash);
+
+        if (!match) {
+          return res
+            .status(401)
+            .json({ message: "Invalid username or password" });
+        }
+       // console.log("JWT_SECRET =", process.env.JWT_SECRET);
+
+        const token = jwt.sign(
+          { id: user.id, username: user.username, role: user.role },
+          JWT_SECRET,
+          { expiresIn: "8h" }
+        );
+
+        res.json({
+          token,
+          user: {
+            username: user.username,
+            role: user.role,
+          },
+        });
+
+      } catch (bcryptErr) {
+        console.error("Bcrypt error:", bcryptErr);
+        res.status(500).json({ message: "Password check failed" });
+      }
+    }
+  );
+});
+/* Protect everything below */
+//app.use("/api", authMiddleware);
 app.get('/api/column-metadata/:tableId', (req, res) => {
   //  console.log("Fetching column metadata");
   const { tableId } = req.params;
@@ -161,6 +222,7 @@ app.get('/api/smart-grid-columns/:tableId', (req, res) => {
   });
 });
 
+
 app.get('/api/gridoptionsmst/:tableId', (req, res) => {
   console.log("Fetching gridOptionsMst", req.params.tableId);
   const { tableId } = req.params.tableId;
@@ -204,6 +266,20 @@ app.get('/api/report_parameters/:rep', (req, res) => {
     res.json(rows);
   });
 });
+app.get('/lovmetadata/:rep', (req, res) => {
+  console.log("Fetching Lov metatdata", req.params.rep);
+  // const { tableId } = req.params.rep;
+  const query = 'SELECT * FROM column_metadata_lov WHERE lovHdr = ?';
+
+  connection.query(query, [req.params.rep], (err, rows, fields) => {
+    if (err) {
+      console.error("Error executing query:", err);
+      return res.status(500).json({ error: "Failed to fetch column_metedata_lov" });
+    }
+    console.log('LOV Column_metatdata =', rows);
+    res.json(rows);
+  });
+});
 
 app.post("/save-lpo", async (req, res) => {
   try {
@@ -230,7 +306,7 @@ app.post("/save-lpo", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update NGP_NET table
           const netQuery = `
-          INSERT INTO LPO_NET (LPO_NO, LPO_DATE, SUP_CODE,NARRATION,AMOUNT) 
+          INSERT INTO lpo_net (LPO_NO, LPO_DATE, SUP_CODE,NARRATION,AMOUNT) 
           VALUES (?, ?, ?, ?,?) 
           ON DUPLICATE KEY UPDATE 
           LPO_DATE= VALUES(LPO_DATE),
@@ -242,7 +318,7 @@ app.post("/save-lpo", async (req, res) => {
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
-              [lpoNet.LpoNo, lpoNet.LpoDt, lpoNet.SupCd, lpoNet.Narration,lpoNet.Amount],
+              [lpoNet.LpoNo, lpoNet.LpoDt, lpoNet.SupCd, lpoNet.Narration, lpoNet.Amount],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -254,7 +330,7 @@ app.post("/save-lpo", async (req, res) => {
           });
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-              INSERT INTO LPO_ITEMS (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
+              INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
               ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
@@ -329,7 +405,7 @@ app.post("/save-fpo", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update NGP_NET table
           const netQuery = `
-          INSERT INTO FPO_NET (FPO_NO,FPO_DATE, SUP_CODE,YR_REF_NO,PAY_TERMS,FPO_NOTES,AMOUNT) 
+          INSERT INTO fpo_net (FPO_NO,FPO_DATE, SUP_CODE,YR_REF_NO,PAY_TERMS,FPO_NOTES,AMOUNT) 
           VALUES (?, ?, ?, ?,?,?,?) 
           ON DUPLICATE KEY UPDATE 
           FPO_DATE= VALUES(FPO_DATE),
@@ -355,7 +431,7 @@ app.post("/save-fpo", async (req, res) => {
           });
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-              INSERT INTO FPO_ITEMS (FPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
+              INSERT INTO fpo_items (FPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
               ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
@@ -428,7 +504,7 @@ app.post("/save-ngp", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update NGP_NET table
           const netQuery = `
-            INSERT INTO NGP_NET (PRCH_NO, PRCH_DATE, SUP_CODE,NARRATION,AMOUNT,DISCOUNT) 
+            INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE,NARRATION,AMOUNT,DISCOUNT) 
             VALUES (?, ?, ?, ?,?,?) 
             ON DUPLICATE KEY UPDATE 
             PRCH_DATE= VALUES(PRCH_DATE),
@@ -454,7 +530,7 @@ app.post("/save-ngp", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO NGP_ITEMS (PRCH_NO, SR_NO, ACC_CODE, NARRATION, JOB_NO, AMOUNT)
+            INSERT INTO ngp_items (PRCH_NO, SR_NO, ACC_CODE, NARRATION, JOB_NO, AMOUNT)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
             ACC_CODE = COALESCE(VALUES(ACC_CODE), ACC_CODE), 
@@ -509,7 +585,7 @@ app.post("/save-localpurch", async (req, res) => {
       return res.status(400).json({ message: "Invalid data format" });
     }
     console.log("PURCHASE LOCAL HDR =>**", netData);
-     console.log("PURCHASE LOCAL ITEMS =>** ", itemsData);
+    console.log("PURCHASE LOCAL ITEMS =>** ", itemsData);
     // Start transaction
     connection.getConnection((err, conn) => {
       if (err) {
@@ -528,7 +604,7 @@ app.post("/save-localpurch", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
-            INSERT INTO PURCHASE_HDR (PJV_NO, PJV_DATE, SUP_CODE,NARRATION,INV_AMOUNT,DISCOUNT,VAT_AMOUNT) 
+            INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE,NARRATION,INV_AMOUNT,DISCOUNT,VAT_AMOUNT) 
             VALUES (?, ?, ?, ?,?,?,?) 
             ON DUPLICATE KEY UPDATE 
             PJV_DATE= VALUES(PJV_DATE),
@@ -556,7 +632,7 @@ app.post("/save-localpurch", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO PURCHASE_ITEMS (SRV_NO, SR_NO, ITEM_CODE, QTY, COST)
+            INSERT INTO purchase_items (SRV_NO, SR_NO, ITEM_CODE, QTY, COST)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
             ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
@@ -629,7 +705,7 @@ app.post("/save-pret", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
-            INSERT INTO PRET_HDR (VCHR_NO, VCHR_DATE, SUP_CODE,NARRATION,INV_AMOUNT,VAT_PERC) 
+            INSERT INTO pret_hdr (VCHR_NO, VCHR_DATE, SUP_CODE,NARRATION,INV_AMOUNT,VAT_PERC) 
             VALUES (?, ?, ?, ?,?,?) 
             ON DUPLICATE KEY UPDATE 
             VCHR_DATE= VALUES(VCHR_DATE),
@@ -657,7 +733,7 @@ app.post("/save-pret", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO PRET_ITEMS (VCHR_NO, SR_NO, ITEM_CODE, QTY, COST)
+            INSERT INTO pret_items (VCHR_NO, SR_NO, ITEM_CODE, QTY, COST)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
             ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
@@ -734,7 +810,7 @@ app.post("/save-crnote", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("CrNoteNo, DoDt==>", CrnHdr);
           const netQuery = `
-            INSERT INTO CRNOTE_HDR ( VCHR_NO,VCHR_DATE, CUST_CODE, DEBIT_AC, 
+            INSERT INTO crnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, DEBIT_AC, 
                                      NARRATION, AMOUNT, VAT_AMT) 
             VALUES (?,?,?,?, 
                     ?,?,?) 
@@ -824,7 +900,7 @@ app.post("/save-drnote", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("DrNoteNo, DoDt==>", CrnHdr);
           const netQuery = `
-            INSERT INTO DRNOTE_HDR ( VCHR_NO,VCHR_DATE, CUST_CODE, CREDIT_AC, 
+            INSERT INTO drnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, CREDIT_AC, 
                                      NARRATION, AMOUNT, VAT_AMT) 
             VALUES (?,?,?,?, 
                     ?,?,?) 
@@ -912,7 +988,7 @@ app.post("/save-do", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("DoNo, DoDt==>", DoHdr, DoHdr.DoNo, DoHdr.DoDt);
           const netQuery = `
-            INSERT INTO FAB_DO_HDR ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
+            INSERT INTO fab_do_hdr ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
                                      LPO_NO, LPO_DATE, DO_NO, CONTACT_PERSON,DO_APPROVED) 
             VALUES (?,?,?,?, 
                     ?,?,?,?,?) 
@@ -945,7 +1021,7 @@ app.post("/save-do", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO FAB_DO_DTL (INV_NO, SR_NO, INV_DATE, ITEM_CODE, INV_QTY, INV_UNIT)
+            INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE, INV_QTY, INV_UNIT)
             VALUES ?
             ON DUPLICATE KEY UPDATE 
             INV_NO = VALUES(INV_NO),
@@ -1024,7 +1100,7 @@ app.post("/save-rcp", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
-               INSERT INTO VOUCHERS (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
+               INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
                                      CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
                                       AMOUNT) 
                VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
@@ -1063,7 +1139,7 @@ app.post("/save-rcp", async (req, res) => {
             for (const chq of chqData.filter(chq =>
               chq.ChqNo && chq.ChqNo.trim() !== "")) {
               const chqQuery = `
-                  INSERT INTO PDC_RCD (
+                  INSERT INTO pdc_rcd (
                     TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
                     PDC_CODE, CUST_CODE, CHQ_BANK, AMOUNT, NARRATION
                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1107,7 +1183,7 @@ app.post("/save-rcp", async (req, res) => {
           console.log('TRAN_ACC insert start');
           for (const trn of tranaccData) {
             const tranQuery = `
-                  INSERT INTO TRAN_ACC (
+                  INSERT INTO tran_acc (
                     TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
                      AMOUNT, DB_CR,NARRATION1,NARRATION2
                   ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?)
@@ -1149,7 +1225,7 @@ app.post("/save-rcp", async (req, res) => {
           console.log("InvStl INSERT START:");
           for (const trn of InvStlData) {
             const stlQuery = `
-                  INSERT INTO ADJ_DTL (
+                  INSERT INTO adj_dtl (
                     SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
                      STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT
                   ) VALUES (?, ?, ?, ?, ?,?, ?, ?)
@@ -1238,7 +1314,7 @@ app.post("/save-frgnpurch", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
-            INSERT INTO PUR_FRGN_HDR (PJV_NO, PJV_DATE,INV_NO, INV_DATE, PO_NO,SUP_CODE,
+            INSERT INTO pur_frgn_hdr (PJV_NO, PJV_DATE,INV_NO, INV_DATE, PO_NO,SUP_CODE,
                                       ACC_CODE,NARRATION,INV_AMOUNT_FRGN,INV_AMOUNT_LOCAL,
                                       CURR_CODE, CONV_RATE,
                                       DISCOUNT,VAT_AMOUNT) 
@@ -1277,7 +1353,7 @@ app.post("/save-frgnpurch", async (req, res) => {
           });
           // ✅ Step 2: Insert/Update G table
           const LcstTrnQuery = `
-            INSERT INTO LCST_TRN (VCHR_NO, GIT_TYPE,AMOUNT)
+            INSERT INTO lcst_trn (VCHR_NO, GIT_TYPE,AMOUNT)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
             AMOUNT = COALESCE(VALUES(AMOUNT), AMOUNT);
@@ -1298,7 +1374,7 @@ app.post("/save-frgnpurch", async (req, res) => {
 
           // ✅ Step 3: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO PUR_FRGN_ITEMS (PJV_NO, SR_NO, ITEM_CODE, QTY, COST_FC,UNIT_COST)
+            INSERT INTO pur_frgn_items (PJV_NO, SR_NO, ITEM_CODE, QTY, COST_FC,UNIT_COST)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
             ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
@@ -1356,7 +1432,7 @@ app.get("/suplst", function (req, res) {
   connection.query(
     "SELECT SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3, SUP_TEL1, " +
     " SUP_PERS,VAT_REG_NO,CN_CODE , DATE_FORMAT(START_DT , '%d/%m/%Y') AS START_DT " +
-    " FROM SUP_MST ORDER BY SUP_code",
+    " FROM sup_mst ORDER BY SUP_code",
     function (err, results, fields) {
       if (err) {
         console.error("Error executing query: ", err.message);
@@ -1372,7 +1448,7 @@ app.get("/suplst", function (req, res) {
 app.get("/cmpdetails", function (req, res) {
   // const tableName= "COMPANY";
   connection.query(
-    "select NAME, PLACE, ADDRESS1 " + " FROM COMPANY",
+    "select NAME, PLACE, ADDRESS1 " + " FROM company",
 
     function (err, results, fields) {
       if (err) {
@@ -1392,7 +1468,7 @@ app.get("/InvStlCust/:custcd", function (req, res) {
   connection.query(
     "SELECT ACC_CODE CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM V_CUST_OUTSTANDING_BILL WHERE ACC_CODE = ?",
+    "FROM v_cust_outstanding_bill WHERE ACC_CODE = ?",
     [req.params.custcd],
     function (err, results) {
       if (err) {
@@ -1414,7 +1490,7 @@ app.get("/InvStlSup/:custcd", function (req, res) {
   connection.query(
     "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, '' AS NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM V_SUP_OUTSTANDING_BILL WHERE BALANCE > 0 AND ACC_CODE = ?",
+    "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ?",
     [req.params.custcd],
     function (err, results) {
       if (err) {
@@ -1578,7 +1654,7 @@ app.post("/saveLpoItems", async function (req, res) {
       for (const row of receivedData) {
         console.log("row =-----", row);
         const result = await connection.execute(
-          "SELECT LPO_NO, SR_NO FROM LPO_ITEMS WHERE LPO_NO = :po AND SR_NO = :sr_no",
+          "SELECT LPO_NO, SR_NO FROM lpo_items WHERE LPO_NO = :po AND SR_NO = :sr_no",
           [row.LPO_NO, row.SR_NO],
           {
             outFormat: orcl1.OBJECT,
@@ -1646,7 +1722,7 @@ app.post("/saveLpoItems", async function (req, res) {
       row.QTY === null
     ) {
       const result = await connection.execute(
-        "DELETE FROM LPO_ITEMS WHERE LPO_NO = :1 AND SR_NO = :2",
+        "DELETE FROM lpo_items WHERE LPO_NO = :1 AND SR_NO = :2",
         [row.LPO_NO, row.SR_NO],
         {
           outFormat: orcl1.OBJECT,
@@ -1661,7 +1737,7 @@ app.post("/saveLpoItems", async function (req, res) {
     if (row.isNew === true) {
       console.log("Server Insert Lpoitems row--", row);
       const result = await connection.execute(
-        "INSERT INTO  LPO_ITEMS ( LPO_NO, ITEM_CODE ," +
+        "INSERT INTO  lpo_items ( LPO_NO, ITEM_CODE ," +
         " QTY , RATE ,  CAT_CODE , SR_NO)" +
         " VALUES (:1,:2,:3,:4,:5,:6) "[
         (row.LPO_NO,
@@ -1696,7 +1772,7 @@ app.get("/supplier/:id", function (req, res) {
   // console.log("Supplier Edit ");
   connection.query(
     "select SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3,  SUP_TEL1 ," +
-    "SUP_FAX1,EMAIL,SUP_PERS, CN_CODE ,LPO_LIMIT, CR_LIMIT,CR_PERIOD, VAT_REG_NO FROM SUP_MST WHERE SUP_CODE=?",
+    "SUP_FAX1,EMAIL,SUP_PERS, CN_CODE ,LPO_LIMIT, CR_LIMIT,CR_PERIOD, VAT_REG_NO FROM sup_mst WHERE SUP_CODE=?",
     [req.params.id],
 
     function (err, result) {
@@ -1715,7 +1791,7 @@ app.get("/api/sup-next-code/:id", function (req, res) {
   console.log("Supplier NextCode 1st Chr=", Name1);
   connection.query(
     "select Max(Substr(SUP_CODE,3,10))+1 As Sup_Code_Next " +
-    " FROM SUP_MST WHERE SUBSTR(LTRIM(SUP_NAME),1,1) =?",
+    " FROM sup_mst WHERE SUBSTR(LTRIM(SUP_NAME),1,1) =?",
     [Name1],
 
     function (err, result) {
@@ -1790,7 +1866,7 @@ app.post("/api/sup-save", async (req, res) => {
 });
 //delete Sup DELETE RECORD
 app.delete("/supDelete/:id", function (req, res, next) {
-  var sql = "DELETE FROM SUP_MST WHERE SUP_CODE = ?";
+  var sql = "DELETE FROM sup_mst WHERE SUP_CODE = ?";
   connection.query(sql, [req.params.id], function (err, result) {
     if (err) throw err;
     console.log("Number of records deleted: " + result.affectedRows);
@@ -1851,7 +1927,7 @@ app.get("/cuslst", function (req, res) {
     "CUS_FAX1,CUS_FAX2,CR_LIMIT,PAYMENT_TERMS,SMAN_CODE,CUS_GRADE_CODE," +
     "CUS_LICENSE_FILE,CUS_LICENSE_EXPIRY,CUS_QUOTE_LIMIT,CUS_LIC_EXP_ALLOW," +
     "BLOCK_DO,CR_TERMS,VAT_REG_NO, NATION_CODE, EMAIL , START_DT " +
-    " from CUS_MST ",
+    " from cus_mst ",
     {},
 
     function (err, results, fields) {
@@ -1872,7 +1948,7 @@ app.get("/cuslovdropdown", function (req, res) {
 
   connection.query(
     "select CUST_CODE, LTRIM(CUST_NAME) CUST_NAME, CUST_ADR1" +
-    " from CUS_MST   ORDER BY LTRIM(CUST_NAME)",
+    " from cus_mst   ORDER BY LTRIM(CUST_NAME)",
 
     function (error, results, fields) {
       if (error) throw error;
@@ -1885,7 +1961,7 @@ app.get("/cuslovdropdown", function (req, res) {
 app.get("/cuslov/:cname", function (req, res) {
   connection.query(
     "select CUST_CODE, LTRIM(CUST_NAME) CUST_NAME, CUST_ADR1" +
-    " from CUS_MST  WHERE CUST_NAME LIKE :1 ORDER BY LTRIM(CUST_NAME)",
+    " from cus_mst  WHERE CUST_NAME LIKE :1 ORDER BY LTRIM(CUST_NAME)",
     [req.params.cname === "*" ? "%" : req.params.cname + "%"],
 
     function (error, results, fields) {
@@ -1902,7 +1978,7 @@ app.get("/customer/:id", function (req, res) {
 
   const sql = `
     SELECT CUST_CODE, CUST_NAME, CUST_ADR1, CUST_ADR2
-    FROM CUS_MST
+    FROM cus_mst
     WHERE CUST_CODE = ?
   `;
 
@@ -1928,7 +2004,7 @@ app.get("/MaxVchrNo/:Tp", function (req, res) {
   //
   if (req.params.Tp == "SIV") {
     connection.execute(
-      "select MAX(SIV_NO)   MXVCHR  FROM SIV_HDR ",
+      "select MAX(SIV_NO)   MXVCHR  FROM siv_hdr ",
       [],
       {
         outFormat: orcl1.OBJECT,
@@ -1946,7 +2022,7 @@ app.get("/MaxVchrNo/:Tp", function (req, res) {
     );
   } else if (req.params.Tp == "SRV") {
     connection.execute(
-      "select MAX(SRV_NO)   MXVCHR  FROM SRV_HDR ",
+      "select MAX(SRV_NO)   MXVCHR  FROM srv_hdr ",
 
 
       function (err, result) {
@@ -1962,7 +2038,7 @@ app.get("/MaxVchrNo/:Tp", function (req, res) {
     );
   } else if (req.params.Tp == "SADJ") {
     connection.query(
-      "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM STK_HDR",
+      "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_hdr",
       [],
 
       function (err, result) {
@@ -1977,7 +2053,7 @@ app.get("/MaxVchrNo/:Tp", function (req, res) {
     );
   } else if (req.params.Tp == "PRET") {
     connection.execute(
-      "select Lpad(MAX(SUBSTR(VCHR_NO,1,6)+1) ||'RLV1',10,'0') MXVCHR  FROM PRET_HDR ",
+      "select Lpad(MAX(SUBSTR(VCHR_NO,1,6)+1) ||'RLV1',10,'0') MXVCHR  FROM pret_hdr ",
       [],
 
       function (err, result) {
@@ -1992,7 +2068,7 @@ app.get("/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-      "select MAX(VCHR_NO)   MXVCHR  FROM TRAN_ACC WHERE TRAN_TYPE =?",
+      "select MAX(VCHR_NO)   MXVCHR  FROM tran_acc WHERE TRAN_TYPE =?",
       [req.params.Tp],
 
       function (err, result) {
@@ -2016,7 +2092,7 @@ app.get("/lpoitemget", function (req, res) {
   connection.query(
     "select LPO_NO,SR_NO, JOB_NO, ITEM_CODE,ITEM_NAME, QTY, UNIT," +
     "RATE " +
-    "FROM LPO_ITEMS ",
+    "FROM lpo_items ",
     [req.params.id],
     function (error, results, fields) {
       if (error) throw error;
@@ -2034,7 +2110,7 @@ app.get("/invadj/:tp/:vchr", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select SOURCE_TYPE,SOURCE_DOC,SOURCE_DATE, ACC_CODE,STLD_DOC ,STLD_TYPE, STLD_AMT " +
-      "FROM ADJ_DTL WHERE SOURCE_TYPE = :1 AND SOURCE_DOC =:2 ",
+      "FROM adj_dtl WHERE SOURCE_TYPE = :1 AND SOURCE_DOC =:2 ",
       [req.params.tp, req.params.vchr],
       {
         outFormat: orcl1.OBJECT,
@@ -2056,9 +2132,9 @@ app.get("/vouchers/:tp/:vchr", function (req, res) {
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,C.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
-    " FROM VOUCHERS a " +
-    " LEFT OUTER JOIN  CUS_MST b ON a.CUST_CODE = b.CUST_CODE " +
-    " LEFT OUTER JOIN ACC_MST c ON a.ACC_CODE = c.ACC_CODE " +
+    " FROM vouchers a " +
+    " LEFT OUTER JOIN  cus_mst b ON a.CUST_CODE = b.CUST_CODE " +
+    " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
     " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO =?   ",
     [req.params.tp, req.params.vchr],
     function (err, results, fields) {
@@ -2095,7 +2171,7 @@ app.get("/accled/:acc/:dt1/:dt2", function (req, res) {
       "a.ACC_CODE,a.AMOUNT, a.DB_CR, a.NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME,   " +
       " DECODE(DB_CR,'D', a.AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', a.AMOUNT, 0 ) CREDIT_AMT, " +
-      " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM TRAN_ACC a, V_ALL_CHEQUES b  " +
+      " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc a, V_ALL_CHEQUES b  " +
       "WHERE a.TRAN_TYPE=b.TRAN_TYPE(+) AND a.VCHR_NO=b.VCHR_NO(+) " +
       "AND a.ACC_CODE = :1 " +
       "AND a.DATTE BETWEEN TO_DATE(:2,'DD/MM/YY') AND  TO_DATE(:3,'DD/MM/YY') ORDER BY 6",
@@ -2123,7 +2199,7 @@ app.get("/ledopbal/:acc/:dt1", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select SUM(DECODE(DB_CR,'D', a.AMOUNT,a.AMOUNT*(-1))) AMOUNT" +
-      " FROM TRAN_ACC a  " +
+      " FROM tran_acc a  " +
       "WHERE  a.ACC_CODE = :1 " +
       "AND a.DATTE < TO_DATE(:2,'DD/MM/YY') ",
       [req.params.acc, req.params.dt1],
@@ -2151,7 +2227,7 @@ app.get("/tranacc/:tp/:vchr", function (req, res) {
     "   a.USERNAME,b.AC_HEAD AS ACC_HEAD , " +
     "   CASE WHEN a.DB_CR = 'D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
-    " FROM TRAN_ACC  a " +
+    " FROM tran_acc  a " +
     " LEFT JOIN AC_LIST b ON a.ACC_CODE = b.AC_CODE " +
     " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ?",
     [req.params.tp, req.params.vchr],
@@ -2178,7 +2254,7 @@ app.get("/tranaccDR/:tp/:vchr", function (req, res) {
       "select TRAN_ACC.ROWID,ROWNUM SR_NO,TRAN_TYPE,VCHR_NO,DATTE, ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME," +
       "DECODE(DB_CR,'D', AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', AMOUNT, 0 ) CREDIT_AMT,  " +
-      "AC_NAME ACC_HEAD FROM TRAN_ACC, AC_LIST  WHERE ACC_CODE = AC_CODE AND TRAN_TYPE = :1 AND VCHR_NO =:2  and DB_CR='D'",
+      "AC_NAME ACC_HEAD FROM tran_acc, ac_list  WHERE ACC_CODE = AC_CODE AND TRAN_TYPE = :1 AND VCHR_NO =:2  and DB_CR='D'",
       [req.params.tp, req.params.vchr],
       {
         outFormat: orcl1.OBJECT,
@@ -2203,7 +2279,7 @@ app.get("/pdcrcd/:tp/:vchr", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM PDC_RCD WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -2227,7 +2303,7 @@ app.get("/pdcisu/:tp/:vchr", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM PDC_ISU WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -2249,7 +2325,7 @@ app.get("/pdcrcdreg/:tp/", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM PDC_RCD WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -2272,7 +2348,7 @@ app.get("/lpoMaxNo", function (req, res) {
   pool.getConnection(function (err, conn) {
     //
     conn.execute(
-      "select MAX(LPO_NO)   MXLPO  FROM LPO_NET",
+      "select MAX(LPO_NO)   MXLPO  FROM lpo_net",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -2296,7 +2372,7 @@ app.post("/lpoupd", function (req, res, next) {
   console.log("Entered lpoud SERVER");
   console.log("lpoupd **", req.body);
   let sql =
-    "INSERT INTO LPO_ITEMS (LPO_NO,LPO_DATE,SUP_CODE,ITEM_CODE,QTY,RATE) VALUES " +
+    "INSERT INTO lpo_items (LPO_NO,LPO_DATE,SUP_CODE,ITEM_CODE,QTY,RATE) VALUES " +
     "('" +
     lpo[0].LPO_NO +
     "','" +
@@ -2322,7 +2398,7 @@ app.post("/lpoHdrUpd", function (req, res, next) {
   console.log("Entered lpoHdrUpd SERVER");
   console.log("lpoHdrUpd **", req.body);
   let sql =
-    "INSERT INTO LPO_NET (LPO_NO,LPO_DATE,SUP_CODE,AMOUNT) VALUES " +
+    "INSERT INTO lpo_net (LPO_NO,LPO_DATE,SUP_CODE,AMOUNT) VALUES " +
     "('" +
     lpo.lpono +
     "','" +
@@ -2344,7 +2420,7 @@ app.get("/fpoMaxNo", function (req, res) {
   pool.getConnection(function (err, conn) {
     //
     conn.execute(
-      "select MAX(FPO_NO)   MXLPO  FROM FPO_NET",
+      "select MAX(FPO_NO)   MXLPO  FROM fpo_net",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -2367,7 +2443,7 @@ app.get("/Rplnlst", function (req, res) {
 
   //const tableName= "RPLN_MST";
   connection.query(
-    "select REPORT_LN, RP_HEAD,PRIMARY_GROUP from RPLN_MST ORDER BY PRIMARY_GROUP,REPORT_LN",
+    "select REPORT_LN, RP_HEAD,PRIMARY_GROUP from rpln_mst ORDER BY PRIMARY_GROUP,REPORT_LN",
     {},
 
     function (err, results, fields) {
@@ -2387,7 +2463,7 @@ app.get("/RplnMst/:id", function (req, res) {
 
   //const tableName= "RPLN_MST";
   connection.query(
-    "select REPORT_LN, RP_HEAD ,PRIMARY_GROUP from RPLN_MST WHERE REPORT_LN = ?",
+    "select REPORT_LN, RP_HEAD ,PRIMARY_GROUP from rpln_mst WHERE REPORT_LN = ?",
     [req.params.id],
 
     function (err, results) {
@@ -2433,7 +2509,7 @@ app.get("/Gllst", function (req, res) {
   console.log("Gl List ");
   // const tableName= "GL_MST";
   connection.query(
-    "select REPORT_LN, GL_CODE, GL_HEAD from GL_MST ORDER BY REPORT_LN,GL_CODE",
+    "select REPORT_LN, GL_CODE, GL_HEAD from gl_mst ORDER BY REPORT_LN,GL_CODE",
     {},
 
     function (err, results, fields) {
@@ -2455,7 +2531,7 @@ app.get("/banklst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select BANK_CODE,BANK_NAME from BANK_MST ORDER BY BANK_NAME",
+      "select BANK_CODE,BANK_NAME from bank_mst ORDER BY BANK_NAME",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -2477,7 +2553,7 @@ app.get("/Aclist/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select AC_CODE, AC_NAME" + " FROM AC_LIST WHERE AC_CODE=:1",
+      "select AC_CODE, AC_NAME" + " FROM ac_list WHERE AC_CODE=:1",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -2498,7 +2574,7 @@ app.get("/Aclist", function (req, res) {
   console.log("Aclist ");
 
   connnection.execute(
-    "select AC_CODE, AC_NAME" + " FROM AC_LIST  ORDER BY AC_NAME",
+    "select AC_CODE, AC_NAME" + " FROM ac_list  ORDER BY AC_NAME",
     {},
 
     function (error, results, fields) {
@@ -2514,7 +2590,7 @@ app.get("/Accsubcatlist", function (req, res) {
   console.log("AccSubCat ");
 
   connection.query(
-    "select REPORT_LN, GL_CODE, SUB_CAT_CODE, SUB_CAT_DESC FROM ACC_SUB_CAT  ORDER BY 1,2,3 ",
+    "select REPORT_LN, GL_CODE, SUB_CAT_CODE, SUB_CAT_DESC FROM acc_sub_cat  ORDER BY 1,2,3 ",
     {},
 
     function (error, results) {
@@ -2565,7 +2641,7 @@ app.get("/Acclist", function (req, res) {
   //const tableName= "ACC_MST";
   connection.query(
     " SELECT A.REPORT_LN, A.GL_CODE, B.GL_HEAD, A.ACC_CODE, A.ACC_HEAD " +
-    " FROM ACC_MST A " +
+    " FROM acc_mst A " +
     " LEFT OUTER JOIN GL_MST B ON A.REPORT_LN = B.REPORT_LN AND A.GL_CODE = B.GL_CODE " +
     " ORDER BY A.REPORT_LN, A.GL_CODE, A.ACC_CODE ",
     {},
@@ -2586,7 +2662,7 @@ app.get("/api/accmst/:id", function (req, res) {
 
   connection.query(
     "select  ACC_CODE, ACC_HEAD,REPORT_LN, GL_CODE, OP_BAL, OP_DBCR" +
-    " FROM ACC_MST WHERE ACC_CODE=?",
+    " FROM acc_mst WHERE ACC_CODE=?",
     [req.params.id],
 
     function (error, result) {
@@ -2632,7 +2708,7 @@ app.get("/banklst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select BANK_CODE,BANK_NAME from BANK_MST ORDER BY BANK_CODE",
+      "select BANK_CODE,BANK_NAME from bank_mst ORDER BY BANK_CODE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -2653,7 +2729,7 @@ app.get("/bankmst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select BANK_CODE, BANK_NAME" + " FROM BANK_MST WHERE BANK_CODE=:id",
+      "select BANK_CODE, BANK_NAME" + " FROM bank_mst WHERE BANK_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -2697,7 +2773,7 @@ app.get("/nationmst/:id", function (req, res) {
   console.log("nation_mst Id", req.params.id);
   connection.query(
     "select NATION_CODE, NATION_NAME ,NATIONALITY, CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
-    " FROM NATION_MST WHERE NATION_CODE= ?",
+    " FROM nation_mst WHERE NATION_CODE= ?",
     [req.params.id],
 
     function (error, result) {
@@ -2716,7 +2792,7 @@ app.get("/currencymst/:id", function (req, res) {
   console.log("nation_mst Id", req.params.id);
   connection.query(
     "select NATION_CODE, NATION_NAME ,NATIONALITY, CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
-    " FROM NATION_MST WHERE CUR_CODE= ?",
+    " FROM nation_mst WHERE CUR_CODE= ?",
     [req.params.id],
 
     function (error, result) {
@@ -2734,7 +2810,7 @@ app.get("/currencylov", function (req, res) {
   console.log("Currency List");
   connection.query(
     "select CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
-    " FROM NATION_MST  WHERE CUR_CODE IS NOT NULL order by CUR_CODE",
+    " FROM nation_mst  WHERE CUR_CODE IS NOT NULL order by CUR_CODE",
     [req.params.id],
 
     function (error, result) {
@@ -2763,7 +2839,7 @@ app.post("/api/save-nationmst", (req, res) => {
     .join(", ");
 
   // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO Nation_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
+  const query = `INSERT INTO nation_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
                    ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   connection.query(query, values, (err, result) => {
@@ -2781,7 +2857,7 @@ app.get("/trantypelst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select TRAN_TYPE,TYPE_DES, TYPE_ABBR from TRAN_TYPE ORDER BY TRAN_TYPE",
+      "select TRAN_TYPE,TYPE_DES, TYPE_ABBR from tran_type ORDER BY TRAN_TYPE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -2805,7 +2881,7 @@ app.get("/trantypent/:id", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select TRAN_TYPE, TYPE_DES, TYPE_ABBR" +
-      " FROM TRAN_TYPE WHERE TRAN_TYPE=:id",
+      " FROM tran_type WHERE TRAN_TYPE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -2851,7 +2927,7 @@ app.get("/nationlst", function (req, res) {
   // const tableName= "NATION_MST";
   connection.query(
     "select NATION_CODE,NATION_NAME, CUR_CODE," +
-    " CUR_NAME, round(DHS_CONV_RATE,4) DHS_CONV_RATE from NATION_MST ORDER BY NATION_CODE",
+    " CUR_NAME, round(DHS_CONV_RATE,4) DHS_CONV_RATE from nation_mst ORDER BY NATION_CODE",
     {},
 
     function (err, results, fields) {
@@ -2870,7 +2946,7 @@ app.get("/loclist", function (req, res) {
   //console.log('Loc.List ');
 
   connection.query(
-    "select LOC_CODE,LOC_NAME, LOC_NAME from LOC_MST ORDER BY LOC_CODE",
+    "select LOC_CODE,LOC_NAME, LOC_NAME from loc_mst ORDER BY LOC_CODE",
     [],
 
     function (err, result) {
@@ -2889,7 +2965,7 @@ app.get("/locent/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select LOC_CODE, LOC_NAME " + " FROM LOC_MST WHERE LOC_CODE=:id",
+      "select LOC_CODE, LOC_NAME " + " FROM loc_mst WHERE LOC_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -2909,7 +2985,7 @@ app.post("/locent", function (req, res) {
   //insert
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
-    let sql = "INSERT INTO LOC_MST (LOC_CODE, LOC_NAME) VALUES (:1,:2) ";
+    let sql = "INSERT INTO loc_mst (LOC_CODE, LOC_NAME) VALUES (:1,:2) ";
 
     //console.log(sql);
     conn.execute(
@@ -2939,7 +3015,7 @@ app.put("/locent/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "UPDATE LOC_MST SET LOC_NAME = :1 " + " WHERE LOC_CODE=:2",
+      "UPDATE loc_mst SET LOC_NAME = :1 " + " WHERE LOC_CODE=:2",
       [req.body.locname, req.body.loccode],
       {
         outFormat: orcl1.OBJECT,
@@ -2961,7 +3037,7 @@ app.delete("/locdel/:id", function (req, res) {
   // console.log("Oracle  -Loc delete entered");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
-    let sql = "DELETE FROM LOC_MST WHERE LOC_CODE= :1 ";
+    let sql = "DELETE FROM loc_mst WHERE LOC_CODE= :1 ";
 
     conn.execute(
       sql,
@@ -2989,7 +3065,7 @@ app.get("/Vatlst", function (req, res) {
   //const tableName = 'VAT_MST';
   connection.query(
     "select VAT_REG_NO,VAT_PERC" +
-    " from VAT_MST ORDER BY 1",
+    " from vat_mst ORDER BY 1",
     {},
 
     function (err, results, fields) {
@@ -3005,7 +3081,7 @@ app.get("/Vatlst", function (req, res) {
 app.get("/vatmst/:id", function (req, res) {
 
   connection.query(
-    "select * FROM VAT_MST WHERE VAT_REG_NO=? ",
+    "select * FROM vat_mst WHERE VAT_REG_NO=? ",
     [req.params.id],
 
     function (error, results) {
@@ -3052,7 +3128,7 @@ app.get("/Smanlst", function (req, res) {
   //console.log('Salesman List ');
   // const tableName = 'SMAN_MST';
   connection.query(
-    "select * from SMAN_MST ORDER BY SMAN_CODE",
+    "select * from sman_mst ORDER BY SMAN_CODE",
 
     function (err, results, fields) {
       if (err) {
@@ -3069,7 +3145,7 @@ app.get("/smanmst/:id", function (req, res) {
 
   connection.query(
     "select SMAN_CODE, SMAN_NAME ,SMAN_MOBILE,SMAN_DESIGNATION,SMAN_EMAIL, USER_NAME, LOGIN_USER," +
-    "SMAN_ACTIVE FROM SMAN_MST WHERE SMAN_CODE=? ",
+    "SMAN_ACTIVE FROM sman_mst WHERE SMAN_CODE=? ",
     [req.params.id],
 
     function (error, results) {
@@ -3110,7 +3186,7 @@ app.get("/qttrmlst", function (req, res) {
 
   connection.query(
     "select SR_NO, TERMS_HDR, TERMS_DETAILS" +
-    "  from QUOT_TERMS_COND_MST ORDER BY SR_NO",
+    "  from quot_terms_cond_mst ORDER BY SR_NO",
 
     function (err, result) {
       if (err) {
@@ -3127,7 +3203,7 @@ app.get("/qtTermEntQt/:id", function (req, res) {
 
   connection.query(
     "select Distinct SR_NO, TERMS_HDR, TERMS_DETAILS" +
-    "  from QUOT_TERMS_COND WHERE QUOT_NO = ? ORDER BY  SR_NO",
+    "  from quot_terms_cond WHERE QUOT_NO = ? ORDER BY  SR_NO",
     [req.params.id],
     function (err, result) {
       if (err) {
@@ -3144,7 +3220,7 @@ app.get("/quotnotes/:id", function (req, res) {
 
   connection.query(
     "select Distinct SR_NO, NOT_ES" +
-    "  from QUOT_NOTES WHERE QUOT_NO = ? ORDER BY  SR_NO",
+    "  from quot_notes WHERE QUOT_NO = ? ORDER BY  SR_NO",
     [req.params.id],
     function (err, result) {
       if (err) {
@@ -3161,7 +3237,7 @@ app.get("/qtDocUpload/:id", function (req, res) {
 
   connection.query(
     "select Distinct QUOT_NO,SR_NO, INQ_DOC" +
-    "  from QUOT_INQ_DOCS WHERE QUOT_NO = ? ORDER BY  SR_NO",
+    "  from quot_inq_docs WHERE QUOT_NO = ? ORDER BY  SR_NO",
     [req.params.id],
     function (err, result) {
       if (err) {
@@ -3180,7 +3256,7 @@ app.get("/quotetrment/:id", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select SR_NO,  TERMS_HDR, TERMS_DETAILS" +
-      "  from QUOT_TERMS_COND_MST " +
+      "  from quot_terms_cond_mst " +
       " WHERE sr_no=:id",
       [req.params.id],
       {
@@ -3205,8 +3281,8 @@ app.get("/lpolst/:dys", function (req, res) {
   connection.query(
     "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, " +
     "b.SUP_NAME, a.AMOUNT, a.ATTN, a.CANCELLED, a.REQ_NO, a.SMAN_CODE, a.NARRATION " +
-    "FROM LPO_NET a " +
-    "JOIN SUP_MST b ON a.SUP_CODE = b.SUP_CODE " +
+    "FROM lpo_net a " +
+    "JOIN sup_mst b ON a.SUP_CODE = b.SUP_CODE " +
     "WHERE a.LPO_DATE >= CURDATE() - INTERVAL ? DAY " +
     "ORDER BY a.LPO_NO DESC",
     [req.params.dys], // Passing the :dys parameter as a placeholder
@@ -3234,8 +3310,8 @@ app.get("/lporeg", function (req, res) {
   connection.query(
     "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, " +
     "b.SUP_NAME, a.AMOUNT, a.ATTN, a.PAY_TERMS, a.PLACE_DLV,a.DELIVERY_REQ,a.CANCELLED, a.REQ_NO, a.SMAN_CODE, a.NARRATION " +
-    "FROM LPO_NET a " +
-    "JOIN SUP_MST b ON a.SUP_CODE = b.SUP_CODE " +
+    "FROM lpo_net a " +
+    "JOIN sup_mst b ON a.SUP_CODE = b.SUP_CODE " +
     "WHERE a.LPO_DATE >= ? AND a.LPO_DATE <= ?" +
     "ORDER BY a.LPO_NO ASC",
     [start_date, end_date], // Passing the :dys parameter as a placeholder
@@ -3255,7 +3331,7 @@ app.get("/joblist", function (req, res) {
   connection.query(
     "select a.JOB_NO,DATE_FORMAT(a.START_DATE,'%d/%m/%Y') START_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.CONTRACT_AMT, a.CONSULTANT, a.CANCEL_IND, a.PROJ_NAME, a.APPROVED_BY ,a.LPO_NO ," +
-    " date_format(a.LPO_DATE,'%d/%m/%Y') LPO_DATE from JOB_CARD a, CUS_MST b where  " +
+    " date_format(a.LPO_DATE,'%d/%m/%Y') LPO_DATE from job_card a, cus_mst b where  " +
     " a.CUST_CODE = b.CUST_CODE ORDER BY a.JOB_NO DESC",
 
     // a.START_DATE >= SYSDATE - 1800 and
@@ -3276,7 +3352,7 @@ app.get("/fpolst/:dys", function (req, res) {
   connection.query(
     "select DISTINCT a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.YR_REF_NO, a.PAY_TERMS,a.CANCELLED, a.REQ_NO, a.PREPARED_BY,a.FPO_NOTES" +
-    " from FPO_NET a LEFT OUTER JOIN  SUP_MST b ON b.SUP_CODE = a.SUP_CODE  " +
+    " from fpo_net a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
     "  WHERE  a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
 
     [req.params.dys],
@@ -3297,8 +3373,8 @@ app.get("/fporeg", function (req, res) {
   connection.query(
     "select a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.YR_REF_NO,a.PAY_TERMS,c.CUR_NAME, a.CANCELLED, a.REQ_NO, a.PREPARED_BY" +
-    " from FPO_NET a LEFT OUTER JOIN  SUP_MST b ON b.SUP_CODE = a.SUP_CODE  " +
-    "LEFT OUTER JOIN NATION_MST c on c.CUR_CODE = a.CURR_ENCY " +
+    " from fpo_net a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
+    "LEFT OUTER JOIN nation_mst c on c.CUR_CODE = a.CURR_ENCY " +
     "  WHERE  a.FPO_DATE >= ? AND a.FPO_DATE <= ?  ORDER BY a.FPO_NO ASC",
 
     [start_date, end_date],
@@ -3320,7 +3396,7 @@ app.get("/fponet/:fpoNo", function (req, res) {
   connection.query(
     "select a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.CURR_ENCY, a.PAY_TERMS ,a.FPO_NOTES " +
-    " from FPO_NET a LEFT OUTER JOIN  SUP_MST b ON b.SUP_CODE = a.SUP_CODE  " +
+    " from fpo_net a LEFT OUTER JOIN  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
     "  WHERE  a.FPO_NO = ?  ",
     [req.params.fpoNo],
     function (err, result) {
@@ -3338,7 +3414,7 @@ app.get("/fpoitems/:fpoNo", function (req, res) {
   connection.query(
     "select a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.SR_NO,a.QTY, a.UNIT,a.RATE,a.LOC_CODE,a.ITEM_CODE, a.ITEM_NAME " +
-    " from FPO_ITEMS a LEFT OUTER JOIN  SUP_MST b ON b.SUP_CODE = a.SUP_CODE  " +
+    " from fpo_items a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
     "  WHERE  a.FPO_NO = ?   ORDER BY a.SR_NO ASC",
     [req.params.fpoNo],
 
@@ -3358,7 +3434,7 @@ app.get("/pinvfrgnlst/:dys", function (req, res) {
     "SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m%Y') PJV_DATE, " +
     "a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m%Y') INV_DATE, a.SUP_CODE,b.SUP_NAME,  " +
     "a.DISCOUNT, a.RND_OFF, a.VAT_AMOUNT, a.INV_AMOUNT_FRGN , a.CURR_CODE, a.CONV_RATE " +
-    " FROM PUR_FRGN_HDR a LEFT OUTER JOIN SUP_MST b ON a.SUP_CODE = b.SUP_CODE " +
+    " FROM pur_frgn_hdr a left outer join sup_mst b ON a.SUP_CODE = b.SUP_CODE " +
     "WHERE a.PJV_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.PJV_NO DESC",
     [req.params.dys],  // Ensure the parameter is correctly passed as an array
 
@@ -3382,7 +3458,7 @@ app.get("/srvlst/:dys", function (req, res) {
     conn.execute(
       "select a.SRV_NO,To_char(a.SRV_DATE,'DD/MM/RRRR') SRV_DATE, a.SUP_CODE," +
       " b.SUP_NAME, a.NARRATION, a.LPO_NO, a.INV_NO, a.INV_DATE" +
-      " from SRV_HDR a, SUP_MST b where  a.SRV_DATE >= SYSDATE - :dys and " +
+      " from srv_hdr a, sup_mst b where  a.SRV_DATE >= SYSDATE - :dys and " +
       " a.SUP_CODE = b.SUP_CODE ORDER BY a.SRV_NO DESC",
       [req.params.dys],
       {
@@ -3408,7 +3484,7 @@ app.get("/srvhdr/:srv", function (req, res) {
     conn.execute(
       "select a.SRV_NO,To_char(a.SRV_DATE,'YYYY-MM-DD') SRV_DATE, a.SUP_CODE," +
       " b.SUP_NAME, a.NARRATION, a.LPO_NO, a.INV_NO, a.INV_DATE ,a.ROWID" +
-      " from SRV_HDR a, SUP_MST b where a.SUP_CODE =b.SUP_CODE and  a.SRV_NO= :srv ",
+      " from srv_hdr a, sup_mst b where a.SUP_CODE =b.SUP_CODE and  a.SRV_NO= :srv ",
       [req.params.srv],
       {
         outFormat: orcl1.OBJECT,
@@ -3433,7 +3509,7 @@ app.get("/srvitems/:srv", function (req, res) {
     conn.execute(
       "select a.SRV_NO,To_char(a.SRV_DATE,'DD/MM/RRRR') SRV_DATE, a.LOC_CODE," +
       "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST" +
-      " from SRV_ITEMS a, ITEM_MST b where a.ITEM_CODE =b.ITEM_CODE and  a.SRV_NO= :srv ORDER by a.Sr_no ",
+      " from srv_items a, item_mst b where a.ITEM_CODE =b.ITEM_CODE and  a.SRV_NO= :srv ORDER by a.Sr_no ",
       [req.params.srv],
       {
         outFormat: orcl1.OBJECT,
@@ -3459,7 +3535,7 @@ app.get("/sivlst/:dys", function (req, res) {
     conn.execute(
       "select a.SIV_NO,To_char(a.SIV_DATE,'DD/MM/RRRR') SIV_DATE, a.COST_CODE," +
       " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO " +
-      " from SIV_HDR a, CUS_MST b where  a.SIV_DATE >= SYSDATE - :dys and " +
+      " from siv_hdr a, cus_mst b where  a.SIV_DATE >= SYSDATE - :dys and " +
       " a.CUST_CODE = b.CUST_CODE(+) ORDER BY a.SIV_NO DESC",
       [req.params.dys],
       {
@@ -3485,7 +3561,7 @@ app.get("/sivhdr/:siv", function (req, res) {
     conn.execute(
       "select a.ROWID,a.SIV_NO,To_char(a.SIV_DATE,'DD/MM/RRRR') SIV_DATE, a.CUST_CODE," +
       " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO" +
-      " from SIV_HDR a, CUS_MST b where a.CUST_CODE =b.CUST_CODE(+) and  a.SIV_NO= :siv ",
+      " from siv_hdr a, cus_mst b where a.CUST_CODE =b.CUST_CODE(+) and  a.SIV_NO= :siv ",
       [req.params.siv],
       {
         outFormat: orcl1.OBJECT,
@@ -3510,7 +3586,7 @@ app.get("/sivitems/:srv", function (req, res) {
     conn.execute(
       "select a.ROWID,a.SIV_NO,To_char(a.SIV_DATE,'DD/MM/RRRR') SIV_DATE, a.LOC_CODE," +
       "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST,a.ROWID" +
-      " from SIV_ITEMS a, ITEM_MST b where a.ITEM_CODE =b.ITEM_CODE and  a.SIV_NO= :srv ORDER by lpad(a.Sr_no ,3,'0')",
+      " from siv_items a, item_mst b where a.ITEM_CODE =b.ITEM_CODE and  a.SIV_NO= :srv ORDER by lpad(a.Sr_no ,3,'0')",
       [req.params.srv],
       {
         outFormat: orcl1.OBJECT,
@@ -3531,7 +3607,7 @@ app.get("/sadjlst", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%y') AS VCHR_DATE," +
     "  a.NARRATION" +
-    " from STK_HDR a ORDER BY a.VCHR_NO ",
+    " from stk_hdr a ORDER BY a.VCHR_NO ",
     [],
 
     function (err, result) {
@@ -3547,55 +3623,55 @@ app.get("/sadjlst", function (req, res) {
 });
 
 app.get("/sadjhdr/:siv", function (req, res) {
-   console.log('sadjhdr',req.params.siv);
+  console.log('sadjhdr', req.params.siv);
 
-    connection.query(
-      "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE," +
-      "  a.NARRATION" +
-      " from STK_HDR a WHERE a.VCHR_NO=  ? ",
-      [req.params.siv],
-      
-      function (err, result) {
-        if (err) {
-          throw err;
-        } else {
-           console.log("STK_HDR Read", result);
-         res.json(result);
-        }
+  connection.query(
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE," +
+    "  a.NARRATION" +
+    " from stk_hdr a WHERE a.VCHR_NO=  ? ",
+    [req.params.siv],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        console.log("STK_HDR Read", result);
+        res.json(result);
       }
-    );
-  });
+    }
+  );
+});
 
 app.get("/sadjitems/:srv", function (req, res) {
- 
-    //console.log('SADJ Items. ');
 
-    connection.query(
-      "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.LOC_CODE," +
-      "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST,a.NARRATION " +
-      " from STK_ADJ a LEFT OUTER JOIN ITEM_MST b ON a.ITEM_CODE =b.ITEM_CODE WHERE  a.VCHR_NO= ? ORDER by a.SR_NO",
-      [req.params.srv],
-     
-      function (err, result) {
-        if (err) {
-          throw err;
-        } else {
-          // console.log("Oracle SRVItems", result.rows);
-          res.json(result);
-        
-        }
+  //console.log('SADJ Items. ');
+
+  connection.query(
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.LOC_CODE," +
+    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST,a.NARRATION " +
+    " from stk_adj a left outer join item_mst b ON a.ITEM_CODE =b.ITEM_CODE WHERE  a.VCHR_NO= ? ORDER by a.SR_NO",
+    [req.params.srv],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        // console.log("Oracle SRVItems", result.rows);
+        res.json(result);
+
       }
-    );
-  });
+    }
+  );
+});
 
 app.get("/invlst/:dys", function (req, res) {
 
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.ADDL_CUST_NAME, c.SMAN_NAME  SMAN_CODE, a.CAN_CEL,a.DISCOUNT,a.AMOUNT" +
-    " from NET_SALES a  " +
+    " from net_sales a  " +
     " Left join sman_mst c ON a.SMAN_CODE = c.SMAN_CODE " +
-    " left outer join CUS_MST b  ON a.CUST_CODE = b.CUST_CODE where  a.INV_DATE >= CURDATE() -INTERVAL ? DAY  " +
+    " left outer join cus_mst b  ON a.CUST_CODE = b.CUST_CODE where  a.INV_DATE >= CURDATE() -INTERVAL ? DAY  " +
     "   ORDER BY a.INV_NO DESC",
     [req.params.dys],
 
@@ -3621,7 +3697,7 @@ app.get("/jobsalreg", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE " +
-    " from FAB_INV_HDR a LEFT OUTER JOIN CUS_MST b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_DATE BETWEEN ? AND ? ",
+    " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_DATE BETWEEN ? AND ? ",
     [start_date, end_date],
 
     function (err, result) {
@@ -3650,7 +3726,7 @@ app.get("/invhdr/:id", function (req, res) {
     conn.execute(
       "select a.INV_NO,a.INV_DATE, a.CUST_CODE,c.CUST_NAME," +
       " a.SMAN_CODE,a.ADDL_CUST_NAME, b.SMAN_NAME, a.REMARKS1" +
-      " FROM NET_SALES a, SMAN_MST b , CUS_MST c " +
+      " FROM net_sales a, sman_mst b , cus_mst c " +
       " WHERE INV_NO =:id and a.SMAN_CODE =b.SMAN_CODE(+) and a.CUST_CODE = c.CUST_CODE(+)",
       [req.params.id],
       {
@@ -3674,7 +3750,7 @@ app.get("/invitem/:id", function (req, res) {
   connection.query(
     "select INV_NO,SR_NO ,'' AS ITEM_CODE, INV_ITEM_DESC ITEM_DES1 , INV_QTY, INV_UNIT ,INV_RATE , VAT_PERC ," +
     " round(Inv_qty*Inv_rate,2) AMOUNT" +
-    " FROM FAB_INV_DTL  WHERE INV_NO = ? " +
+    " FROM fab_inv_dtl  WHERE INV_NO = ? " +
     " and  INV_QTY||INV_RATE IS NOT NULL order by sr_no",
     [req.params.id],
 
@@ -3696,9 +3772,9 @@ app.get("/quotlst/:dys", function (req, res) {
     " a.PROJECT_NAME,a.SUBJECT, a.YOUR_REF,a.INQ_NO," +
     " a.ATTN,b.CUST_NAME, a.DETAILS, a.NARRATION, a.ENGG_CODE SMAN_CODE,c.ENG_NAME, " +
     "a.CANCELLED ,a.PAYMENT_TERMS,a.AMOUNT" +
-    " from QUOT_HDR a  " +
-    " LEFT OUTER JOIN CUS_MST b on a.CUST_CODE = b.CUST_CODE " +
-    " LEFT OUTER JOIN ENG_MST c on  a.ENGG_CODE = c.ENG_CODE  " +
+    " from quot_hdr a  " +
+    " left outer join cus_mst b on a.cust_code = b.cust_code " +
+    " left outer join eng_mst c on  a.engg_code = c.eng_code  " +
     " where  a.QUOT_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY DATE_FORMAT(a.QUOT_DATE, '%Y/%m/%d') DESC",
     [req.params.dys],
 
@@ -3734,9 +3810,9 @@ app.get("/quothdr/:id", function (req, res) {
       a.FAX_NO,a.CURR_CODE,
       a.INQ_NO,a.REV_NO,a.QUOT_APPROVED,a.QUOT_APPROVED_BY
 
-    FROM QUOT_HDR a
-    LEFT JOIN SMAN_MST b ON a.ENGG_CODE = b.SMAN_CODE
-    LEFT JOIN CUS_MST c ON a.CUST_CODE = c.CUST_CODE
+    from quot_hdr a
+    left join sman_mst b on a.engg_code = b.sman_code
+    left join cus_mst c on a.cust_code = c.cust_code
     WHERE a.QUOT_NO = ?
   `;
 
@@ -3757,7 +3833,7 @@ app.get("/quotitem/:id", function (req, res) {
   connection.query(
     "select QUOT_NO,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
     " round(qty*rate,2) AMOUNT" +
-    " FROM QUOT_ITEM  WHERE QUOT_NO = ? " +
+    " FROM quot_item  WHERE QUOT_NO = ? " +
     "  order by sr_no",
     [req.params.id],
 
@@ -3775,7 +3851,7 @@ app.get("/quotent1/:id", function (req, res) {
   // console.log('QUOTE Entry.'+`${:id}`);
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select a.* " + " from QUOT_ITEM a   " + " ORDER BY a.SR_NO ",
+      "select a.* " + " from quot_item a   " + " ORDER BY a.SR_NO ",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -3802,7 +3878,7 @@ app.get("/sinqlst/:dys", function (req, res) {
       "select a.INQ_NO, To_char(a.INQ_DATE,'DD/MM/RRRR') INQ_DATE," +
       "a.QUOTE_NO,To_char(a.QUOTE_DATE,'DD/MM/RRRR') QUOT_DATE, a.CUST_CODE," +
       " b.CUST_NAME, a.SUBJECT, a.INQ_NO, a.ENGG_CODE, a.INQ_TYPE " +
-      " from SALES_INQUIRY a, CUS_MST b where  a.INQ_DATE >= SYSDATE - :dys and " +
+      " from sales_inquiry a, cus_mst b where  a.INQ_DATE >= SYSDATE - :dys and " +
       " a.CUST_CODE = b.CUST_CODE(+) ORDER BY a.INQ_NO DESC",
       [req.params.dys],
       {
@@ -3829,7 +3905,7 @@ app.get("/invlist/:dys", function (req, res) {
     conn.execute(
       "select a.INV_NO,To_char(a.INV_DATE,'DD/MM/RRRR') INV_DATE, a.CUST_CODE," +
       " b.CUST_NAME, a.ADDL_CUST_NAME, a.DO_NO, a.SMAN_CODE, a.CAN_CEL ,a.LPO_NO,a.AMOUNT" +
-      " from NET_SALES a, CUS_MST b where  a.INV_DATE >= SYSDATE - :dys and " +
+      " from net_sales a, cus_mst b where  a.INV_DATE >= SYSDATE - :dys and " +
       " a.CUST_CODE = b.CUST_CODE(+) ORDER BY a.INV_NO DESC",
       [req.params.dys],
       {
@@ -3855,8 +3931,8 @@ app.get("/fabinvlist/:dys", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ," +
     "a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO " +
-    " from FAB_INV_HDR a    " +
-    " LEFT OUTER JOIN CUS_MST b on b.CUST_CODE = a.CUST_CODE " +
+    " from fab_inv_hdr a    " +
+    " left outer join cus_mst b on b.cust_code = a.cust_code " +
     " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  ORDER BY a.INV_NO DESC",
     [req.params.dys],
 
@@ -3879,7 +3955,7 @@ app.get("/fabinvhdr/:inv", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE " +
-    " from FAB_INV_HDR a LEFT OUTER JOIN CUS_MST b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
+    " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
     [req.params.inv],
 
     function (err, result) {
@@ -3901,7 +3977,7 @@ app.get("/fabinvitems/:vchr", function (req, res) {
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
     " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, " +
     "a.INV_QTY, a.INV_RATE ,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
-    " from FAB_INV_DTL a where a.Inv_no = ?" +
+    " from fab_inv_dtl a where a.Inv_no = ?" +
     "  ORDER BY a.SR_NO",
     [req.params.vchr],
 
@@ -3921,7 +3997,7 @@ app.get("/sretlst/:dys", function (req, res) {
   connection.query(
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT" +
-    " from SRET_HDR a LEFT OUTER JOIN CUS_MST b  ON a.CUST_CODE = b.CUST_CODE " +
+    " from sret_hdr a left outer join cus_mst b  ON a.CUST_CODE = b.CUST_CODE " +
     " where  a.SRET_DATE >= CURDATE() - INTERVAL ? DAY " +
     " ORDER BY a.SRET_NO DESC",
     [req.params.dys],
@@ -3942,7 +4018,7 @@ app.get("/srethdr/:vchr", function (req, res) {
   connection.query(
 
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT FROM  SRET_HDR " +
+    " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT FROM  sret_hdr " +
     " WHERE  a.VCHR_NO = ? ",
 
     [req.params.vchr],
@@ -3964,7 +4040,7 @@ app.get("/sretitems/:vchr", function (req, res) {
 
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.LOC_CODE," +
     " a.ITEM_CODE, a.SR_NO, a.QTY, a.COST, a.DISC_PER" +
-    "FROM SRET_ITEMS "+
+    "FROM sret_items " +
     " WHERE  a.SRETNO = ? ",
 
     [req.params.vchr],
@@ -3987,7 +4063,7 @@ app.get("/salretreg", function (req, res) {
   connection.query(
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT" +
-    " from SRET_HDR a LEFT OUTER JOIN CUS_MST b ON a.CUST_CODE = b.CUST_CODE where  a.SRET_DATE BETWEEN ? AND ?  " +
+    " from sret_hdr a left outer join cus_mst b ON a.CUST_CODE = b.CUST_CODE where  a.SRET_DATE BETWEEN ? AND ?  " +
     "  ORDER BY a.SRET_NO DESC",
     [start_date, end_date],
 
@@ -4007,7 +4083,7 @@ app.get("/crntlst/:dys", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
     " COALESCE(b.CUST_NAME,'Invalid Customer') AS CUST_NAME, a.NARRATION, a.DEBIT_AC,a.VAT_AMT,  a.AMOUNT" +
-    " from CRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from crnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY  " +
     "  ORDER BY a.VCHR_NO DESC",
     [req.params.dys],
@@ -4030,7 +4106,7 @@ app.get("/crnotereg", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.DEBIT_AC,a.VAT_AMT,  a.AMOUNT" +
-    " from CRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from crnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE between ? and ? " +
     "  ORDER BY a.VCHR_NO DESC",
     [req.query.start_date, req.query.end_date],
@@ -4051,7 +4127,7 @@ app.get("/crntHdr/:vchr", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.DEBIT_AC,a.VAT_AMT,  a.AMOUNT" +
-    " from CRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from crnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_NO = ? ",
 
     [req.params.vchr],
@@ -4073,7 +4149,7 @@ app.get("/drntHdr/:vchr", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.CREDIT_AC,a.VAT_AMT,  a.AMOUNT" +
-    " from DRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_NO = ? ",
 
     [req.params.vchr],
@@ -4094,7 +4170,7 @@ app.get("/drntlst/:dys", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.CREDIT_AC,  a.AMOUNT" +
-    " from DRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY  " +
     "  ORDER BY a.VCHR_NO DESC",
     [req.params.dys],
@@ -4117,7 +4193,7 @@ app.get("/drnotereg", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.CREDIT_AC,  a.AMOUNT" +
-    " from DRNOTE_HDR a LEFT OUTER JOIN CUS_MST b ON b.CUST_CODE = a.CUST_CODE" +
+    " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE between ? and ? " +
     "  ORDER BY a.VCHR_NO DESC",
     [req.query.start_date, req.query.end_date],
@@ -4139,7 +4215,7 @@ app.get("/pinvlst/:dys", function (req, res) {
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , " +
     "a.SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
-    " from PURCHASE_HDR a, SUP_MST b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
+    " from purchase_hdr a, sup_mst b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.PJV_NO DESC",
     [req.params.dys],
 
@@ -4163,7 +4239,7 @@ app.get("/ngpnet/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.DISCOUNT,a.LPO_NO,a.INV_NO, a.INV_DATE,a.NARRATION  " +
-    " from NGP_NET a LEFT OUTER JOIN  SUP_MST b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  " +
+    " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  " +
     " ORDER BY a.PRCH_NO DESC",
     [req.params.vch],
 
@@ -4182,7 +4258,7 @@ app.get("/ngpitems/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD, a.NARRATION , COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, a.AMOUNT" +
-    " from NGP_ITEMS a LEFT OUTER JOIN  ACC_MST b on b.ACC_CODE = a.ACC_CODE  WHERE  a.PRCH_NO =?  " +
+    " from ngp_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE  WHERE  a.PRCH_NO =?  " +
     " AND a.ACC_CODE IS NOT NULL " +
     " ORDER BY a.SR_NO",
     [req.params.vch],
@@ -4208,7 +4284,7 @@ app.get("/purchaseHdr/:vch", function (req, res) {
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, COALESCE(a.INV_AMOUNT, 0) AS INV_AMOUNT , COALESCE(a.DISCOUNT,0) AS DISCOUNT ,a.PO_NO,a.INV_NO, " +
     " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,COALESCE(a.VAT_AMOUNT,0) AS VAT_AMOUNT " +
-    " from PURCHASE_HDR a LEFT OUTER JOIN  SUP_MST b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
+    " from purchase_hdr a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
 
     [req.params.vch],
 
@@ -4228,7 +4304,7 @@ app.get("/purchaseitems/:vch", function (req, res) {
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.COST AS RATE, ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
-    " from PURCHASE_ITEMS a LEFT OUTER JOIN  ACC_MST b on b.ACC_CODE = a.ACC_CODE " +
+    " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
     " LEFT OUTER JOIN ITEM_MST c ON c.ITEM_CODE = a.ITEM_CODE" +
     " WHERE  a.SRV_NO =?  " +
     " AND a.ACC_CODE IS NOT NULL " +
@@ -4275,7 +4351,7 @@ app.get("/api/getMaxDoc/:table/:field", async (req, res) => {
         }
       case "CRNOTE_HDR":
         {
-          res.json({ maxValue: 'CR'+String(Number(result.substring(2,10)) + 1).padStart(8, "0")  });
+          res.json({ maxValue: 'CR' + String(Number(result.substring(2, 10)) + 1).padStart(8, "0") });
           console.log("maxDoc CRNOTE_HDR =", result.substring(2, 10));
           break;
         }
@@ -4297,7 +4373,7 @@ app.get("/purfrgnhdr/:vch", function (req, res) {
     " b.SUP_NAME, a.ACC_CODE,a.INV_AMOUNT_FRGN, a.INV_AMOUNT_LOCAL,a.CURR_CODE, a.CONV_RATE," +
     " a.DISCOUNT,a.PO_NO,a.INV_NO, " +
     " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,a.VAT_AMOUNT " +
-    " from PUR_FRGN_HDR a LEFT OUTER JOIN  SUP_MST b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
+    " from pur_frgn_hdr a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
 
     [req.params.vch],
 
@@ -4315,15 +4391,15 @@ app.get("/purfrgnhdr/:vch", function (req, res) {
 app.get("/gittypesfp/:vch", function (req, res) {
   connection.query(
     `SELECT a.GIT_TYPE AS expCode, b.TYPE_DES AS expHead, a.ACC_CODE, a.AMOUNT as amount
-     FROM LCST_TRN a , GIT_TYPES b where a.GIT_TYPE= b.TYPE_CODE
+     FROM lcst_trn a , git_types b where a.GIT_TYPE= b.TYPE_CODE
      AND VCHR_NO = ? 
   
      UNION ALL
   
      SELECT TYPE_CODE AS expCode, TYPE_DES AS expHead, '' AS ACC_CODE, NULL  
-     FROM GIT_TYPES g
+     FROM git_types g
      WHERE NOT EXISTS (
-         SELECT 1 FROM LCST_TRN t WHERE t.VCHR_NO = ? AND t.GIT_TYPE = g.TYPE_CODE
+         SELECT 1 FROM lcst_trn t WHERE t.VCHR_NO = ? AND t.GIT_TYPE = g.TYPE_CODE
      )
   
      ORDER BY expCode`,
@@ -4343,8 +4419,8 @@ app.get("/purfrgnitems/:vch", function (req, res) {
     "select a.PJV_NO,a.SR_NO, " +
     "  a.ITEM_CODE, c.ITEM_NAME1 ITEM_DESC , " +
     " a.QTY, COALESCE(a.COST_FC,0) COST_FC, a.UNIT_COST,ROUND( COALESCE(a.QTY,0) * COALESCE(a.UNIT_COST,0) ,2) AS AMOUNT " +
-    " from PUR_FRGN_ITEMS a " +
-    " LEFT OUTER JOIN ITEM_MST c ON c.ITEM_CODE = a.ITEM_CODE" +
+    " from pur_frgn_items a " +
+    " left outer join item_mst c on c.item_code = a.item_code" +
     " WHERE  a.PJV_NO =?  " +
     " ORDER BY a.SR_NO",
     [req.params.vch],
@@ -4373,7 +4449,7 @@ app.get("/tranaccNext/:vch", function (req, res) {
     " b.SUP_NAME, a.ACC_CODE,a.INV_AMOUNT_FRGN, a.INV_AMOUNT_LOCAL,a.CURR_CODE, a.CONV_RATE," +
     " a.DISCOUNT,a.PO_NO,a.INV_NO, " +
     " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,a.VAT_AMOUNT " +
-    " from PUR_FRGN_HDR a LEFT OUTER JOIN  SUP_MST b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
+    " from pur_frgn_hdr a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
 
     [req.params.vch],
 
@@ -4392,7 +4468,7 @@ app.get("/prethdr/:vch", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') as VCHR_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_AMOUNT, a.INV_NO, a.INV_DATE,a.NARRATION ,a.DISCOUNT" +
-    " from PRET_HDR a left OUTER JOIN SUP_MST b ON  a.SUP_CODE = b.SUP_CODE  where  a.VCHR_NO = ? " +
+    " from pret_hdr a left outer join sup_mst b ON  a.SUP_CODE = b.SUP_CODE  where  a.VCHR_NO = ? " +
     " ORDER BY a.VCHR_NO DESC",
     [req.params.vch],
 
@@ -4412,7 +4488,7 @@ app.get("/ngplst/:dys", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.LPO_NO,a.JOB_NO,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
-    " from NGP_NET a left outer join SUP_MST b on b.SUP_CODE = a.SUP_CODE  " +
+    " from ngp_net a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
     " where  a.PRCH_DATE >= CURDATE() - INTERVAL ? DAY   " +
     " ORDER BY a.PRCH_NO DESC",
 
@@ -4436,7 +4512,7 @@ app.get("/pretlst/:dys", function (req, res) {
     "select a.VCHR_NO, DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE," +
     "a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_AMOUNT,  VAT_PERC,NARRATION ,DISCOUNT" +
-    " from PRET_HDR a LEFT OUTER JOIN SUP_MST b ON  a.SUP_CODE = b.SUP_CODE " +
+    " from pret_hdr a left outer join sup_mst b ON  a.SUP_CODE = b.SUP_CODE " +
     " where  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY " +
     " ORDER BY a.VCHR_NO DESC",
     [req.params.dys],
@@ -4455,7 +4531,7 @@ app.get("/pretlst/:dys", function (req, res) {
 app.get("/nextdo", function (req, res) {
   connection.query(
     "select (Max(a.INV_NO)+1) AS NextDo " +
-    " from FAB_DO_HDR a ",
+    " from fab_do_hdr a ",
     function (err, results, fields) {
       if (err) {
         throw err;
@@ -4478,7 +4554,7 @@ app.get("/dolist/:dys", function (req, res) {
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ," +
     " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d%m%Y') AS LPO_DATE, a.CONTACT_PERSON " +
-    " from FAB_DO_HDR a, CUS_MST b where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY and " +
+    " from fab_do_hdr a, cus_mst b where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.CUST_CODE = b.CUST_CODE ORDER BY a.INV_NO DESC",
     [req.params.dys],
 
@@ -4499,8 +4575,8 @@ app.get("/fabdohdr/:doNo", function (req, res) {
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
     "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, " +
     "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.DO_APPROVED " +
-    "FROM FAB_DO_HDR a " +
-    "LEFT OUTER JOIN CUS_MST b ON a.CUST_CODE = b.CUST_CODE " +
+    "FROM fab_do_hdr a " +
+    "left outer join cus_mst b on a.cust_code = b.cust_code " +
     "WHERE a.INV_NO = ?",
     [req.params.doNo],   // <-- Missing comma before!
     (err, results) => {
@@ -4523,8 +4599,8 @@ app.get("/jobdoreg", function (req, res) {
     "SELECT a.INV_NO AS DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
     "b.CUST_NAME, a.JOB_NO, a.DO_NO, a.PAYMENT_TERMS, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, " +
     "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.PRINTED_BY " +
-    "FROM FAB_DO_HDR a " +
-    "LEFT OUTER JOIN CUS_MST b ON a.CUST_CODE = b.CUST_CODE " +
+    "from fab_do_hdr a " +
+    "left outer join cus_mst b on a.cust_code = b.cust_code " +
     "WHERE a.INV_DATE BETWEEN ? AND ? ORDER BY INV_DATE, INV_NO",
     [start_date, end_date],   // <-- Missing comma before!
     (err, results) => {
@@ -4543,7 +4619,7 @@ app.get("/fabdoitems/:doNo", function (req, res) {
   connection.query(
     "SELECT a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d%m%Y') AS DO_DATE,  " +
     " a.SR_NO,  a.ITEM_CODE,a.INV_ITEM_DESC AS ITEM_DESC ,a.INV_QTY AS QTY ,a.INV_UNIT as UNIT  " +
-    "FROM FAB_DO_DTL a " +
+    "from fab_do_dtl a " +
     "WHERE a.INV_NO = ? order by a.sr_no",
     [req.params.doNo],   // <-- Missing comma before!
     (err, results) => {
@@ -4563,8 +4639,8 @@ app.get("/pretitems/:vchr", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d%m%Y') VCHR_DATE," +
     " a.ITEM_CODE, b.ITEM_NAME1,a.QTY, a.COST ,a.SR_NO, (a.QTY * a.COST) AMOUNT" +
-    " from PRET_ITEMS a" +
-    " LEFT OUTER JOIN ITEM_MST b  ON a.LOC_CODE = b.LOC_CODE and a.ITEM_CODE = b.ITEM_CODE " +
+    " from pret_items a" +
+    " left outer join item_mst b  on a.loc_code = b.loc_code and a.item_code = b.item_code " +
     " where  a.vchr_no = ? " +
     "  ORDER BY a.SR_NO",
     [req.params.vchr],
@@ -4590,7 +4666,7 @@ app.get("/netsales/:vchr", function (req, res) {
       "select a.INV_NO,a.INV_DATE," +
       " a.CUST_CODE, a.LPO_NO, a.ADDL_CUST_NAME, a.AMOUNT, a.DISCOUNT, a.ROUND_OFF, " +
       " a.CURR_ENCY, a.VAT_PERC, a.VAT_AMOUNT, a.SMAN_CODE, a.DISC_PER " +
-      " from NET_SALES a where a.INV_NO = :vchr",
+      " from net_sales a where a.INV_NO = :vchr",
       [req.params.vchr],
       {
         outFormat: orcl1.OBJECT,
@@ -4616,7 +4692,7 @@ app.get("/sinvitems/:vchr", function (req, res) {
     conn.execute(
       "select a.INV_NO,To_char(a.INV_DATE,'DD/MM/RRRR') INV_DATE," +
       " a.ITEM_CODE,a.ITEM_DES1, a.INV_QTY, a.INV_RATE ,Nvl(a.SR_NO, ROWNUM) SR_NO, nvl(a.INV_QTY,0) * Nvl(a.INV_RATE,0) AMOUNT" +
-      " from INVOICE a where a.Inv_no = :vchr" +
+      " from invoice a where a.Inv_no = :vchr" +
       "  ORDER BY Nvl(a.SR_NO, ROWNUM)",
       [req.params.vchr],
       {
@@ -4636,25 +4712,25 @@ app.get("/sinvitems/:vchr", function (req, res) {
 });
 
 app.get("/sadjlst/:dys", function (req, res) {
-  
 
-    connection.query(
-      "select a.VCHR_NO,To_char(a.VCHR_DATE,'DD/MM/RRRR') VCHR_DATE," +
-      " a.NARRATION " +
-      " from STK_HDR a where  a.VCHR_DATE >= SYSDATE - :dys " +
-      "  ORDER BY a.VCHR_NO DESC",
-      [req.params.dys],
-      
-      function (err, result) {
-        if (err) {
-          throw err;
-        } else {
-          //console.log("Oracle LPOLST", result);
-          res.json(result)
-         
-        }
+
+  connection.query(
+    "select a.VCHR_NO,To_char(a.VCHR_DATE,'DD/MM/RRRR') VCHR_DATE," +
+    " a.NARRATION " +
+    " from stk_hdr a where  a.VCHR_DATE >= SYSDATE - :dys " +
+    "  ORDER BY a.VCHR_NO DESC",
+    [req.params.dys],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        //console.log("Oracle LPOLST", result);
+        res.json(result)
+
       }
-    );
+    }
+  );
 
 });
 
@@ -4662,7 +4738,7 @@ app.get("/gtrnlst/:dys", function (req, res) {
   connection.query(
     "select a.GTRN_NO,DATE_FORMAT(a.GTRN_DATE,'%d/%m/%Y') GTRN_DATE," +
     " a.GTRN_NARRATION  AS NARRATION" +
-    " from GTRN_HDR a where  a.GTRN_DATE >= CURDATE() -INTERVAL ? DAY " +
+    " from gtrn_hdr a where  a.GTRN_DATE >= CURDATE() -INTERVAL ? DAY " +
     "  ORDER BY a.GTRN_NO DESC",
     [req.params.dys],
 
@@ -4681,7 +4757,7 @@ app.get("/gtrnitems/:vch", function (req, res) {
   connection.query(
     "select a.GTRN_NO,DATE_FORMAT(a.GTRN_DATE,'%d/%m/%Y') GTRN_DATE," +
     " a.LOC_FROM, a.LOC_TO ,a.ITEM_CODE, a.QTY,a.SR_NO, a.UNIT_COST,' ' as UOM " +
-    " from GTRN_ITEMS a where  a.GTRN_NO =?  " +
+    " from gtrn_items a where  a.GTRN_NO =?  " +
     "  ORDER BY a.SR_NO  DESC",
     [req.params.vch],
 
@@ -4707,7 +4783,7 @@ app.get("/trnlst/:tp/:dys/:dbcr", function (req, res) {
     conn.execute(
       "select a.TRAN_TYPE,a.VCHR_NO,To_char(a.DATTE,'DD/MM/RRRR') DATTE, a.ACC_CODE," +
       " b.AC_NAME, a.AMOUNT, a.DB_CR,a.NARRATION1,a.NARRATION2,a.JOB_NO, a.PANEL_NO,  a.USERNAME " +
-      " from TRAN_ACC a, AC_LIST b where  a.TRAN_TYPE =:tp and a.DATTE >= SYSDATE - :dys and " +
+      " from tran_acc a, ac_list b where  a.TRAN_TYPE =:tp and a.DATTE >= SYSDATE - :dys and " +
       " a.DB_cr = NVL(:dbcr,'C') AND a.ACC_CODE = b.AC_CODE ORDER BY a.VCHR_NO DESC",
       [req.params.tp, req.params.dys, req.params.dbcr],
       {
@@ -4731,7 +4807,7 @@ app.get("/sinqcomplst", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select CMPL_CODE,CMPL_NAME" +
-      "  from SINQ_COMPLIANCE_MST ORDER BY cmpl_codE",
+      "  from sinq_compliance_mst ORDER BY cmpl_codE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -4755,7 +4831,7 @@ app.get("/sinqloclst", function (req, res) {
 
     conn.execute(
       "select SINQ_LOC_CODE,SINQ_LOC_NAME" +
-      "  from SINQ_LOC_MST ORDER BY SINQ_LOC_CODE",
+      "  from sinq_loc_mst ORDER BY SINQ_LOC_CODE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -4777,7 +4853,7 @@ app.get("/sinqloc/:id", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select SINQ_LOC_CODE, SINQ_LOC_NAME " +
-      "FROM SINQ_LOC_MST WHERE SINQ_LOC_CODE=:id",
+      "FROM sinq_loc_mst WHERE SINQ_LOC_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -4798,7 +4874,7 @@ app.get("/locmst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select LOC_CODE, LOC_NAME " + "FROM LOC_MST WHERE LOC_CODE=:id",
+      "select LOC_CODE, LOC_NAME " + "FROM loc_mst WHERE LOC_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -4819,7 +4895,7 @@ app.get("/locmst/:id", function (req, res) {
 app.get("/catlst", function (req, res) {
   connection.query(
 
-    "select CAT_CODE, CAT_NAME" + " from CAT_MST order by CAT_CODE",
+    "select CAT_CODE, CAT_NAME" + " from cat_mst order by CAT_CODE",
     {},
 
     function (error, results, fields) {
@@ -4835,7 +4911,7 @@ app.get("/catlst", function (req, res) {
 app.get("/catmst/:id", function (req, res) {
 
   connection.query(
-    "select CAT_CODE, CAT_NAME " + "FROM CAT_MST WHERE CAT_CODE=?",
+    "select CAT_CODE, CAT_NAME " + "FROM cat_mst WHERE CAT_CODE=?",
     [req.params.id],
 
     function (error, result) {
@@ -4882,7 +4958,7 @@ app.get("/itmsubcat/:cat/:scat", function (req, res) {
 
   connection.query(
     "select a.CAT_CODE,b.CAT_NAME, a.SUB_CAT_CODE, a.SUB_CAT_NAME " +
-    "FROM ITEM_SUBCAT a, CAT_MST b WHERE a.cat_code = b.cat_code and a.CAT_CODE=? AND a.SUB_CAT_CODE =?",
+    "FROM item_subcat a, CAT_MST b WHERE a.cat_code = b.cat_code and a.CAT_CODE=? AND a.SUB_CAT_CODE =?",
     [req.params.cat, req.params.scat],
 
     function (error, result) {
@@ -4949,7 +5025,7 @@ app.get("/sinqtypelst", function (req, res) {
 
   connection.query(
     "select INQ_TYPE_CODE,INQ_TYPE_DESC" +
-    "  from INQ_TYPE_MST ORDER BY INQ_TYPE_CODE",
+    "  from inq_type_mst ORDER BY INQ_TYPE_CODE",
 
     function (err, result) {
       if (err) {
@@ -4966,7 +5042,7 @@ app.get("/sinqtypelst", function (req, res) {
 app.get("/sinqtype/:id", function (req, res) {
   connection.query(
     "select INQ_TYPE_CODE, INQ_TYPE_DESC " +
-    "FROM INQ_TYPE_MST WHERE INQ_TYPE_CODE=?",
+    "FROM inq_type_mst WHERE INQ_TYPE_CODE=?",
     [req.params.id],
 
     function (error, result) {
@@ -4995,7 +5071,7 @@ app.post("/api/save-sinqstat", (req, res) => {
     .join(", ");
 
   // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO Inq_type_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
+  const query = `INSERT INTO inq_type_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
                    ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   connection.query(query, values, (err, result) => {
@@ -5034,7 +5110,7 @@ app.get("/enqformlst", function (req, res) {
     // console.log('Sales Enq Form of enq. ');
 
     conn.execute(
-      "select RCP_CODE,RCP_DESC" + "  from SINQ_RCPT_MST ORDER BY RCP_CODE",
+      "select RCP_CODE,RCP_DESC" + "  from sinq_rcpt_mst ORDER BY RCP_CODE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -5055,7 +5131,7 @@ app.get("/enqformMst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select RCP_CODE, RCP_DESC " + " FROM SINQ_RCPT_MST WHERE RCP_CODE=:id",
+      "select RCP_CODE, RCP_DESC " + " FROM sinq_rcpt_mst WHERE RCP_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -5105,7 +5181,7 @@ app.get("/enqstatlist", function (req, res) {
 
     conn.execute(
       "select STAT_CODE,STAT_DESC" +
-      "  from SALES_INQUIRY_STATUS ORDER BY STAT_CODE",
+      "  from sales_inquiry_status ORDER BY STAT_CODE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -5127,7 +5203,7 @@ app.get("/enqstat/:id", function (req, res) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select STAT_CODE, STAT_DESC " +
-      " FROM SALES_INQUIRY_STATUS WHERE STAT_CODE=:id",
+      " FROM sales_inquiry_status WHERE STAT_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -5185,7 +5261,7 @@ app.post("/invhdrpost", function (req, res, next) {
     // /TO_DATE('${OrclInvdt}', 'YYYY-MM-DD"T"HH24:MI:SS.SSS"Z"')
     Pmode = "INSERT";
     let sql =
-      "INSERT INTO NET_SALES (INV_NO, INV_DATE, CUST_CODE,AMOUNT) VALUES " +
+      "INSERT INTO net_sales (INV_NO, INV_DATE, CUST_CODE,AMOUNT) VALUES " +
       "('" +
       req.body.invNo +
       "','" +
@@ -5306,7 +5382,7 @@ app.put("/sinvacc", function (req, res, next) {
     //
     Pmode = "INSERT";
     conn.execute(
-      "INSERT INTO  TRAN_ACC (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -5340,7 +5416,7 @@ app.put("/sinvacc", function (req, res, next) {
     dbCr = "C";
     //SALES cR 30101
     conn.execute(
-      "INSERT INTO  TRAN_ACC (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -5373,7 +5449,7 @@ app.put("/sinvacc", function (req, res, next) {
     );
     //
     conn.execute(
-      "INSERT INTO  TRAN_ACC (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -5413,7 +5489,7 @@ app.put("/sinvacc", function (req, res, next) {
 
 //delete Cus DELETE RECORD
 app.delete("/cusDelete/:id", function (req, res, next) {
-  var sql = "DELETE FROM CUS_MST WHERE CUST_CODE = ?";
+  var sql = "DELETE FROM cus_mst WHERE CUST_CODE = ?";
   connection.query(sql, [req.params.id], function (err, result) {
     if (err) throw err;
     //  console.log("Number of records deleted: " + result.affectedRows);
@@ -5422,7 +5498,7 @@ app.delete("/cusDelete/:id", function (req, res, next) {
 //Cmp Name
 app.get("/cmpname", function (req, res) {
   connection.query(
-    "select NAME, PLACE " + " FROM COMPANY ",
+    "select NAME, PLACE " + " FROM company ",
     [],
 
     function (error, results) {
@@ -5440,7 +5516,7 @@ app.get("/itemlst/:catg", function (req, res) {
 
   connection.query(
     "select LOC_CODE, ITEM_CODE , ITEM_NAME1 , CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND" +
-    " FROM ITEM_MST  WHERE CAT_CODE like ? AND ITEM_NAME1 <>'.' order by ITEM_NAME1",
+    " FROM item_mst  WHERE CAT_CODE like ? AND ITEM_NAME1 <>'.' order by ITEM_NAME1",
     [req.params.catg],
 
     //Decode(:catg,'null','%', :catg)
@@ -5456,7 +5532,7 @@ app.get("/itmlst", function (req, res) {
   //const tableName= 'ITEM_MST';
   connection.query(
     "select LOC_CODE, ITEM_CODE , ITEM_NAME1 ,OP_STOCK, CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND, cl_stock," +
-    "COST_PRICE, ITEM_DATE, SUP_CODE,SALES_ACCOUNT  FROM ITEM_MST  order by cat_code, sub_cat,item_code",
+    "COST_PRICE, ITEM_DATE, SUP_CODE,SALES_ACCOUNT  FROM item_mst  order by cat_code, sub_cat,item_code",
     [],
 
     //Decode(:catg,'null','%', :catg)
@@ -5476,7 +5552,7 @@ app.get("/items/:id", function (req, res) {
     "select  ITEM_CODE, ITEM_NAME1,LOC_CODE, CAT_CODE, SUB_CAT, OP_STOCK,OP_RATE, CL_STOCK, " +
     "ITEM_UNIT,  COST_PRICE, SALE_PRICE , REORD_QTY, REORD_LVL ,MAX_LEVEL,ITEM_PACK, " +
     " ITEM_PACK_FACTOR,SUP_CODE, SALES_ACCOUNT,BRAND " +
-    " FROM ITEM_MST WHERE ITEM_CODE= ?",
+    " FROM item_mst WHERE ITEM_CODE= ?",
     [req.params.id],
 
     function (error, results) {
@@ -5500,18 +5576,18 @@ app.get("/stkval", function (req, res) {
       ROUND(IFNULL(c.CL_STOCK, 0) * IFNULL(uc.UNIT_COST, 0),2) AS AMOUNT,
       a.ITEM_UNIT,
       a.CAT_CODE
-    FROM ITEM_MST AS a
-    LEFT JOIN (
-      SELECT ITEM_CODE, SUM(qty) AS CL_STOCK
-      FROM STOCK_TRANS
-      GROUP BY ITEM_CODE
-    ) AS c ON a.ITEM_CODE = c.ITEM_CODE
-    LEFT JOIN (
-      SELECT 
+    from item_mst as a
+    left join (
+      select item_code, sum(qty) as cl_stock
+      from stock_trans
+      group by item_code
+    ) as c on a.item_code = c.item_code
+    left join (
+      select 
         item_code,
         loc_code,
-        AVGCOST(loc_code, item_code, ?) AS UNIT_COST
-      FROM ITEM_MST
+        avgcost(loc_code, item_code, ?) as unit_cost
+      from item_mst
     ) AS uc ON a.ITEM_CODE = uc.item_code AND a.LOC_CODE = uc.loc_code
     ORDER BY a.ITEM_NAME1
   `;
@@ -5527,7 +5603,7 @@ app.get("/stkledOp/:id/:stdt", function (req, res) {
 
   connection.query(
     "select  sum(qty) as OPBAL  " +
-    " FROM STOCK_TRANS WHERE ITEM_CODE= ? and  DOC_DATE < ?",
+    " FROM stock_trans WHERE ITEM_CODE= ? and  DOC_DATE < ?",
     [req.params.id, req.params.stdt],
 
     function (error, results) {
@@ -5547,7 +5623,7 @@ app.get("/stkled/:id/:stdt/:enddt", function (req, res) {
     " CASE WHEN QTY>0 THEN QTY ELSE 0 END  AS QTY_IN ," +
     " CASE WHEN QTY<=0 THEN QTY ELSE 0 END  AS QTY_OUT ," +
     " CASE WHEN QTY<=0 THEN AVGCOST(LOC_CODE,ITEM_CODE,DOC_DATE)  ELSE STD_COST END  AS STD_COST " +
-    " FROM STOCK_TRANS WHERE ITEM_CODE= ? AND DOC_DATE BETWEEN ? AND ? ORDER BY date_format(DOC_DATE,'%Y/%m/%d') , SORT_ORD",
+    " FROM stock_trans WHERE ITEM_CODE= ? AND DOC_DATE BETWEEN ? AND ? ORDER BY date_format(DOC_DATE,'%Y/%m/%d') , SORT_ORD",
     [req.params.id, req.params.stdt, req.params.enddt],
 
     function (error, results) {
@@ -5573,7 +5649,7 @@ app.post("/api/save-itemmst", (req, res) => {
     .join(", ");
 
   // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO Item_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
+  const query = `INSERT INTO item_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
                    ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   connection.query(query, values, (err, result) => {
@@ -5593,7 +5669,7 @@ app.delete("/itemdel/:itmcd", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     //console.log("supname.SUP_NAME="+req.body.SUP_NAME);
     conn.execute(
-      "DELETE FROM ITEM_MST WHERE ITEM_CODE =:1",
+      "DELETE FROM item_mst WHERE ITEM_CODE =:1",
       {
         1: req.params.itmcd,
       },
@@ -5617,7 +5693,7 @@ app.get("/itmscatlst", function (req, res) {
   //tableName ='ITEM_SUBCAT';
   connection.query(
     "select a.CAT_CODE, b.CAT_NAME, a.SUB_CAT_CODE, a.SUB_CAT_NAME" +
-    " from ITEM_SUBCAT a LEFT OUTER JOIN CAT_MST b ON b.CAT_CODE = a.CAT_CODE",
+    " from item_subcat a LEFT OUTER JOIN CAT_MST b ON b.CAT_CODE = a.CAT_CODE",
 
     {},
 
@@ -5639,7 +5715,7 @@ app.get("/lpoitems/:po", function (req, res) {
   connection.query(
     "select LPO_NO,JOB_NO,SR_NO,MAIN_SR_NO,ITEM_CODE , ITEM_NAME , QTY, UNIT ,RATE ," +
     " round(qty*rate,2) AMOUNT" +
-    " FROM LPO_ITEMS WHERE LPO_NO =? order by sr_no",
+    " FROM lpo_items WHERE LPO_NO =? order by sr_no",
     [req.params.po],
 
     function (error, results, fields) {
@@ -5658,7 +5734,7 @@ app.get("/lponet/:po", function (req, res) {
     "select LPO_NO,DATE_FORMAT(LPO_DATE,'%d/%m/%Y') LPO_DATE,SUP_CODE , AMOUNT, VAT_PERC, VAT_AMOUNT,NARRATION, " +
     "REQ_NO,PLACE_DLV , ATTN ,DATE_REQ ,SMAN_CODE,'' SUPP_REF_NO ,'' PAY_TERMS  ,'' DELIVERY_REQ ," +
     "'' LPO_APPROVED, '' APPROVED_BY  ,DISCOUNT  " +
-    " FROM LPO_NET WHERE LPO_NO =?",
+    " FROM lpo_net WHERE LPO_NO =?",
     [req.params.po],
 
     function (error, results, fields) {
@@ -5790,7 +5866,7 @@ app.put("/rvtranacc/:dat", function (req, res, next) {
         // console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  TRAN_ACC (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
@@ -5832,7 +5908,7 @@ app.delete("/rvdelrow", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     conn.execute(
       "select rowid, TRAN_TYPE,VCHR_NO , AMOUNT, ACC_CODE, DB_CR" +
-      " FROM TRAN_ACC WHERE TRAN_TYPE =:tp AND VCHR_NO =:vch",
+      " FROM tran_acc WHERE TRAN_TYPE =:tp AND VCHR_NO =:vch",
       [postData[0].TRAN_TYPE, postData[0].VCHR_NO],
       {
         outFormat: orcl1.OBJECT,
@@ -5854,7 +5930,7 @@ app.delete("/rvdelrow", function (req, res, next) {
           if (!RowInGrid && !(results.rows[i].ROWID == "null")) {
             //   console.log('You can Delete :', results.rows[i])
             conn.execute(
-              "DELETE FROM TRAN_ACC " + "  WHERE  ROWID =:rwid",
+              "DELETE FROM tran_acc " + "  WHERE  ROWID =:rwid",
               [results.rows[i].ROWID],
               {
                 autoCommit: true,
@@ -5931,7 +6007,7 @@ app.put("/rvinvstl/:dat", function (req, res, next) {
         //  console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  TRAN_ACC (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
@@ -6011,7 +6087,7 @@ app.put("/sivhdrupd/:hdr", function (req, res, next) {
       // console.log("Insert Sivhdr");
       if (sivhdr.vchrno !== 0) {
         conn.execute(
-          "INSERT INTO  SIV_HDR (  SIV_NO, SIV_DATE,  " +
+          "INSERT INTO  siv_hdr (  SIV_NO, SIV_DATE,  " +
           " JOB_NO  , PANEL_NO , NARRATION )" +
           " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5 ) ",
           [
@@ -6129,7 +6205,7 @@ app.put("/sivitmupd/:dat", function (req, res, next) {
         // console.log("Insert SivItems", sivitem[i].ITEM_CODE);
         if (sivitem[i].QTY !== 0 && sivitem[i].ITEM_CODE !== null) {
           conn.execute(
-            "INSERT INTO  SIV_ITEMS (  SIV_NO, SIV_DATE, SR_NO , " +
+            "INSERT INTO  siv_items (  SIV_NO, SIV_DATE, SR_NO , " +
             " JOB_NO  , ITEM_CODE ,QTY )" +
             " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
             [
@@ -6208,7 +6284,7 @@ app.put("/ngphdrupd/:hdr", function (req, res, next) {
       // console.log("Insert NGPNet");
       if (sivhdr.vchrno !== 0) {
         conn.execute(
-          "INSERT INTO  NGP_NET  (  PRCH_NO, PRCH_DATE,  " +
+          "INSERT INTO  ngp_net  (  PRCH_NO, PRCH_DATE,  " +
           " NARRATION, SUP_CODE,INV_NO, INV_DATE,LPO_NO )" +
           " VALUES (LPAD(:1,10,'0'),TO_DATE(substr(:2,1,10),'DD-MM-YYYY'),:3 ,:4,:5,TO_DATE(substr(:6,1,10),'DD-MM-YYYY'),:7 ) ",
           [
@@ -6281,7 +6357,7 @@ app.put("/srvhdrupd/:hdr", function (req, res, next) {
       //  console.log("Insert SRvhdr");
       if (sivhdr.vchrno !== 0) {
         conn.execute(
-          "INSERT INTO  SRV_HDR (  SRV_NO, SRV_DATE,  " +
+          "INSERT INTO  srv_hdr (  SRV_NO, SRV_DATE,  " +
           " NARRATION )" +
           " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3 ) ",
           [sivhdr.vchrno, sivhdr.vchrdate, sivhdr.narr],
@@ -6351,7 +6427,7 @@ app.put("/srvitmupd/:dat", function (req, res, next) {
         console.log("Insert SivItems", sivitem[i].ITEM_CODE);
         if (sivitem[i].QTY !== 0 && sivitem[i].ITEM_CODE !== null) {
           conn.execute(
-            "INSERT INTO  SIV_ITEMS (  SIV_NO, SIV_DATE, SR_NO , " +
+            "INSERT INTO  siv_items (  SIV_NO, SIV_DATE, SR_NO , " +
             " JOB_NO  , ITEM_CODE ,QTY )" +
             " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
             [
@@ -6427,7 +6503,7 @@ app.put("/ngptranupd/:dat", function (req, res, next) {
         //  console.log("Insert Tranacc", sivitem[i].ACC_CODE);
         if (sivitem[i].AMOUNT !== 0 && sivitem[i].ACC_CODE !== null) {
           conn.execute(
-            "INSERT INTO  TRAN_ACC (  VCHR_NO, DATTE, SR_NO , " +
+            "INSERT INTO  tran_acc (  VCHR_NO, DATTE, SR_NO , " +
             " JOB_NO  , ACC_CODE ,AMOUNT,DB_CR,NARRATION1 )" +
             " VALUES (LPAD(:1,10,'0'),TO_DATE(SUBSTR(:2,1,10),'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
             [
@@ -6499,7 +6575,7 @@ app.put("/sadjhdrupd/:hdr", function (req, res, next) {
       // console.log("Insert Sadjhdr");
       if (sivhdr.vchrno !== 0) {
         conn.execute(
-          "INSERT INTO  STK_HDR (  VCHR_NO, VCHR_DATE,  " +
+          "INSERT INTO  stk_hdr (  VCHR_NO, VCHR_DATE,  " +
           " NARRATION )" +
           " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3 ) ",
           [sivhdr.vchrno, sivhdr.vchrdate, sivhdr.narr],
@@ -6568,7 +6644,7 @@ app.put("/sadjitmupd/:dat", function (req, res, next) {
         //  console.log("Insert SadjItems", sivitem[i].ITEM_CODE);
         if (sivitem[i].QTY !== 0 && sivitem[i].ITEM_CODE !== null) {
           conn.execute(
-            "INSERT INTO  Stk_adj (  VCHR_NO, VCHR_DATE, SR_NO , " +
+            "INSERT INTO  stk_adj (  VCHR_NO, VCHR_DATE, SR_NO , " +
             " NARRATION  , ITEM_CODE ,QTY )" +
             " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
             [
@@ -6607,7 +6683,7 @@ app.get("/jobcard/:jobNo", function (req, res) {
   connection.query(
     "select  JOB_NO, PROJ_NAME, DATE_FORMAT(START_DATE,'d%m%Y') AS START_DATE, LPO_NO, " +
     " DATE_FORMAT(LPO_DATE,'d%m%Y') AS LPO_DATE ,CUST_CODE, MEANS_PAYMENTS, CONTACT_PER,MEANS_TRANSPORT ," +
-    " PLACE_OF_DLV , REVENUE_AC,SMAN_CODE,CURR_CODE, CONVERT_RATE FROM JOB_CARD  WHERE JOB_NO =?", [req.params.jobNo],
+    " PLACE_OF_DLV , REVENUE_AC,SMAN_CODE,CURR_CODE, CONVERT_RATE FROM job_card  WHERE JOB_NO =?", [req.params.jobNo],
 
     function (error, result) {
       if (error) {
@@ -6626,7 +6702,7 @@ app.get("/joblst", function (req, res) {
   connection.query(
     "select  JOB_NO, PROJ_NAME, DATE_FORMAT(START_DATE,'d%m%Y') AS START_DATE, LPO_NO, " +
     " DATE_FORMAT(LPO_DATE,'d%m%Y') AS LPO_DATE ,CUST_CODE, MEANS_PAYMENTS, CONTACT_PR,MEANS_TRANSPORT ," +
-    +" PLACE_OF_DEIVERY , SMAN_CODE FROM JOB_CARD  ORDER BY JOB_NO DESC", [],
+    +" PLACE_OF_DEIVERY , SMAN_CODE FROM job_card  ORDER BY JOB_NO DESC", [],
 
     function (error, result) {
       if (error) {
@@ -6642,7 +6718,7 @@ app.get("/joblst", function (req, res) {
 
 app.get("/jobstatlst", function (req, res) {
   connection.query(
-    "select STAT_CODE, STAT_DESC" + " FROM JOB_STATUS_MST  ORDER BY STAT_CODE ",
+    "select STAT_CODE, STAT_DESC" + " FROM job_status_mst  ORDER BY STAT_CODE ",
     {},
 
     function (error, result) {
@@ -6658,7 +6734,7 @@ app.get("/jobstatlst", function (req, res) {
 });
 app.get("/jobstatmst/:id", function (req, res) {
   connection.query(
-    "select STAT_CODE, STAT_DESC  FROM JOB_STATUS_MST  where STAT_CODE =? ",
+    "select STAT_CODE, STAT_DESC  FROM job_status_mst  where STAT_CODE =? ",
     [req.params.id],
 
     function (error, result) {
@@ -6687,7 +6763,7 @@ app.post("/api/save-jobstat", (req, res) => {
     .join(", ");
 
   // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO Job_status_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
+  const query = `INSERT INTO job_status_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
                  ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   connection.query(query, values, (err, result) => {
@@ -6704,7 +6780,7 @@ app.get("/vchrlst/:tranId", function (req, res) {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM VOUCHERS WHERE TRAN_TYPE=? order by vchr_no desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE TRAN_TYPE=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -6723,7 +6799,7 @@ app.get("/vchrlst/:tranId", function (req, res) {
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
       " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       "DB_CR " +
-      "  FROM TRAN_ACC WHERE TRAN_TYPE=? order by vchr_no desc",
+      "  from tran_acc WHERE TRAN_TYPE=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -6748,7 +6824,7 @@ app.get('/LedOp/:acode/:stdt', function (req, res) {
   console.log('Leddsp O/P Bal ', acCode, stDt);
   connection.query("SELECT " +
     "SUM(CASE WHEN db_cr = 'D' THEN AMOUNT ELSE AMOUNT * -1 END) AS OPBAL " + // ← removed comma
-    "FROM TRAN_ACC WHERE ACC_CODE = ? AND DATTE < ?",
+    "FROM tran_acc WHERE ACC_CODE = ? AND DATTE < ?",
     [acCode, stDt],
     function (error, result) {
       if (error) {
@@ -6769,7 +6845,7 @@ app.get('/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   console.log('Leddsp', acCode, stDt, endDt);
   connection.query("select SR_NO,TRAN_TYPE,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
     " CASE WHEN db_cr ='D' THEN AMOUNT ELSE 0 END AS AMOUNT_DR ," +
-    " CASE WHEN db_cr ='C' THEN AMOUNT ELSE 0 END  AS AMOUNT_CR FROM TRAN_ACC WHERE ACC_CODE = ? AND " +
+    " CASE WHEN db_cr ='C' THEN AMOUNT ELSE 0 END  AS AMOUNT_CR FROM tran_acc WHERE ACC_CODE = ? AND " +
     " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), TRAN_TYPE ,VCHR_NO ", [acCode, stDt, endDt],
     function (error, result) {
       if (error) {
@@ -6866,7 +6942,7 @@ app.get("/tranlst/:tranId", function (req, res) {
     "IF(DB_CR='D', AMOUNT, 0) AS AMOUNT_DR, " +
     "IF(DB_CR='C', AMOUNT, 0) AS AMOUNT_CR, " +
     "DB_CR, NARRATION1, NARRATION2, JOB_NO " +
-    "FROM TRAN_ACC WHERE TRAN_TYPE = ? AND DATTE BETWEEN ? AND ? ORDER BY VCHR_NO , db_cr desc",
+    "FROM tran_acc WHERE TRAN_TYPE = ? AND DATTE BETWEEN ? AND ? ORDER BY VCHR_NO , db_cr desc",
     [req.params.tranId, start_date, end_date],
     function (error, result) {
       if (error) {
@@ -6884,7 +6960,7 @@ app.get("/pcashlst/:id", function (req, res) {
   console.log('Petty cash ');
   connection.query(
     "SELECT VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, PAY_VCHR_NO, PAY_VCHR_DATE, " +
-    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION FROM PCASHEXP_HDR  order by vchr_no desc",
+    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION FROM pcashexp_hdr  order by vchr_no desc",
     function (error, result) {
       if (error) {
         //  throw error;
@@ -6904,7 +6980,7 @@ app.get("/pdcrcdreg", function (req, res) {
     "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
-    "FROM PDC_RCD  where  chq_date BETWEEN ? AND ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd  where  chq_date BETWEEN ? AND ? ORDER BY CHQ_DATE",
     [req.query.start_date, req.query.end_date],
     function (err, result) {
       if (err) {
@@ -6923,7 +6999,7 @@ app.get("/pdcrcdlst/:dys", function (req, res) {
     "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
-    "FROM PDC_RCD  where  chq_date >= CURDATE() - INTERVAL ? DAY ORDER BY CHQ_DATE",
+    "FROM pdc_rcd  where  chq_date >= CURDATE() - INTERVAL ? DAY ORDER BY CHQ_DATE",
     [req.params.dys],
     function (err, result) {
       if (err) {
@@ -6942,7 +7018,7 @@ app.get("/pdcisulst/:dys", function (req, res) {
     "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, SUP_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
-    "FROM PDC_ISU ORDER BY CHQ_DATE",
+    "FROM pdc_isu ORDER BY CHQ_DATE",
 
     function (err, result) {
       if (err) {
