@@ -23,13 +23,13 @@ const JWT_SECRET = process.env.JWT_SECRET;
 app.use(express.json());  // ✅ Enables JSON request body parsing
 app.use(express.urlencoded({ extended: true })); // ✅ Parses URL-encoded data
 
-
-var dbIp = "192.168.1.11";  // MySQL server IP
+dbIp = process.env.DB_HOST;
+//var dbIp = "192.168.1.11";  // MySQL server IP
 //var dbIp = "192.168.162.69";  // MySQL server IP
 var dbPort = "3306";         // Default MySQL port
 var dbAddr = "http://" + dbIp + ":" + dbPort;
-var clientAddr = "http://192.168.1.11:3000";  // Client address for CORS
-//var clientAddr = "http://192.168.162.69:3000";  // Client address for CORS
+var clientAddr = "http://"+process.env.DB_HOST+":3000";  // Client address for CORS
+//var clientAddr = "http://192.168.1.11:3000";  // Client address for CORS
 // MySQL connection details
 var connection = mysql.createPool({
   host: dbIp,
