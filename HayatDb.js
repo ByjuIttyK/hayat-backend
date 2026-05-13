@@ -322,7 +322,7 @@ app.get('/api/report_parameters/:rep', (req, res) => {
     res.json(rows);
   });
 });
-app.get('/lovmetadata/:rep', (req, res) => {
+app.get('/api/lovmetadata/:rep', (req, res) => {
   console.log("Fetching Lov metatdata", req.params.rep);
   // const { tableId } = req.params.rep;
   const query = 'SELECT * FROM column_metadata_lov WHERE lovHdr = ?';
@@ -9228,7 +9228,7 @@ app.get("/vchrlst/:tranId", function (req, res) {
   };
 });
 //app.get('/LedOp/:acode/:stdt', function (req, res) {
-app.get('/ledBal/:acode/:stdt', function (req, res) {
+app.get('/api/ledBal/:acode/:stdt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
 
@@ -9249,7 +9249,7 @@ app.get('/ledBal/:acode/:stdt', function (req, res) {
 }
 );
 
-app.get('/LedOp/:acode/:stdt', function (req, res) {
+app.get('/api/LedOp/:acode/:stdt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
 
@@ -9270,7 +9270,7 @@ app.get('/LedOp/:acode/:stdt', function (req, res) {
 }
 );
 
-app.get('/Leddsp/:acode/:stdt/:enddt', function (req, res) {
+app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
@@ -9291,7 +9291,7 @@ app.get('/Leddsp/:acode/:stdt/:enddt', function (req, res) {
     }
   );
 });
-app.get('/Tbal/:dt', function (req, res) {
+app.get('/api/Tbal/:dt', function (req, res) {
   console.log('Tbal query =', req.query); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9309,7 +9309,7 @@ app.get('/Tbal/:dt', function (req, res) {
     }
   });
 });
-app.get('/PandL/:dt', function (req, res) {
+app.get('/api/PandL/:dt', function (req, res) {
   console.log('P&L params =', req.params); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9336,7 +9336,7 @@ app.get('/PandL/:dt', function (req, res) {
     }
   });
 });
-app.get('/Blsht/:dt', function (req, res) {
+app.get('/api/Blsht/:dt', function (req, res) {
   console.log('BLSHT params =', req.params); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9365,7 +9365,7 @@ app.get('/Blsht/:dt', function (req, res) {
 });
 
 
-app.get('/supbal', function (req, res) {
+app.get('/api/supbal', function (req, res) {
   //  const acCode = req.params.acode;
   const { end_date } = req.query;
 
@@ -9446,7 +9446,7 @@ app.get("/trnprn/:tranId/:Vchr", function (req, res) {
 });
 
 
-app.get('/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
+app.get('/api/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
   const jobNo = req.params.jobNo;
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
