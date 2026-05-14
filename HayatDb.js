@@ -69,7 +69,7 @@ app.use(function (req, res, next) {
 /// End body-parser configuration
 //  Commented on 22/2/2025 - end 
 // Create app server
-var server = app.listen(3001, dbIp, function () {
+var server = app.listen(3001, '0.0.0.0', function () {
   var host = server.address().address;
   var port = server.address().port;
 
@@ -490,7 +490,7 @@ SELECT
   f.InvAmt AS TOT_INV_AMT,
   ((a.CONTRACT_AMT * (1+a.VAT_PERC/100) )- f.InvAmt) as BALANCE_TO_INVOICE
 FROM job_card a
-LEFT JOIN CUS_MST b ON a.CUST_CODE = b.CUST_CODE
+LEFT JOIN cus_mst b ON a.CUST_CODE = b.CUST_CODE
 LEFT JOIN (
   SELECT job_no, SUM(NET_AMT) AS InvAmt
   FROM fab_inv_hdr
@@ -3810,7 +3810,7 @@ app.get("/api/bankrecolst", function (req, res) {
 
   connection.query(
     "select DOC_NO , ACC_HEAD AS BANK_NAME,   BANK_CODE, CLOS_DT  , STMT_BAL, CHQ_DPST , CHQ_INS , START_DT" +
-    "  from bnkrcnl_hdr join ACC_MST ON (acc_code = bank_code) ORDER BY DOC_NO DESC",
+    "  from bnkrcnl_hdr join acc_mst ON (acc_code = bank_code) ORDER BY DOC_NO DESC",
 
     function (err, result) {
       if (err) {
@@ -3926,7 +3926,7 @@ app.get("/api/tranacc/:tp/:vchr", function (req, res) {
     "   CASE WHEN a.DB_CR = 'D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc  a " +
-    " LEFT JOIN AC_LIST b ON a.ACC_CODE = b.AC_CODE " +
+    " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
     " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ?",
     [req.params.tp, req.params.vchr],
     //LEFT JOIN = ALL ROWS OF LEFT TABLE  (TRAN_ACC Here)
@@ -4334,13 +4334,13 @@ app.put("/api/glmst/:id", function (req, res, next) {
 
 
 
-app.get("/api/Acclist", function (req, res) {
+app.get("/api/acclist", function (req, res) {
   console.log("Acc mst List ");
   //const tableName= "ACC_MST";
   connection.query(
     " SELECT A.REPORT_LN, A.GL_CODE, B.GL_HEAD, A.ACC_CODE, A.ACC_HEAD " +
     " FROM acc_mst A " +
-    " LEFT OUTER JOIN GL_MST B ON A.REPORT_LN = B.REPORT_LN AND A.GL_CODE = B.GL_CODE " +
+    " LEFT OUTER JOIN gl_mst B ON A.REPORT_LN = B.REPORT_LN AND A.GL_CODE = B.GL_CODE " +
     " ORDER BY A.REPORT_LN, A.GL_CODE, A.ACC_CODE ",
     {},
     function (err, results, fields) {
@@ -6193,7 +6193,7 @@ app.get("/api/purchaseitems/:vch", function (req, res) {
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.COST AS RATE, ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
     " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
-    " LEFT OUTER JOIN ITEM_MST c ON c.ITEM_CODE = a.ITEM_CODE" +
+    " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
     " WHERE  a.SRV_NO =?  " +
     " AND a.ACC_CODE IS NOT NULL " +
     " ORDER BY a.SR_NO",
@@ -6222,7 +6222,7 @@ app.get("/api/purchaseItemsJob/:Job", function (req, res) {
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,a.LPO_NO,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.COST , ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
     " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
-    " LEFT OUTER JOIN ITEM_MST c ON c.ITEM_CODE = a.ITEM_CODE" +
+    " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
     " WHERE  a.JOB_NO = ?  " +
     " ORDER BY a.SR_NO",
     [req.params.Job],
@@ -6250,7 +6250,7 @@ app.get("/api/grtnitemsjob/:Job", function (req, res) {
     " a.PROD_CODE AS ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,COALESCE(b.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.UNIT_COST COST, ROUND( COALESCE(a.QTY,0) * COALESCE(a.UNIT_COST,0) ,2) AS AMOUNT " +
     " from goods_rtn_items a   " +
-    " LEFT OUTER JOIN ITEM_MST c ON a.PROD_CODE = c.ITEM_CODE " +
+    " LEFT OUTER JOIN item_mst c ON a.PROD_CODE = c.ITEM_CODE " +
     ", goods_rtn_Hdr b" +
     " WHERE  b.JOB_NO = ? and a.SRV_NO =b.SRV_NO  " +
     " ORDER BY a.SRV_NO",
@@ -6301,7 +6301,7 @@ app.get("/api/expaccjob/:Job", function (req, res) {
   connection.query(
     "select a.EXP_CODE,a.ACC_CODE , b.ACC_HEAD " +
     " from job_expenses_link a   " +
-    " LEFT OUTER JOIN ACC_MST b ON a.ACC_CODE = b.ACC_CODE " +
+    " LEFT OUTER JOIN acc_mst b ON a.ACC_CODE = b.ACC_CODE " +
     " WHERE  a.JOB_NO = ?   " +
     " ORDER BY a.EXP_CODE",
     [req.params.Job],
@@ -7980,7 +7980,7 @@ app.get("/api/itmscatlst", function (req, res) {
   //tableName ='ITEM_SUBCAT';
   connection.query(
     "select a.CAT_CODE, b.CAT_NAME, a.SUB_CAT_CODE, a.SUB_CAT_NAME" +
-    " from item_subcat a LEFT OUTER JOIN CAT_MST b ON b.CAT_CODE = a.CAT_CODE",
+    " from item_subcat a LEFT OUTER JOIN cat_mst b ON b.CAT_CODE = a.CAT_CODE",
 
     {},
 
@@ -8022,7 +8022,7 @@ app.get("/api/lponet/:po", function (req, res) {
     " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
     "a.REQ_NO,a.PLACE_DLV , a.ATTN ,a.DATE_REQ ,a.SMAN_CODE, a.SUPP_REF_NO , a.PAY_TERMS  , a.DELIVERY_REQ ," +
     " a.LPO_APPROVED,  a.APPROVED_BY  ,a.DISCOUNT  " +
-    " FROM lpo_net a LEFT OUTER JOIN SUP_MST b on (a.SUP_CODE=b.SUP_CODE) WHERE LPO_NO =?",
+    " FROM lpo_net a LEFT OUTER JOIN sup_mst b on (a.SUP_CODE=b.SUP_CODE) WHERE LPO_NO =?",
     [req.params.po],
 
     function (error, results, fields) {
@@ -9377,7 +9377,7 @@ app.get('/api/supbal', function (req, res) {
     "FROM ( " +
     "  SELECT b.SUP_CODE, b.SUP_NAME, " +
     "  SUM(CASE WHEN db_cr = 'D' THEN AMOUNT ELSE AMOUNT * -1 END) AS BALANCE " +
-    "  FROM tran_acc a JOIN SUP_MST b ON a.ACC_CODE = b.SUP_CODE " +
+    "  FROM tran_acc a JOIN sup_mst b ON a.ACC_CODE = b.SUP_CODE " +
     "  WHERE DATTE < ? " +
     "  GROUP BY b.SUP_CODE, b.SUP_NAME " +
     ") AS summary ORDER BY SUP_CODE",
