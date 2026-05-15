@@ -29,14 +29,17 @@ console.log('dbIp===>', process.env.DB_HOST);
 //var dbIp = "192.168.162.69";  // MySQL server IP
 var dbPort = "3306";         // Default MySQL port
 var dbAddr = "http://" + dbIp + ":" + dbPort;
-var clientAddr = "http://" + process.env.DB_HOST + ":3000";  // Client address for CORS
+//var clientAddr = "http://" + process.env.DB_HOST + ":3000";  // Client address for CORS
+var clientAddr = "http://hayaterp.cloud";
 //var clientAddr = "http://192.168.1.11:3000";  // Client address for CORS
 // MySQL connection details
 var connection = mysql.createPool({
   host: dbIp,
   port: dbPort,
-  user: 'root',         // Replace with your MySQL username
-  password: 'Digital@65',         // Replace with your MySQL password
+ user: process.env.DB_USER,
+ password: process.env.DB_PASSWORD,
+//	user: 'root',         // Replace with your MySQL username
+//  password: 'Digital@65',         // Replace with your MySQL password
   database: 'hayat',    // Your database name
   waitForConnections: true,
   connectionLimit: 10,
@@ -322,7 +325,7 @@ app.get('/api/report_parameters/:rep', (req, res) => {
     res.json(rows);
   });
 });
-app.get('/api/lovmetadata/:rep', (req, res) => {
+app.get('/lovmetadata/:rep', (req, res) => {
   console.log("Fetching Lov metatdata", req.params.rep);
   // const { tableId } = req.params.rep;
   const query = 'SELECT * FROM column_metadata_lov WHERE lovHdr = ?';
@@ -337,7 +340,7 @@ app.get('/api/lovmetadata/:rep', (req, res) => {
   });
 });
 
-app.post("/api/save-lpo", async (req, res) => {
+app.post("/save-lpo", async (req, res) => {
   try {
     console.log("save-lpo ==>", req.body);
     const { lpoNet, lpoItems } = req.body;
@@ -360,10 +363,10 @@ app.post("/api/save-lpo", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `
           INSERT INTO lpo_net (LPO_NO, LPO_DATE, SUP_CODE,NARRATION,AMOUNT,ATTN,SMAN_CODE) 
-          VALUES (?, ?, ?, ?,?,?,?) 
+          VALUES (?, ?, ?, ?,?,?,?) s
           ON DUPLICATE KEY UPDATE 
           LPO_DATE= VALUES(LPO_DATE),
           SUP_CODE = VALUES(SUP_CODE),
@@ -382,7 +385,7 @@ app.post("/api/save-lpo", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("LPO_NET Insert/Update:", result);
+                console.log("lpo_net Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -408,7 +411,7 @@ app.post("/api/save-lpo", async (req, res) => {
               if (err) {
                 return reject(err);
               }
-              console.log("LPO_ITEMS Insert/Update:", result);
+              console.log("lpo_items Insert/Update:", result);
               resolve(result);
             });
           });
@@ -508,7 +511,7 @@ ORDER BY a.START_DATE DESC;
     res.json(rows);
   });
 });
-app.post("/api/jobcard-save", async (req, res) => {
+app.post("/jobcard-save", async (req, res) => {
   try {
     console.log("jobcard-save ==>", req.body);
 
@@ -614,7 +617,7 @@ app.post("/api/jobcard-save", async (req, res) => {
               ],
               (err, result) => {
                 if (err) return reject(err);
-                console.log("JOB_CARD Insert/Update:", result);
+                console.log("job_card Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -678,7 +681,7 @@ app.post("/api/jobcard-save", async (req, res) => {
   }
 });
 
-app.post("/api/save-fpo", async (req, res) => {
+app.post("/save-fpo", async (req, res) => {
   try {
     console.log("save-fpo ==>", req.body);
     const { lpoNet, lpoItems } = req.body;
@@ -701,7 +704,7 @@ app.post("/api/save-fpo", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `
           INSERT INTO fpo_net (FPO_NO,FPO_DATE, SUP_CODE,YR_REF_NO,PAY_TERMS,FPO_NOTES,SMAN_CODE,AMOUNT) 
           VALUES (?, ?, ?, ?,?,?,?,?) 
@@ -778,14 +781,14 @@ app.post("/api/save-fpo", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
-app.post("/api/save-ngp", async (req, res) => {
+app.post("/save-ngp", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
 
     if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
       return res.status(400).json({ message: "Invalid data format" });
     }
-    console.log("NGP_NET=>**", netData);
+    console.log("ngp_net=>**", netData);
     // Start transaction
     connection.getConnection((err, conn) => {
       if (err) {
@@ -801,7 +804,7 @@ app.post("/api/save-ngp", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `
             INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE,NARRATION,AMOUNT,DISCOUNT) 
             VALUES (?, ?, ?, ?,?,?) 
@@ -821,7 +824,7 @@ app.post("/api/save-ngp", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("NGP_NET Insert/Update:", result);
+                console.log("ngp_net Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -876,7 +879,7 @@ app.post("/api/save-ngp", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
-app.post("/api/save-localpurch", async (req, res) => {
+app.post("/save-localpurch", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
 
@@ -900,7 +903,7 @@ app.post("/api/save-localpurch", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE,NARRATION,
@@ -983,7 +986,7 @@ app.post("/api/save-localpurch", async (req, res) => {
   }
 });
 
-app.post("/api/save-pret", async (req, res) => {
+app.post("/save-pret", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
 
@@ -1006,7 +1009,7 @@ app.post("/api/save-pret", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO pret_hdr (VCHR_NO, VCHR_DATE, SUP_CODE,NARRATION,INV_AMOUNT,VAT_PERC) 
@@ -1085,7 +1088,7 @@ app.post("/api/save-pret", async (req, res) => {
 });
 
 //// Quote saves
-app.post("/api/save-qtNotes", async (req, res) => {
+app.post("/save-qtNotes", async (req, res) => {
   try {
     console.log("save-Quote-Notes ==>", req.body);
     res.json({ message: "Notes saved successfully!" });
@@ -1098,7 +1101,7 @@ app.post("/api/save-qtNotes", async (req, res) => {
   };
 });
 
-app.post("/api/save-qtTechDtl", async (req, res) => {
+app.post("/save-qtTechDtl", async (req, res) => {
   try {
     console.log("save-Quote-TechDtl ==>", req.body);
     res.json({ message: "Tech Dtl saved successfully!" });
@@ -1111,7 +1114,7 @@ app.post("/api/save-qtTechDtl", async (req, res) => {
   };
 });
 
-app.post("/api/save-qtDoc", async (req, res) => {
+app.post("/save-qtDoc", async (req, res) => {
   try {
     console.log("save-Quote-Doc-Upload ==>", req.body);
     const lpoItems = req.body;
@@ -1181,7 +1184,7 @@ app.post("/api/save-qtDoc", async (req, res) => {
   }
 });
 
-app.post("/api/save-quotation", async (req, res) => {
+app.post("/save-quotation", async (req, res) => {
   try {
     console.log("Save-Quote-items ==>", req.body);
     const { qtHdr, lpoItems } = req.body;
@@ -1293,7 +1296,7 @@ app.post("/api/save-quotation", async (req, res) => {
     res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
   }
 });
-app.post("/api/save-qtTermsCond", async (req, res) => {
+app.post("/save-qtTermsCond", async (req, res) => {
   try {
     // console.log("save-Quote-Terms -cond ==>", req.body);
     const lpoItems = req.body;
@@ -1373,7 +1376,7 @@ app.post("/api/save-qtTermsCond", async (req, res) => {
 ///Quote Save
 
 
-app.post("/api/save-fabinv", async (req, res) => {
+app.post("/save-fabinv", async (req, res) => {
   try {
     console.log("save-Proj.Invoice ==>", req.body);
     const { fabInvNet, sretItems } = req.body;
@@ -1396,7 +1399,7 @@ app.post("/api/save-fabinv", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `INSERT INTO fab_inv_hdr (
           INV_NO, INV_DATE, CUST_CODE, JOB_NO,
           LPO_NO, LPO_DATE, DO_NO, DO_DATE,
@@ -1523,7 +1526,7 @@ app.post("/api/save-fabinv", async (req, res) => {
 
 
 
-app.post("/api/save-siv", async (req, res) => {
+app.post("/save-siv", async (req, res) => {
   try {
     console.log("SIV Save ==>", req.body);
     const { netData, itemsData } = req.body;
@@ -1531,7 +1534,7 @@ app.post("/api/save-siv", async (req, res) => {
       return res.status(400).json({ message: "Invalid SRV data format" });
     }
     console.log("SIV_HDR ==>", netData);
-    console.log("SIV_ITEMS Items ==>", itemsData);
+    console.log("siv_items Items ==>", itemsData);
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
@@ -1546,7 +1549,7 @@ app.post("/api/save-siv", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `INSERT INTO siv_hdr (
           SIV_NO,SIV_DATE,JOB_NO,CUST_CODE,NARRATION)
                             VALUES ( ?, ?, ?, ?,?  )
@@ -1627,15 +1630,15 @@ app.post("/api/save-siv", async (req, res) => {
 
 
 
-app.post("/api/save-srv", async (req, res) => {
+app.post("/save-srv", async (req, res) => {
   try {
     console.log("SRV Save ==>", req.body);
     const { netData, itemsData } = req.body;
     if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
       return res.status(400).json({ message: "Invalid SRV data format" });
     }
-    console.log("SRV_HDR ==>", netData);
-    console.log("SRV_ITEMS Items ==>", itemsData);
+    console.log("srv_hdr ==>", netData);
+    console.log("srv_items Items ==>", itemsData);
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
@@ -1650,7 +1653,7 @@ app.post("/api/save-srv", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `INSERT INTO srv_hdr (
           SRV_NO,SRV_DATE,PO_NO,SUP_CODE,NARRATION )
                             VALUES ( ?, ?, ?, ?,?  )
@@ -1671,7 +1674,7 @@ app.post("/api/save-srv", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("Srv_hdr Insert/Update:", result);
+                console.log("srv_hdr Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -1729,7 +1732,7 @@ app.post("/api/save-srv", async (req, res) => {
   }
 });
 
-app.post("/api/save-sret", async (req, res) => {
+app.post("/save-sret", async (req, res) => {
   try {
     console.log("Sales Return ==>", req.body);
     const { sretNet, sretItems } = req.body;
@@ -1752,7 +1755,7 @@ app.post("/api/save-sret", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           const netQuery = `INSERT INTO sret_hdr (
           SRET_NO,SRET_DATE,INV_NO,CUST_CODE,
           DR_CODE,NARRATION1,NARRATION2,
@@ -1847,7 +1850,7 @@ app.post("/api/save-sret", async (req, res) => {
 
 
 
-app.post("/api/save-crnote", async (req, res) => {
+app.post("/save-crnote", async (req, res) => {
   try {
     const { CrnHdr } = req.body;
 
@@ -1873,7 +1876,7 @@ app.post("/api/save-crnote", async (req, res) => {
         Amount: formik.values.grossAmt || null,
         VatAmt: formik.values.vatAmount || null*/
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("CrNoteNo, DoDt==>", CrnHdr);
           const netQuery = `
             INSERT INTO crnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, DEBIT_AC, 
@@ -1938,7 +1941,7 @@ app.post("/api/save-crnote", async (req, res) => {
 
 })
 
-app.post("/api/save-drnote", async (req, res) => {
+app.post("/save-drnote", async (req, res) => {
   try {
     const { CrnHdr } = req.body;
 
@@ -1964,7 +1967,7 @@ app.post("/api/save-drnote", async (req, res) => {
         Amount: formik.values.grossAmt || null,
         VatAmt: formik.values.vatAmount || null*/
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("DrNoteNo, DoDt==>", CrnHdr);
           const netQuery = `
             INSERT INTO drnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, CREDIT_AC, 
@@ -2029,7 +2032,7 @@ app.post("/api/save-drnote", async (req, res) => {
 
 })
 
-app.post("/api/save-do", async (req, res) => {
+app.post("/save-do", async (req, res) => {
   console.log('save-do, start ===>')
   try {
     const { DoHdr, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -2053,7 +2056,7 @@ app.post("/api/save-do", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("DoNo, DoDt==>", DoHdr, DoHdr.DoNo, DoHdr.DoDt);
           const netQuery = `
             INSERT INTO fab_do_hdr ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
@@ -2139,7 +2142,7 @@ app.post("/api/save-do", async (req, res) => {
   }
 });
 ///
-app.post("/api/save-rcp", async (req, res) => {
+app.post("/save-rcp", async (req, res) => {
   console.log("SAVE RECEIPTS");
   try {
     const { vchrData, chqData, tranaccData, InvStlData } = req.body; // Extract form data & grid rows from payload
@@ -2165,10 +2168,10 @@ app.post("/api/save-rcp", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
-               INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
+               INSERT INTO vouchers (tran_type, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
                                      CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
                                       AMOUNT) 
                VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
@@ -2202,13 +2205,13 @@ app.post("/api/save-rcp", async (req, res) => {
           });
           // ✅
           if (vchrData.TranType !== "05") {
-            console.log('PDC_RCD insert start');
+            console.log('pdc_rcd insert start');
 
             for (const chq of chqData.filter(chq =>
               chq.ChqNo && chq.ChqNo.trim() !== "")) {
               const chqQuery = `
                   INSERT INTO pdc_rcd (
-                    TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
+                    tran_type, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
                     PDC_CODE, CUST_CODE, CHQ_BANK, AMOUNT, NARRATION
                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE
@@ -2248,11 +2251,11 @@ app.post("/api/save-rcp", async (req, res) => {
               });
             }
           }
-          console.log('TRAN_ACC insert start', tranaccData);
+          console.log('tran_acc insert start', tranaccData);
           for (const trn of tranaccData) {
             const tranQuery = `
                   INSERT INTO tran_acc (
-                    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
+                    tran_type, VCHR_NO, DATTE, SR_NO,ACC_CODE,
                      AMOUNT, DB_CR,NARRATION1,NARRATION2
                   ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?)
                   ON DUPLICATE KEY UPDATE
@@ -2337,7 +2340,7 @@ app.post("/api/save-rcp", async (req, res) => {
               console.error("Commit Error:", err);
               return res.status(500).json({ message: "Commit error", error: err });
             }
-            console.log('PDC_RCD insert end');
+            console.log('pdc_rcd insert end');
             conn.release(); // Release the connection back to the pool
             res.json({ message: "Data saved successfully!" });
           });
@@ -2356,7 +2359,7 @@ app.post("/api/save-rcp", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error :Bank Receipt Voucher ", error });
   }
 })
-app.post("/api/save-frgnpurch", async (req, res) => {
+app.post("/save-frgnpurch", async (req, res) => {
   try {
     const { netData, expData, itemsData } = req.body; // Extract form data & grid rows from payload
 
@@ -2379,7 +2382,7 @@ app.post("/api/save-frgnpurch", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO pur_frgn_hdr (PJV_NO, PJV_DATE,INV_NO, INV_DATE, PO_NO,SUP_CODE,
@@ -2414,7 +2417,7 @@ app.post("/api/save-frgnpurch", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("NGP_NET Insert/Update:", result);
+                console.log("ngp_net Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -2492,7 +2495,7 @@ app.post("/api/save-frgnpurch", async (req, res) => {
 ///
 
 
-app.post("/api/save-sadj", async (req, res) => {
+app.post("/save-sadj", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
 
@@ -2515,10 +2518,10 @@ app.post("/api/save-sadj", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
-            INSERT INTO STK_hdr (VCHR_NO, VCHR_DATE,NARRATION) 
+            INSERT INTO stk_hdr (VCHR_NO, VCHR_DATE,NARRATION) 
             VALUES (?, ?, ?) 
             ON DUPLICATE KEY UPDATE 
             VCHR_DATE= VALUES(VCHR_DATE),
@@ -2534,7 +2537,7 @@ app.post("/api/save-sadj", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("STK_HDR Insert/Update:", result);
+                console.log("stk_hdr Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -2589,7 +2592,7 @@ app.post("/api/save-sadj", async (req, res) => {
 });
 
 
-app.post("/api/save-gtrn", async (req, res) => {
+app.post("/save-gtrn", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
 
@@ -2612,7 +2615,7 @@ app.post("/api/save-gtrn", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO gtrn_hdr (GTRN_NO, GTRN_DATE,GTRN_NARRATION, LOC_FROM,LOC_TO) 
@@ -2690,9 +2693,9 @@ app.post("/api/save-gtrn", async (req, res) => {
 });
 
 // Sample API: Get supplier list from MySQL database
-app.get("/api/suplst", function (req, res) {
+app.get("/suplst", function (req, res) {
   console.log("Supplier List Request  (lov)");
-  //const tableName= "SUP_MST";
+  //const tableName= "sup_mst";
   // Query to fetch supplier data from MySQL database
   connection.query(
     "SELECT SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3, SUP_TEL1, " +
@@ -2710,7 +2713,7 @@ app.get("/api/suplst", function (req, res) {
   );
 });
 
-app.get("/api/cmpdetails", function (req, res) {
+app.get("/cmpdetails", function (req, res) {
   // const tableName= "COMPANY";
   connection.query(
     "select NAME, PLACE, ADDRESS1 " + " FROM company",
@@ -2728,7 +2731,7 @@ app.get("/api/cmpdetails", function (req, res) {
   );
 });
 
-app.get("/api/SupAgeingInv", function (req, res) {
+app.get("/SupAgeingInv", function (req, res) {
   const as_at_date = req.query.as_at_date ||
     new Date().toISOString().split('T')[0];
   // const p_sman = req.query.p_sman ? req.query.p_sman.trim().toUpperCase() : null;
@@ -2753,7 +2756,7 @@ app.get("/api/SupAgeingInv", function (req, res) {
   );
 });
 
-app.get("/api/CusAgeingInv", function (req, res) {
+app.get("/CusAgeingInv", function (req, res) {
   const as_at_date = req.query.as_at_date ||
     new Date().toISOString().split('T')[0];
   const p_sman = req.query.p_sman ? req.query.p_sman.trim().toUpperCase() : null;
@@ -2778,13 +2781,13 @@ app.get("/api/CusAgeingInv", function (req, res) {
   );
 });
 
-app.get("/api/CustSt", function (req, res) {
+app.get("/CustSt", function (req, res) {
   const as_on_date = req.query.as_on_date || new Date().toISOString().split('T')[0];
   const p_cus = req.query.p_cus ? req.query.p_cus.trim().toUpperCase() : null;
 
   console.log("CustSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT CUST_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
+  let sql = "SELECT CUST_CODE, tran_type, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
     " NAR, DR_AMT, CR_AMT, BALANCE" +
     " FROM v_cust_outstanding_bill" +
     " WHERE DATTE < ?";
@@ -2808,13 +2811,13 @@ app.get("/api/CustSt", function (req, res) {
   });
 });
 
-app.get("/api/SupSt", function (req, res) {
+app.get("/SupSt", function (req, res) {
   const as_on_date = req.query.as_on_date || new Date().toISOString().split('T')[0];
   const p_cus = req.query.p_cus ? req.query.p_cus.trim().toUpperCase() : null;
 
   console.log("SupSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT ACC_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
+  let sql = "SELECT ACC_CODE, tran_type, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
     "  DR_AMT, CR_AMT, BALANCE,'' AS NAR" +
     " FROM v_sup_outstanding_bill" +
     " WHERE DATTE < ?";
@@ -2838,11 +2841,11 @@ app.get("/api/SupSt", function (req, res) {
   });
 });
 
-app.get("/api/InvStlCust/:custcd", function (req, res) {
+app.get("/InvStlCust/:custcd", function (req, res) {
   B
   console.log("InvStlCust", req.params.custcd);
   connection.query(
-    "SELECT ACC_CODE CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
+    "SELECT ACC_CODE CUST_CODE, VCHR_NO DOC_NO, tran_type DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
     "FROM v_cust_outstanding_bill WHERE ACC_CODE = ?",
     [req.params.custcd],
@@ -2861,10 +2864,10 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
   );
 });
 
-app.get("/api/InvStlSup/:custcd", function (req, res) {
+app.get("/InvStlSup/:custcd", function (req, res) {
   console.log("InvStlSup", req.params.custcd);
   connection.query(
-    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, '' AS NAR," +
+    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, tran_type DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, '' AS NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
     "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ?",
     [req.params.custcd],
@@ -2936,7 +2939,7 @@ app.get("/api/InvStlSup/:custcd", function (req, res) {
   }
   
 });*/
-app.put("/api/saveInvItems", function (req, res) {
+app.put("/saveInvItems", function (req, res) {
   const receivedData = req.body.data;
 
   // Check if receivedData is an array
@@ -3011,7 +3014,7 @@ app.put("/api/saveInvItems", function (req, res) {
   processRows();
 });
 ////
-app.post("/api/saveLpoItems", async function (req, res) {
+app.post("/saveLpoItems", async function (req, res) {
   const receivedData = req.body.data;
   console.log("receivedData--", receivedData);
   // Check if receivedData is an array
@@ -3076,7 +3079,7 @@ app.post("/api/saveLpoItems", async function (req, res) {
     if (row.isNew === true) {
       console.log("Server Update Lpoitems");
       const result = await connection.execute(
-        "UPDATE LPO_ITEMS SET ITEM_CODE = :1, ITEM_NAME = :2, QTY = :3, RATE = :4, UNIT = :5, CAT_CODE = :6 WHERE LPO_NO = :7 AND SR_NO = :8",
+        "UPDATE lpo_items SET ITEM_CODE = :1, ITEM_NAME = :2, QTY = :3, RATE = :4, UNIT = :5, CAT_CODE = :6 WHERE LPO_NO = :7 AND SR_NO = :8",
         [
           row.ITEM_CODE,
           row.ITEM_NAME,
@@ -3136,14 +3139,14 @@ app.post("/api/saveLpoItems", async function (req, res) {
 
 ///
 //rest api to get all results
-/* connection.query('select SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3,  SUP_TEL1 ,EMAIL from SUP_MST ORDER BY SUP_NAME', function (error, results, fields) {
+/* connection.query('select SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3,  SUP_TEL1 ,EMAIL from sup_mst ORDER BY SUP_NAME', function (error, results, fields) {
    if (error) throw error;
    res.end(JSON.stringify(results));
  });
 });*/
 
 //rest api to get a single employee data
-app.get("/api/supplier/:id", function (req, res) {
+app.get("/supplier/:id", function (req, res) {
 
   // console.log("Supplier Edit ");
   connection.query(
@@ -3241,7 +3244,7 @@ app.post("/api/sup-save", async (req, res) => {
   });
 });
 //delete Sup DELETE RECORD
-app.delete("/api/supDelete/:id", function (req, res, next) {
+app.delete("/supDelete/:id", function (req, res, next) {
   var sql = "DELETE FROM sup_mst WHERE SUP_CODE = ?";
   connection.query(sql, [req.params.id], function (err, result) {
     if (err) throw err;
@@ -3294,9 +3297,9 @@ app.post("/api/save-customer", (req, res) => {
   });
 });
 
-app.get("/api/cuslst", function (req, res) {
+app.get("/cuslst", function (req, res) {
   console.log("Cuslist");
-  // const tableName= "CUS_MST";
+  // const tableName= "cus_mst";
   connection.query(
 
     "select CUST_CODE, CUST_NAME, CUST_ADR1,CUST_ADR2, CUST_ADR3," +
@@ -3320,7 +3323,7 @@ app.get("/api/cuslst", function (req, res) {
   );
 });
 
-app.get("/api/cuslovdropdown", function (req, res) {
+app.get("/cuslovdropdown", function (req, res) {
   console.log("CusLOV Dropdown");
 
   connection.query(
@@ -3335,7 +3338,7 @@ app.get("/api/cuslovdropdown", function (req, res) {
   );
 });
 
-app.get("/api/cuslov/:cname", function (req, res) {
+app.get("/cuslov/:cname", function (req, res) {
   connection.query(
     "select CUST_CODE, LTRIM(CUST_NAME) CUST_NAME, CUST_ADR1" +
     " from cus_mst  WHERE CUST_NAME LIKE :1 ORDER BY LTRIM(CUST_NAME)",
@@ -3350,7 +3353,7 @@ app.get("/api/cuslov/:cname", function (req, res) {
   );
 });
 //col === "screwdriver" ? " selected " : "")
-app.get("/api/customer/:id", function (req, res) {
+app.get("/customer/:id", function (req, res) {
   console.log("Customer Edit 1", req.params.id);
 
   const sql = `
@@ -3374,7 +3377,7 @@ app.get("/api/customer/:id", function (req, res) {
 
 //
 
-app.get("/api/MaxVchrNo/:Tp", function (req, res) {
+app.get("/MaxVchrNo/:Tp", function (req, res) {
   console.log("MaxVchrNo TranType(Tp)", req.params.Tp);
   // var pool = orcl1.getPool();
   // pool.getConnection(function (err, conn) {
@@ -3445,7 +3448,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-      "select MAX(VCHR_NO)   MXVCHR  FROM tran_acc WHERE TRAN_TYPE =?",
+      "select MAX(VCHR_NO)   MXVCHR  FROM tran_acc WHERE tran_type =?",
       [req.params.Tp],
 
       function (err, result) {
@@ -3464,7 +3467,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
 
 
 // lpoitems
-app.get("/api/lpoitemget", function (req, res) {
+app.get("/lpoitemget", function (req, res) {
   console.log(req.params);
   connection.query(
     "select LPO_NO,SR_NO, JOB_NO, ITEM_CODE,ITEM_NAME, QTY, UNIT," +
@@ -3476,11 +3479,11 @@ app.get("/api/lpoitemget", function (req, res) {
       //console.log(results);
       res.end(JSON.stringify(results));
       conn.close();
-      //FROM CUS_MST WHERE CUST_CODE=?
+      //FROM cus_mst WHERE CUST_CODE=?
     }
   );
 });
-app.get("/api/invadj/:tp/:vchr", function (req, res) {
+app.get("/invadj/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
 
   var pool = orcl1.getPool();
@@ -3504,15 +3507,15 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
     );
   });
 });
-app.get("/api/vouchers/:tp/:vchr", function (req, res) {
+app.get("/vouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
-    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
-    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
+    "select a.tran_type,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
+    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,C.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  cus_mst b ON a.CUST_CODE = b.CUST_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
-    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO =?   ",
+    " WHERE a.tran_type = ? AND a.VCHR_NO =?   ",
     [req.params.tp, req.params.vchr],
     function (err, results, fields) {
       if (err) {
@@ -3526,15 +3529,15 @@ app.get("/api/vouchers/:tp/:vchr", function (req, res) {
     }
   );
 });
-app.get("/api/payvoucher/:tp/:vchr", function (req, res) {
+app.get("/payvoucher/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
-    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
-    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
+    "select a.tran_type,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
+    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,C.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
-    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO =?   ",
+    " WHERE a.tran_type = ? AND a.VCHR_NO =?   ",
     [req.params.tp, req.params.vchr],
     function (err, results, fields) {
       if (err) {
@@ -3637,10 +3640,10 @@ app.get("/api/bankRecon/ledger/", function (req, res) {
 
   console.log("Bank Reco:", bankCode, startDate, endDate);
   connection.query(
-    "select a.TRAN_TYPE AS TRAN_TYPE,a.VCHR_NO AS VCHR_NO ," +
+    "select a.tran_type AS tran_type,a.VCHR_NO AS VCHR_NO ," +
     "DATE_FORMAT(a.DATTE,'%d/%m/%Y') as DATTE, " +
     " a.NARRATION1 AS DETAILS," +
-    " a.CHQ_NO as CHQ_NO,DATE_FORMAT(a.CHQ_DATE,'%d/%m/%Y') AS CHQ_DATE, DEBIT,CREDIT FROM V_BANK_RECO a  " +
+    " a.CHQ_NO as CHQ_NO,DATE_FORMAT(a.CHQ_DATE,'%d/%m/%Y') AS CHQ_DATE, DEBIT,CREDIT FROM  v_bank_reco a  " +
     "WHERE  a.ACC_CODE = ? " +
     "AND a.DATTE BETWEEN ? AND ? ORDER BY a.CHQ_DATE",
     [bankCode, startDate, endDate],
@@ -3805,7 +3808,7 @@ app.post('/api/bankRecon/save', async (req, res) => {
   }
 });
 
-app.get("/api/bankrecolst", function (req, res) {
+app.get("/bankrecolst", function (req, res) {
   // console.log('Sales Enq.Type. ');
 
   connection.query(
@@ -3823,28 +3826,28 @@ app.get("/api/bankrecolst", function (req, res) {
     }
   );
 });
-app.get("/api/accled/:acc/:dt1/:dt2", function (req, res) {
+app.get("/accled/:acc/:dt1/:dt2", function (req, res) {
   console.log("Accled", req.params);
   console.log("date=", req.params.dt1.substring(4, 16).trim());
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
-    /*select TRAN_ACC.ROWID,ROWNUM SR_NO,TRAN_TYPE,VCHR_NO,"+
+    /*select tran_acc.ROWID,ROWNUM SR_NO,tran_type,VCHR_NO,"+
     "To_char(DATTE,'DD/MM/YYYY') DATTE, TO_CHAR(DATTE,'YY/MM/DD') DTSORT,"+
     " ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
     " NARRATION2, JOB_NO,USERNAME," +
     " DECODE(DB_CR,'D', AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', AMOUNT, 0 ) CREDIT_AMT,  " +
-    " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM TRAN_ACC, V_ALL_CHEQUES b "+
-    " WHERE TRAN_ACC.TRAN_TYPE=b.TRAN_TYPE(+) AND TRAN_ACC.VCHR_NO=b.VCHR_NO(+) " +
-    " AND TRAN_ACC.ACC_CODE = :1 ORDER BY 6"*/
+    " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc, V_ALL_CHEQUES b "+
+    " WHERE tran_acc.tran_type=b.tran_type(+) AND tran_acc.VCHR_NO=b.VCHR_NO(+) " +
+    " AND tran_acc.ACC_CODE = :1 ORDER BY 6"*/
     conn.execute(
-      "select a.ROWID,ROWNUM SR_NO,a.TRAN_TYPE,a.VCHR_NO," +
+      "select a.ROWID,ROWNUM SR_NO,a.tran_type,a.VCHR_NO," +
       "To_char(a.DATTE,'DD/MM/YYYY') DATTE, TO_CHAR(a.DATTE,'YY/MM/DD') DTSORT," +
       "a.ACC_CODE,a.AMOUNT, a.DB_CR, a.NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME,   " +
       " DECODE(DB_CR,'D', a.AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', a.AMOUNT, 0 ) CREDIT_AMT, " +
-      " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc a, V_ALL_CHEQUES b  " +
-      "WHERE a.TRAN_TYPE=b.TRAN_TYPE(+) AND a.VCHR_NO=b.VCHR_NO(+) " +
+      " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc a, v_all_cheques b  " +
+      "WHERE a.tran_type=b.tran_type(+) AND a.VCHR_NO=b.VCHR_NO(+) " +
       "AND a.ACC_CODE = :1 " +
       "AND a.DATTE BETWEEN TO_DATE(:2,'DD/MM/YY') AND  TO_DATE(:3,'DD/MM/YY') ORDER BY 6",
       [req.params.acc, req.params.dt1, req.params.dt2],
@@ -3864,7 +3867,7 @@ app.get("/api/accled/:acc/:dt1/:dt2", function (req, res) {
   });
 });
 
-app.get("/api/accOpbal", function (req, res) {
+app.get("/accOpbal", function (req, res) {
 
   // console.log("date=",req.params.dt1.substring(4, 16).trim());
 
@@ -3889,7 +3892,7 @@ app.get("/api/accOpbal", function (req, res) {
 });
 
 
-app.get("/api/ledopbal/:acc/:dt1", function (req, res) {
+app.get("/ledopbal/:acc/:dt1", function (req, res) {
   console.log("Accled O/p Bal", req.params);
   // console.log("date=",req.params.dt1.substring(4, 16).trim());
 
@@ -3917,19 +3920,19 @@ app.get("/api/ledopbal/:acc/:dt1", function (req, res) {
   });
 });
 
-app.get("/api/tranacc/:tp/:vchr", function (req, res) {
+app.get("/tranacc/:tp/:vchr", function (req, res) {
   console.log("tranacc entered :", req.params);
   connection.query(
-    "  SELECT a.SR_NO, a.TRAN_TYPE,a.VCHR_NO, DATE_FORMAT(a.DATTE, '%d/%m/%Y')  DATTE," +
+    "  SELECT a.SR_NO, a.tran_type,a.VCHR_NO, DATE_FORMAT(a.DATTE, '%d/%m/%Y')  DATTE," +
     "   a.ACC_CODE, a.AMOUNT,  a.DB_CR, a.NARRATION1,a.NARRATION2, a.JOB_NO, " +
     "   a.USERNAME,b.AC_HEAD AS ACC_HEAD , " +
     "   CASE WHEN a.DB_CR = 'D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc  a " +
     " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
-    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ?",
+    " WHERE a.tran_type = ? AND a.VCHR_NO = ?",
     [req.params.tp, req.params.vchr],
-    //LEFT JOIN = ALL ROWS OF LEFT TABLE  (TRAN_ACC Here)
+    //LEFT JOIN = ALL ROWS OF LEFT TABLE  (tran_acc Here)
     function (err, result) {
       if (err) {
         console.error("Error executing query: ", err.message);
@@ -3942,17 +3945,17 @@ app.get("/api/tranacc/:tp/:vchr", function (req, res) {
   );
 });
 
-app.get("/api/tranaccDR/:tp/:vchr", function (req, res) {
+app.get("/tranaccDR/:tp/:vchr", function (req, res) {
   console.log("tranacc", req.params);
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     //
     conn.execute(
-      "select TRAN_ACC.ROWID,ROWNUM SR_NO,TRAN_TYPE,VCHR_NO,DATTE, ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
+      "select tran_acc.ROWID,ROWNUM SR_NO,tran_type,VCHR_NO,DATTE, ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME," +
       "DECODE(DB_CR,'D', AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', AMOUNT, 0 ) CREDIT_AMT,  " +
-      "AC_NAME ACC_HEAD FROM tran_acc, ac_list  WHERE ACC_CODE = AC_CODE AND TRAN_TYPE = :1 AND VCHR_NO =:2  and DB_CR='D'",
+      "AC_NAME ACC_HEAD FROM tran_acc, ac_list  WHERE ACC_CODE = AC_CODE AND tran_type = :1 AND VCHR_NO =:2  and DB_CR='D'",
       [req.params.tp, req.params.vchr],
       {
         outFormat: orcl1.OBJECT,
@@ -3970,14 +3973,14 @@ app.get("/api/tranaccDR/:tp/:vchr", function (req, res) {
   });
 });
 
-app.get("/api/pdcrcd/:tp/:vchr", function (req, res) {
+app.get("/pdcrcd/:tp/:vchr", function (req, res) {
   console.log("Cheque", req.params);
 
   connection.query(
-    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE tran_type = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -3994,14 +3997,14 @@ app.get("/api/pdcrcd/:tp/:vchr", function (req, res) {
 });
 
 
-app.get("/api/pdcisu/:tp/:vchr", function (req, res) {
+app.get("/pdcisu/:tp/:vchr", function (req, res) {
   console.log("Cheque", req.params);
 
   connection.query(
-    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_isu WHERE tran_type = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -4016,14 +4019,14 @@ app.get("/api/pdcisu/:tp/:vchr", function (req, res) {
     }
   );
 });
-app.get("/api/pdcrcdreg/:tp/", function (req, res) {
+app.get("/pdcrcdreg/:tp/", function (req, res) {
   console.log("tranacc", req.params);
   const { start_date, end_date } = req.query;
   connection.query(
-    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE tran_type = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -4040,7 +4043,7 @@ app.get("/api/pdcrcdreg/:tp/", function (req, res) {
 });
 
 //
-app.get("/api/lpoMaxNo", function (req, res) {
+app.get("/lpoMaxNo", function (req, res) {
   console.log("lpoMaxNo");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -4064,7 +4067,7 @@ app.get("/api/lpoMaxNo", function (req, res) {
   });
 });
 //Customer Put - ADD
-app.post("/api/lpoupd", function (req, res, next) {
+app.post("/lpoupd", function (req, res, next) {
   Pmode = "INSERT";
   let lpo = req.body;
   console.log("Entered lpoud SERVER");
@@ -4090,7 +4093,7 @@ app.post("/api/lpoupd", function (req, res, next) {
     conn.close();
   });
 });
-app.post("/api/lpoHdrUpd", function (req, res, next) {
+app.post("/lpoHdrUpd", function (req, res, next) {
   Pmode = "INSERT";
   let lpo = req.body;
   console.log("Entered lpoHdrUpd SERVER");
@@ -4112,7 +4115,7 @@ app.post("/api/lpoHdrUpd", function (req, res, next) {
     conn.close();
   });
 });
-app.get("/api/fpoMaxNo", function (req, res) {
+app.get("/fpoMaxNo", function (req, res) {
   console.log("fpoMaxNo");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -4136,7 +4139,7 @@ app.get("/api/fpoMaxNo", function (req, res) {
   });
 });
 
-app.get("/api/Rplnlst", function (req, res) {
+app.get("/Rplnlst", function (req, res) {
   console.log("Report Line List ");
 
   //const tableName= "RPLN_MST";
@@ -4155,7 +4158,7 @@ app.get("/api/Rplnlst", function (req, res) {
     }
   );
 });
-app.get("/api/RplnMst/:id", function (req, res) {
+app.get("/RplnMst/:id", function (req, res) {
   //const RplnData = req.body;
   console.log("Report Line Get ", req.params.id);
 
@@ -4203,9 +4206,9 @@ app.post("/api/save-rpln", (req, res) => {
     res.json({ message: "Main Group inserted/updated successfully", result });
   });
 });
-app.get("/api/Gllst", function (req, res) {
+app.get("/Gllst", function (req, res) {
   console.log("Gl List ");
-  // const tableName= "GL_MST";
+  // const tableName= "gl_mst";
   connection.query(
     "select REPORT_LN, GL_CODE, GL_HEAD from gl_mst ORDER BY REPORT_LN,GL_CODE",
     {},
@@ -4223,9 +4226,9 @@ app.get("/api/Gllst", function (req, res) {
   );
 });
 
-app.get("/api/banklst", function (req, res) {
+app.get("/banklst", function (req, res) {
   console.log("Bank List ");
-  // const tableName= "BANK_MST";
+  // const tableName= "bank_mst";
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4246,7 +4249,7 @@ app.get("/api/banklst", function (req, res) {
     );
   });
 });
-app.get("/api/Aclist/:id", function (req, res) {
+app.get("/Aclist/:id", function (req, res) {
   console.log("Aclist ");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -4268,7 +4271,7 @@ app.get("/api/Aclist/:id", function (req, res) {
     );
   });
 });
-app.get("/api/Aclist", function (req, res) {
+app.get("/Aclist", function (req, res) {
   console.log("Aclist ");
 
   connnection.execute(
@@ -4284,7 +4287,7 @@ app.get("/api/Aclist", function (req, res) {
     }
   );
 });
-app.get("/api/Accsubcatlist", function (req, res) {
+app.get("/Accsubcatlist", function (req, res) {
   console.log("AccSubCat ");
 
   connection.query(
@@ -4302,14 +4305,14 @@ app.get("/api/Accsubcatlist", function (req, res) {
 });
 
 //update gl_mst
-app.put("/api/glmst/:id", function (req, res, next) {
+app.put("/glmst/:id", function (req, res, next) {
   let bank1 = req.body;
 
   console.log("GL Edit ");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "UPDATE GL_MST SET GL_HEAD=:1, GL_CODE=:2 ," +
+      "UPDATE gl_mst SET GL_HEAD=:1, GL_CODE=:2 ," +
       " REPORT_LN =:3" +
       " where REPORT_LN=:4 and GL_CODE =:5",
       [
@@ -4334,9 +4337,9 @@ app.put("/api/glmst/:id", function (req, res, next) {
 
 
 
-app.get("/api/acclist", function (req, res) {
+app.get("/Acclist", function (req, res) {
   console.log("Acc mst List ");
-  //const tableName= "ACC_MST";
+  //const tableName= "acc_mst";
   connection.query(
     " SELECT A.REPORT_LN, A.GL_CODE, B.GL_HEAD, A.ACC_CODE, A.ACC_HEAD " +
     " FROM acc_mst A " +
@@ -4402,7 +4405,7 @@ app.post("/api/save-accmst", (req, res) => {
   });
 });
 
-app.get("/api/banklst", function (req, res) {
+app.get("/banklst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4423,7 +4426,7 @@ app.get("/api/banklst", function (req, res) {
     );
   });
 });
-app.get("/api/bankmst/:id", function (req, res) {
+app.get("/bankmst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4444,7 +4447,7 @@ app.get("/api/bankmst/:id", function (req, res) {
     );
   });
 });
-app.put("/api/bankmst/:id", function (req, res, next) {
+app.put("/bankmst/:id", function (req, res, next) {
   let bank1 = req.body;
   console.log("bank edt", bank1);
 
@@ -4452,7 +4455,7 @@ app.put("/api/bankmst/:id", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     // console.log("Tran type Update on Server *1 " + req.params.id + " * 1st ");
     conn.execute(
-      "UPDATE BANK_MST SET BANK_NAME=:1 " + " where BANK_CODE=:2 ",
+      "UPDATE bank_mst SET BANK_NAME=:1 " + " where BANK_CODE=:2 ",
       [bank1.bankname, bank1.bankcode],
       {
         outFormat: orcl1.OBJECT,
@@ -4467,7 +4470,7 @@ app.put("/api/bankmst/:id", function (req, res, next) {
   });
 });
 
-app.get("/api/nationmst/:id", function (req, res) {
+app.get("/nationmst/:id", function (req, res) {
   console.log("nation_mst Id", req.params.id);
   connection.query(
     "select NATION_CODE, NATION_NAME ,NATIONALITY, CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
@@ -4486,7 +4489,7 @@ app.get("/api/nationmst/:id", function (req, res) {
   );
 });
 
-app.get("/api/currencymst/:id", function (req, res) {
+app.get("/currencymst/:id", function (req, res) {
   console.log("nation_mst Id", req.params.id);
   connection.query(
     "select NATION_CODE, NATION_NAME ,NATIONALITY, CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
@@ -4504,7 +4507,7 @@ app.get("/api/currencymst/:id", function (req, res) {
     }
   );
 });
-app.get("/api/currencylov", function (req, res) {
+app.get("/currencylov", function (req, res) {
   console.log("Currency List");
   connection.query(
     "select CUR_CODE, CUR_NAME,DHS_CONV_RATE" +
@@ -4550,11 +4553,11 @@ app.post("/api/save-nationmst", (req, res) => {
 });
 
 
-app.get("/api/trantypelst", function (req, res) {
+app.get("/trantypelst", function (req, res) {
   // const tableName= "tran_type";
 
   connection.query(
-    "select TRAN_TYPE,TYPE_DES, TYPE_ABBR from tran_type ORDER BY TRAN_TYPE",
+    "select tran_type,TYPE_DES, TYPE_ABBR from tran_type ORDER BY tran_type",
     [],
 
     function (error, result) {
@@ -4568,14 +4571,14 @@ app.get("/api/trantypelst", function (req, res) {
     });
 
 });
-app.get("/api/trantypent/:id", function (req, res) {
+app.get("/trantypent/:id", function (req, res) {
   console.log("Tran.Type Edit ");
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select TRAN_TYPE, TYPE_DES, TYPE_ABBR" +
-      " FROM tran_type WHERE TRAN_TYPE=:id",
+      "select tran_type, TYPE_DES, TYPE_ABBR" +
+      " FROM tran_type WHERE tran_type=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -4593,15 +4596,15 @@ app.get("/api/trantypent/:id", function (req, res) {
   });
 });
 //update gl_mst
-app.put("/api/trantypent/:id", function (req, res, next) {
+app.put("/trantypent/:id", function (req, res, next) {
   let bank1 = req.body;
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "UPDATE TRAN_TYPE SET TYPE_DES=:1, TRAN_TYPE=:2 ," +
+      "UPDATE tran_type SET TYPE_DES=:1, tran_type=:2 ," +
       " TYPE_ABBR =:3" +
-      " where TRAN_TYPE=:4 ",
+      " where tran_type=:4 ",
       [bank1.typedes, bank1.trantype, bank1.typeabbr, bank1.trantype],
       {
         outFormat: orcl1.OBJECT,
@@ -4616,7 +4619,7 @@ app.put("/api/trantypent/:id", function (req, res, next) {
   });
 });
 
-app.get("/api/nationlst", function (req, res) {
+app.get("/nationlst", function (req, res) {
   console.log("Nation List ");
   // const tableName= "NATION_MST";
   connection.query(
@@ -4636,7 +4639,7 @@ app.get("/api/nationlst", function (req, res) {
   );
 });
 
-app.get("/api/loclist", function (req, res) {
+app.get("/loclist", function (req, res) {
   //console.log('Loc.List ');
 
   connection.query(
@@ -4655,7 +4658,7 @@ app.get("/api/loclist", function (req, res) {
   );
 });
 
-app.get("/api/locent/:id", function (req, res) {
+app.get("/locent/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4675,7 +4678,7 @@ app.get("/api/locent/:id", function (req, res) {
     );
   });
 });
-app.post("/api/locent", function (req, res) {
+app.post("/locent", function (req, res) {
   //insert
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -4705,7 +4708,7 @@ app.post("/api/locent", function (req, res) {
   });
 });
 
-app.put("/api/locent/:id", function (req, res) {
+app.put("/locent/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4727,7 +4730,7 @@ app.put("/api/locent/:id", function (req, res) {
     );
   });
 });
-app.delete("/api/locdel/:id", function (req, res) {
+app.delete("/locdel/:id", function (req, res) {
   // console.log("Oracle  -Loc delete entered");
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -4754,7 +4757,7 @@ app.delete("/api/locdel/:id", function (req, res) {
     );
   });
 });
-app.get("/api/Vatlst", function (req, res) {
+app.get("/Vatlst", function (req, res) {
   //console.log('Salesman List ');
   //const tableName = 'VAT_MST';
   connection.query(
@@ -4772,7 +4775,7 @@ app.get("/api/Vatlst", function (req, res) {
     }
   );
 });
-app.get("/api/vatmst/:id", function (req, res) {
+app.get("/vatmst/:id", function (req, res) {
 
   connection.query(
     "select * FROM vat_mst WHERE VAT_REG_NO=? ",
@@ -4818,7 +4821,7 @@ app.post("/api/save-mst", (req, res) => {
   });
 });
 
-app.get("/api/Smanlst", function (req, res) {
+app.get("/Smanlst", function (req, res) {
   //console.log('Salesman List ');
   // const tableName = 'SMAN_MST';
   connection.query(
@@ -4835,7 +4838,7 @@ app.get("/api/Smanlst", function (req, res) {
   );
 });
 
-app.get("/api/smanmst/:id", function (req, res) {
+app.get("/smanmst/:id", function (req, res) {
 
   connection.query(
     "select SMAN_CODE, SMAN_NAME ,SMAN_MOBILE,SMAN_DESIGNATION,SMAN_EMAIL, USER_NAME, LOGIN_USER," +
@@ -4876,7 +4879,7 @@ app.post("/api/save-smanmst", (req, res) => {
     res.json({ message: "Sales-Man inserted/updated successfully", result });
   });
 })
-app.get("/api/qttrmlst", function (req, res) {
+app.get("/qttrmlst", function (req, res) {
 
   connection.query(
     "select SR_NO, TERMS_HDR, TERMS_DETAILS" +
@@ -4893,7 +4896,7 @@ app.get("/api/qttrmlst", function (req, res) {
     }
   );
 });
-app.get("/api/qtTechDtl/:id", function (req, res) {
+app.get("/qtTechDtl/:id", function (req, res) {
 
   connection.query(
     "select Distinct SR_NO, para_id, TECH_DETAIL_LINE" +
@@ -4910,7 +4913,7 @@ app.get("/api/qtTechDtl/:id", function (req, res) {
     }
   );
 })
-app.get("/api/qtTermEntQt/:id", function (req, res) {
+app.get("/qtTermEntQt/:id", function (req, res) {
 
   connection.query(
     "select Distinct SR_NO, TERMS_HDR, TERMS_DETAILS" +
@@ -4927,7 +4930,7 @@ app.get("/api/qtTermEntQt/:id", function (req, res) {
     }
   );
 });
-app.get("/api/quotnotes/:id", function (req, res) {
+app.get("/quotnotes/:id", function (req, res) {
 
   connection.query(
     "select Distinct SR_NO, NOT_ES" +
@@ -4944,7 +4947,7 @@ app.get("/api/quotnotes/:id", function (req, res) {
     }
   );
 });
-app.get("/api/qtDocUpload/:id", function (req, res) {
+app.get("/qtDocUpload/:id", function (req, res) {
 
   connection.query(
     "select Distinct QUOT_NO,SR_NO, INQ_DOC" +
@@ -4962,7 +4965,7 @@ app.get("/api/qtDocUpload/:id", function (req, res) {
   );
 });
 //"LPO_NO", "LPO_DATE", "SUP_CODE", "CANCELLED", "REQ_NO","APPROVED_BY"
-app.get("/api/quotetrment/:id", function (req, res) {
+app.get("/quotetrment/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -4986,7 +4989,7 @@ app.get("/api/quotetrment/:id", function (req, res) {
   });
 });
 //
-app.get("/api/lpolst/:dys", function (req, res) {
+app.get("/lpolst/:dys", function (req, res) {
   console.log("LpoList");
 
   connection.query(
@@ -5007,7 +5010,7 @@ app.get("/api/lpolst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/lporeg", function (req, res) {
+app.get("/lporeg", function (req, res) {
 
   const { start_date, end_date } = req.query; // Retrieve query parameters
 
@@ -5036,7 +5039,7 @@ app.get("/api/lporeg", function (req, res) {
   );
 });
 
-app.get("/api/jobpanels", function (req, res) {
+app.get("/jobpanels", function (req, res) {
   //[req.params.dys],
   connection.query(
     "select a.JOB_NO,a.SR_NO, a.PANEL_REF,a.QTY" +
@@ -5079,7 +5082,7 @@ app.get("/api/jobpanels/:jbNo", function (req, res) {
 
 
 
-app.get("/api/joblist", function (req, res) {
+app.get("/joblist", function (req, res) {
   //[req.params.dys],
   connection.query(
     `SELECT 
@@ -5117,7 +5120,7 @@ app.get("/api/joblist", function (req, res) {
 });
 //
 
-app.get("/api/joblistQuote/:jobNo", function (req, res) {
+app.get("/joblistQuote/:jobNo", function (req, res) {
   //[req.params.dys],
   connection.query(
     "select a.JOB_NO,DATE_FORMAT(a.START_DATE,'%d/%m/%Y') START_DATE, a.CUST_CODE," +
@@ -5139,7 +5142,7 @@ app.get("/api/joblistQuote/:jobNo", function (req, res) {
 });
 
 //
-app.get("/api/fpolst/:dys", function (req, res) {
+app.get("/fpolst/:dys", function (req, res) {
   connection.query(
     "select DISTINCT a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.YR_REF_NO, a.PAY_TERMS,a.CANCELLED, a.REQ_NO, a.PREPARED_BY,a.FPO_NOTES" +
@@ -5159,7 +5162,7 @@ app.get("/api/fpolst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/fporeg", function (req, res) {
+app.get("/fporeg", function (req, res) {
   const { start_date, end_date } = req.query;
   connection.query(
     "select a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
@@ -5181,7 +5184,7 @@ app.get("/api/fporeg", function (req, res) {
     }
   );
 });
-app.get("/api/fponet/:fpoNo", function (req, res) {
+app.get("/fponet/:fpoNo", function (req, res) {
   //const { fpoNo } = req.query;
   console.log('Fpo No:', req.params.fpoNo);
   connection.query(
@@ -5200,7 +5203,7 @@ app.get("/api/fponet/:fpoNo", function (req, res) {
     }
   );
 });
-app.get("/api/fpoitems/:fpoNo", function (req, res) {
+app.get("/fpoitems/:fpoNo", function (req, res) {
   //const { fpoNo } = req.query;
   connection.query(
     "select a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
@@ -5220,7 +5223,7 @@ app.get("/api/fpoitems/:fpoNo", function (req, res) {
     }
   );
 });
-app.get("/api/pinvfrgnlst/:dys", function (req, res) {
+app.get("/pinvfrgnlst/:dys", function (req, res) {
   connection.query(
     "SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m%Y') PJV_DATE, " +
     "a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m%Y') INV_DATE, a.SUP_CODE,b.SUP_NAME,  " +
@@ -5241,7 +5244,7 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
 });
 
 
-app.get("/api/srvlst/:dys", function (req, res) {
+app.get("/srvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m%y') SRV_DATE, a.SUP_CODE," +
@@ -5262,7 +5265,7 @@ app.get("/api/srvlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/srvhdr/:srv", function (req, res) {
+app.get("/srvhdr/:srv", function (req, res) {
 
   //console.log('SRV Hdr. no'||srv);
 
@@ -5284,7 +5287,7 @@ app.get("/api/srvhdr/:srv", function (req, res) {
   );
 });
 
-app.get("/api/srvitems/:srv", function (req, res) {
+app.get("/srvitems/:srv", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') AS SRV_DATE, a.LOC_CODE," +
@@ -5305,7 +5308,7 @@ app.get("/api/srvitems/:srv", function (req, res) {
 });
 
 
-app.get("/api/sivlst/:dys", function (req, res) {
+app.get("/sivlst/:dys", function (req, res) {
 
 
   connection.query(
@@ -5328,7 +5331,7 @@ app.get("/api/sivlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/sivhdr/:siv", function (req, res) {
+app.get("/sivhdr/:siv", function (req, res) {
 
   connection.execute(
     "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y') SIV_DATE, a.CUST_CODE," +
@@ -5347,7 +5350,7 @@ app.get("/api/sivhdr/:siv", function (req, res) {
   );
 });
 
-app.get("/api/sivitems/:siv", function (req, res) {
+app.get("/sivitems/:siv", function (req, res) {
 
   console.log('SIV Items. ');
 
@@ -5369,7 +5372,7 @@ app.get("/api/sivitems/:siv", function (req, res) {
   );
 });
 
-app.get("/api/sivitemsjob/:job", function (req, res) {
+app.get("/sivitemsjob/:job", function (req, res) {
 
   //console.log('SIV Items. ');
 
@@ -5394,7 +5397,7 @@ app.get("/api/sivitemsjob/:job", function (req, res) {
 });
 
 
-app.get("/api/sadjlst", function (req, res) {
+app.get("/sadjlst", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%y') AS VCHR_DATE," +
     "  a.NARRATION" +
@@ -5413,7 +5416,7 @@ app.get("/api/sadjlst", function (req, res) {
   );
 });
 
-app.get("/api/sadjhdr/:siv", function (req, res) {
+app.get("/sadjhdr/:siv", function (req, res) {
   console.log('sadjhdr', req.params.siv);
 
   connection.query(
@@ -5426,14 +5429,14 @@ app.get("/api/sadjhdr/:siv", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("STK_HDR Read", result);
+        console.log("stk_hdr Read", result);
         res.json(result);
       }
     }
   );
 });
 
-app.get("/api/sadjitems/:srv", function (req, res) {
+app.get("/sadjitems/:srv", function (req, res) {
 
   //console.log('SADJ Items. ');
 
@@ -5455,7 +5458,7 @@ app.get("/api/sadjitems/:srv", function (req, res) {
   );
 });
 
-app.get("/api/invlst/:dys", function (req, res) {
+app.get("/invlst/:dys", function (req, res) {
 
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE, a.CUST_CODE," +
@@ -5478,7 +5481,7 @@ app.get("/api/invlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/jobsalreg", function (req, res) {
+app.get("/jobsalreg", function (req, res) {
 
 
   const { start_date, end_date } = req.query;
@@ -5504,7 +5507,7 @@ app.get("/api/jobsalreg", function (req, res) {
 }
 );
 
-app.get("/api/invhdr/:id", function (req, res) {
+app.get("/invhdr/:id", function (req, res) {
   // console.log ('Quotent Params');
   // console.log(req.params.id);
   //const id1 = req.params.id;
@@ -5534,7 +5537,7 @@ app.get("/api/invhdr/:id", function (req, res) {
   });
 });
 
-app.get("/api/invitem/:id", function (req, res) {
+app.get("/invitem/:id", function (req, res) {
 
   //[req.params.po]
   //
@@ -5555,7 +5558,7 @@ app.get("/api/invitem/:id", function (req, res) {
 });
 
 
-app.get("/api/quotlst/:dys", function (req, res) {
+app.get("/quotlst/:dys", function (req, res) {
 
 
   connection.query(
@@ -5581,7 +5584,7 @@ app.get("/api/quotlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/quothdr/:id", function (req, res) {
+app.get("/quothdr/:id", function (req, res) {
 
   const sql = `
     SELECT 
@@ -5620,7 +5623,7 @@ app.get("/api/quothdr/:id", function (req, res) {
 
 
 
-app.get("/api/quotitem/:id", function (req, res) {
+app.get("/quotitem/:id", function (req, res) {
 
   connection.query(
     "select QUOT_NO,  DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y) AS QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
@@ -5638,7 +5641,7 @@ app.get("/api/quotitem/:id", function (req, res) {
   );
 });
 
-app.get("/api/quotent1/:id", function (req, res) {
+app.get("/quotent1/:id", function (req, res) {
   var pool = orcl1.getPool();
   // console.log('QUOTE Entry.'+`${:id}`);
   pool.getConnection(function (err, conn) {
@@ -5661,7 +5664,7 @@ app.get("/api/quotent1/:id", function (req, res) {
   });
 });
 
-app.get("/api/sinqlst/:dys", function (req, res) {
+app.get("/sinqlst/:dys", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('sinq List. ');
@@ -5689,7 +5692,7 @@ app.get("/api/sinqlst/:dys", function (req, res) {
   });
 });
 
-app.get("/api/invlist/:dys", function (req, res) {
+app.get("/invlist/:dys", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('INV.List. ');
@@ -5715,7 +5718,7 @@ app.get("/api/invlist/:dys", function (req, res) {
     );
   });
 });
-app.get("/api/fabinvlist/:dys", function (req, res) {
+app.get("/fabinvlist/:dys", function (req, res) {
 
 
   connection.query(
@@ -5741,7 +5744,7 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
 });
 
 
-app.get("/api/fabinvjob/:job", function (req, res) {
+app.get("/fabinvjob/:job", function (req, res) {
   console.log('FAB INV HDR== param ', req.params.job);
   connection.query(
     "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
@@ -5765,7 +5768,7 @@ app.get("/api/fabinvjob/:job", function (req, res) {
 );
 
 
-app.get("/api/fabinvhdr/:inv", function (req, res) {
+app.get("/fabinvhdr/:inv", function (req, res) {
   console.log('FAB INV HDR== param ', req.params.inv);
   connection.query(
     "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
@@ -5788,7 +5791,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
 }
 );
 
-app.get("/api/fabinvitems/:vchr", function (req, res) {
+app.get("/fabinvitems/:vchr", function (req, res) {
   console.log('Fab_INv_dtl.', req.params.vchr);
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
@@ -5810,7 +5813,7 @@ app.get("/api/fabinvitems/:vchr", function (req, res) {
   );
 });
 
-app.get("/api/sretlst/:dys", function (req, res) {
+app.get("/sretlst/:dys", function (req, res) {
   connection.query(
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT" +
@@ -5830,7 +5833,7 @@ app.get("/api/sretlst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/srethdr/:vchr", function (req, res) {
+app.get("/srethdr/:vchr", function (req, res) {
   console.log("SRet.Note  req:=", req.params.vchr);
   connection.query(
 
@@ -5853,7 +5856,7 @@ app.get("/api/srethdr/:vchr", function (req, res) {
     }
   );
 });
-app.get("/api/sretitems/:vchr", function (req, res) {
+app.get("/sretitems/:vchr", function (req, res) {
   console.log("SRet.Note  req:=", req.params.vchr);
   connection.query(
 
@@ -5877,7 +5880,7 @@ app.get("/api/sretitems/:vchr", function (req, res) {
 });
 
 
-app.get("/api/salretreg", function (req, res) {
+app.get("/salretreg", function (req, res) {
   const { start_date, end_date } = req.query;
   connection.query(
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
@@ -5897,7 +5900,7 @@ app.get("/api/salretreg", function (req, res) {
     }
   );
 });
-app.get("/api/crntlst/:dys", function (req, res) {
+app.get("/crntlst/:dys", function (req, res) {
 
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
@@ -5920,7 +5923,7 @@ app.get("/api/crntlst/:dys", function (req, res) {
 });
 
 
-app.get("/api/crnotereg", function (req, res) {
+app.get("/crnotereg", function (req, res) {
 
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
@@ -5941,7 +5944,7 @@ app.get("/api/crnotereg", function (req, res) {
     }
   );
 });
-app.get("/api/crntHdr/:vchr", function (req, res) {
+app.get("/crntHdr/:vchr", function (req, res) {
   console.log(" Cr.Note  req:=", req.params.vchr);
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
@@ -5964,7 +5967,7 @@ app.get("/api/crntHdr/:vchr", function (req, res) {
 });
 
 
-app.get("/api/drawingReg", function (req, res) {
+app.get("/drawingReg", function (req, res) {
   const { start_date, end_date } = req.query;
   const query = `
         SELECT 
@@ -5996,7 +5999,7 @@ app.get("/api/drawingReg", function (req, res) {
   });
 });
 
-app.get("/api/getDrawReg/:id", function (req, res) {
+app.get("/getDrawReg/:id", function (req, res) {
   console.log("getDrawReg is called");
   // const { drawNo } = req.query;
   const drawNo = decodeURIComponent(req.query.drawNo)
@@ -6032,7 +6035,7 @@ app.get("/api/getDrawReg/:id", function (req, res) {
 });
 
 
-app.get("/api/drntHdr/:vchr", function (req, res) {
+app.get("/drntHdr/:vchr", function (req, res) {
   console.log("Oracle Cr.Note  req:=", req.params.vchr);
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
@@ -6053,7 +6056,7 @@ app.get("/api/drntHdr/:vchr", function (req, res) {
     }
   );
 });
-app.get("/api/drntlst/:dys", function (req, res) {
+app.get("/drntlst/:dys", function (req, res) {
 
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
@@ -6076,7 +6079,7 @@ app.get("/api/drntlst/:dys", function (req, res) {
 });
 
 
-app.get("/api/drnotereg", function (req, res) {
+app.get("/drnotereg", function (req, res) {
 
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
@@ -6097,7 +6100,7 @@ app.get("/api/drnotereg", function (req, res) {
     }
   );
 });
-app.get("/api/pinvlst/:dys", function (req, res) {
+app.get("/pinvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
@@ -6123,7 +6126,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/ngpnet/:vch", function (req, res) {
+app.get("/ngpnet/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.DISCOUNT,a.LPO_NO,a.INV_NO, a.INV_DATE,a.NARRATION  " +
@@ -6137,12 +6140,12 @@ app.get("/api/ngpnet/:vch", function (req, res) {
       } else {
         //   console.log("Oracle Purchase LC LST", result.rows);
         res.json(result);
-        console.log("NGP_NET", result)
+        console.log("ngp_net", result)
       }
     }
   );
 });
-app.get("/api/ngpitems/:vch", function (req, res) {
+app.get("/ngpitems/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD, a.NARRATION , COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, a.AMOUNT" +
@@ -6167,7 +6170,7 @@ app.get("/api/ngpitems/:vch", function (req, res) {
   );
 });
 
-app.get("/api/purchaseHdr/:vch", function (req, res) {
+app.get("/purchaseHdr/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, COALESCE(a.INV_AMOUNT, 0) AS INV_AMOUNT , COALESCE(a.DISCOUNT,0) AS DISCOUNT ,a.PO_NO,a.INV_NO, " +
@@ -6187,7 +6190,7 @@ app.get("/api/purchaseHdr/:vch", function (req, res) {
     }
   );
 });
-app.get("/api/purchaseitems/:vch", function (req, res) {
+app.get("/purchaseitems/:vch", function (req, res) {
   connection.query(
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
@@ -6216,7 +6219,7 @@ app.get("/api/purchaseitems/:vch", function (req, res) {
     }
   );
 });
-app.get("/api/purchaseItemsJob/:Job", function (req, res) {
+app.get("/purchaseItemsJob/:Job", function (req, res) {
   connection.query(
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,a.LPO_NO,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
@@ -6244,7 +6247,7 @@ app.get("/api/purchaseItemsJob/:Job", function (req, res) {
     }
   );
 });
-app.get("/api/grtnitemsjob/:Job", function (req, res) {
+app.get("/grtnitemsjob/:Job", function (req, res) {
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(b.SRV_DATE,'%d/%m/%y') AS SRV_DATE ,a.LOC_CODE ," +
     " a.PROD_CODE AS ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,COALESCE(b.JOB_NO, 'N/A') AS JOB_NO, " +
@@ -6275,7 +6278,7 @@ app.get("/api/grtnitemsjob/:Job", function (req, res) {
 });
 
 
-app.get("/api/variationsjob/:Job", function (req, res) {
+app.get("/variationsjob/:Job", function (req, res) {
   connection.query(
     "select a.VAR_DESC,DATE_FORMAT(a.VAR_DATE,'%d/%m/%y') AS VAR_DATE , a.AMOUNT " +
     " from job_variations a   " +
@@ -6297,7 +6300,7 @@ app.get("/api/variationsjob/:Job", function (req, res) {
 
 
 
-app.get("/api/expaccjob/:Job", function (req, res) {
+app.get("/expaccjob/:Job", function (req, res) {
   connection.query(
     "select a.EXP_CODE,a.ACC_CODE , b.ACC_HEAD " +
     " from job_expenses_link a   " +
@@ -6356,7 +6359,7 @@ app.get("/api/getMaxDoc/:table/:field", async (req, res) => {
   }
 });
 
-app.get("/api/purfrgnhdr/:vch", function (req, res) {
+app.get("/purfrgnhdr/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.ACC_CODE,a.INV_AMOUNT_FRGN, a.INV_AMOUNT_LOCAL,a.CURR_CODE, a.CONV_RATE," +
@@ -6377,7 +6380,7 @@ app.get("/api/purfrgnhdr/:vch", function (req, res) {
     }
   );
 });
-app.get("/api/gittypesfp/:vch", function (req, res) {
+app.get("/gittypesfp/:vch", function (req, res) {
   connection.query(
     `SELECT a.GIT_TYPE AS expCode, b.TYPE_DES AS expHead, a.ACC_CODE, a.AMOUNT as amount
      FROM lcst_trn a , git_types b where a.GIT_TYPE= b.TYPE_CODE
@@ -6403,7 +6406,7 @@ app.get("/api/gittypesfp/:vch", function (req, res) {
     }
   );
 });
-app.get("/api/purfrgnitems/:vch", function (req, res) {
+app.get("/purfrgnitems/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO, CAST(a.SR_NO AS CHAR) AS SR_NO, " +
     "  a.ITEM_CODE, c.ITEM_NAME1 ITEM_DESC , " +
@@ -6432,7 +6435,7 @@ app.get("/api/purfrgnitems/:vch", function (req, res) {
   );
 });
 
-app.get("/api/tranaccNext/:vch", function (req, res) {
+app.get("/tranaccNext/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.ACC_CODE,a.INV_AMOUNT_FRGN, a.INV_AMOUNT_LOCAL,a.CURR_CODE, a.CONV_RATE," +
@@ -6448,12 +6451,12 @@ app.get("/api/tranaccNext/:vch", function (req, res) {
       } else {
         //   console.log("Oracle Purchase LC LST", result.rows);
         res.json(result);
-        console.log("TRAN_ACC", result)
+        console.log("tran_acc", result)
       }
     }
   );
 });
-app.get("/api/prethdr/:vch", function (req, res) {
+app.get("/prethdr/:vch", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') as VCHR_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_AMOUNT, a.INV_NO, a.INV_DATE,a.NARRATION ,a.DISCOUNT" +
@@ -6473,7 +6476,7 @@ app.get("/api/prethdr/:vch", function (req, res) {
   );
 });
 
-app.get("/api/ngplst/:dys", function (req, res) {
+app.get("/ngplst/:dys", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.LPO_NO,a.JOB_NO,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
@@ -6494,7 +6497,7 @@ app.get("/api/ngplst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/pretlst/:dys", function (req, res) {
+app.get("/pretlst/:dys", function (req, res) {
 
 
   connection.query(
@@ -6517,7 +6520,7 @@ app.get("/api/pretlst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/nextdo", function (req, res) {
+app.get("/nextdo", function (req, res) {
   connection.query(
     "select (Max(a.INV_NO)+1) AS NextDo " +
     " from fab_do_hdr a ",
@@ -6538,7 +6541,7 @@ app.get("/api/nextdo", function (req, res) {
   );
 });
 
-app.get("/api/dolist/:dys", function (req, res) {
+app.get("/dolist/:dys", function (req, res) {
   connection.query(
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ," +
@@ -6559,7 +6562,7 @@ app.get("/api/dolist/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/fabdohdr/:doNo", function (req, res) {
+app.get("/fabdohdr/:doNo", function (req, res) {
   console.log("DO_HDR", req.params.doNo);
   connection.query(
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
@@ -6581,7 +6584,7 @@ app.get("/api/fabdohdr/:doNo", function (req, res) {
   );
 });
 
-app.get("/api/jobdoreg", function (req, res) {
+app.get("/jobdoreg", function (req, res) {
   const { start_date, end_date } = req.query;
 
   console.log("DO_REG", start_date);
@@ -6604,7 +6607,7 @@ app.get("/api/jobdoreg", function (req, res) {
     }
   );
 });
-app.get("/api/fabdoitems/:doNo", function (req, res) {
+app.get("/fabdoitems/:doNo", function (req, res) {
   console.log("DO_DO_DTL", req.params.doNo);
   connection.query(
     "SELECT a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d%m%Y') AS DO_DATE,  " +
@@ -6623,7 +6626,7 @@ app.get("/api/fabdoitems/:doNo", function (req, res) {
     }
   );
 });
-app.get("/api/pretitems/:vchr", function (req, res) {
+app.get("/pretitems/:vchr", function (req, res) {
 
 
   connection.query(
@@ -6647,10 +6650,10 @@ app.get("/api/pretitems/:vchr", function (req, res) {
   );
 });
 
-app.get("/api/netsales/:vchr", function (req, res) {
+app.get("/netsales/:vchr", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
-    //console.log('Sales Invoice Net_Sales ');
+    //console.log('Sales Invoice net_sales ');
 
     conn.execute(
       "select a.INV_NO,a.INV_DATE," +
@@ -6674,7 +6677,7 @@ app.get("/api/netsales/:vchr", function (req, res) {
   });
 });
 
-app.get("/api/sinvitems/:vchr", function (req, res) {
+app.get("/sinvitems/:vchr", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('Sales Invoice Items ');
@@ -6701,7 +6704,7 @@ app.get("/api/sinvitems/:vchr", function (req, res) {
   });
 });
 
-app.get("/api/itemsal", function (req, res) {
+app.get("/itemsal", function (req, res) {
   // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
   console.log(ItemCd, start_date, end_date);
@@ -6739,7 +6742,7 @@ app.get("/api/itemsal", function (req, res) {
   );
 });
 
-app.get("/api/itempur", function (req, res) {
+app.get("/itempur", function (req, res) {
   // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
   console.log(ItemCd, start_date, end_date);
@@ -6775,7 +6778,7 @@ app.get("/api/itempur", function (req, res) {
   });
 });
 
-app.get("/api/custsal", function (req, res) {
+app.get("/custsal", function (req, res) {
   // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
 
@@ -6819,7 +6822,7 @@ app.get("/api/custsal", function (req, res) {
 });
 
 
-app.get("/api/jobsal", function (req, res) {
+app.get("/jobsal", function (req, res) {
   // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
 
@@ -6862,7 +6865,7 @@ app.get("/api/jobsal", function (req, res) {
 //                   "ITEM" = group by Item then Supplier
 
 //function getPurchaseReport(groupBy, start_date, end_date, res) {
-app.get("/api/purchaseReport", function (req, res) {
+app.get("/purchaseReport", function (req, res) {
   let selectCols, groupCols;
   const { groupBy, groupType, start_date, end_date, ItemCd } = req.query;
   console.log("groupBy =", groupBy, ItemCd);
@@ -6916,7 +6919,7 @@ app.get("/api/purchaseReport", function (req, res) {
   });
 });
 
-app.get("/api/suppur", function (req, res) {
+app.get("/suppur", function (req, res) {
   // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
   //console.log('custsal==>',ItemCd,start_date,end_date);
@@ -6945,7 +6948,7 @@ app.get("/api/suppur", function (req, res) {
     }
   });
 });
-app.get("/api/supdueinv", function (req, res) {
+app.get("/supdueinv", function (req, res) {
   const { end_date } = req.query;
   console.log('end_date=', end_date);
   // Option A — Use end_date from frontend (flexible)
@@ -6953,7 +6956,7 @@ app.get("/api/supdueinv", function (req, res) {
     SELECT 
       a.ACC_CODE, 
       a.VCHR_NO, 
-      a.TRAN_TYPE, 
+      a.tran_type, 
       DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, 
       b.SUP_NAME,
       a.DR_AMT, 
@@ -6980,7 +6983,7 @@ app.get("/api/supdueinv", function (req, res) {
 });
 
 
-app.get("/api/sadjlst/:dys", function (req, res) {
+app.get("/sadjlst/:dys", function (req, res) {
   connection.query(
     "select a.VCHR_NO,To_char(a.VCHR_DATE,'DD/MM/RRRR') VCHR_DATE," +
     " a.NARRATION " +
@@ -7001,7 +7004,7 @@ app.get("/api/sadjlst/:dys", function (req, res) {
 
 });
 
-app.get("/api/gtrnlst/:dys", function (req, res) {
+app.get("/gtrnlst/:dys", function (req, res) {
   connection.query(
     "select a.GTRN_NO,DATE_FORMAT(a.GTRN_DATE,'%d/%m/%Y') GTRN_DATE," +
     " a.GTRN_NARRATION  AS NARRATION,LOC_FROM,LOC_TO" +
@@ -7020,7 +7023,7 @@ app.get("/api/gtrnlst/:dys", function (req, res) {
     }
   );
 });
-app.get("/api/gtrnhdr/:Vch", function (req, res) {
+app.get("/gtrnhdr/:Vch", function (req, res) {
   connection.query(
     "select a.GTRN_NO,DATE_FORMAT(a.GTRN_DATE,'%d/%m/%Y') GTRN_DATE," +
     " a.GTRN_NARRATION  AS NARRATION,LOC_FROM, LOC_TO " +
@@ -7040,7 +7043,7 @@ app.get("/api/gtrnhdr/:Vch", function (req, res) {
   );
 });
 
-app.get("/api/gtrnitems/:vch", function (req, res) {
+app.get("/gtrnitems/:vch", function (req, res) {
   connection.query(
     "select a.GTRN_NO,DATE_FORMAT(a.GTRN_DATE,'%d/%m/%Y') GTRN_DATE," +
     " a.LOC_FROM, a.LOC_TO ,a.ITEM_CODE, a.QTY,a.SR_NO, a.UNIT_COST,' ' as UOM " +
@@ -7062,15 +7065,15 @@ app.get("/api/gtrnitems/:vch", function (req, res) {
 
 
 //
-app.get("/api/trnlst/:tp/:dys/:dbcr", function (req, res) {
+app.get("/trnlst/:tp/:dys/:dbcr", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('TRAN List. ', req.params.tp, req.params.dys);
 
     conn.execute(
-      "select a.TRAN_TYPE,a.VCHR_NO,To_char(a.DATTE,'DD/MM/RRRR') DATTE, a.ACC_CODE," +
+      "select a.tran_type,a.VCHR_NO,To_char(a.DATTE,'DD/MM/RRRR') DATTE, a.ACC_CODE," +
       " b.AC_NAME, a.AMOUNT, a.DB_CR,a.NARRATION1,a.NARRATION2,a.JOB_NO, a.PANEL_NO,  a.USERNAME " +
-      " from tran_acc a, ac_list b where  a.TRAN_TYPE =:tp and a.DATTE >= SYSDATE - :dys and " +
+      " from tran_acc a, ac_list b where  a.tran_type =:tp and a.DATTE >= SYSDATE - :dys and " +
       " a.DB_cr = NVL(:dbcr,'C') AND a.ACC_CODE = b.AC_CODE ORDER BY a.VCHR_NO DESC",
       [req.params.tp, req.params.dys, req.params.dbcr],
       {
@@ -7089,7 +7092,7 @@ app.get("/api/trnlst/:tp/:dys/:dbcr", function (req, res) {
   });
 });
 
-app.get("/api/sinqcomplst", function (req, res) {
+app.get("/sinqcomplst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -7111,7 +7114,7 @@ app.get("/api/sinqcomplst", function (req, res) {
     );
   });
 });
-app.get("/api/sinqloclst", function (req, res) {
+app.get("/sinqloclst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('Sales Loc Lst. ');
@@ -7135,7 +7138,7 @@ app.get("/api/sinqloclst", function (req, res) {
     );
   });
 });
-app.get("/api/sinqloc/:id", function (req, res) {
+app.get("/sinqloc/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -7157,7 +7160,7 @@ app.get("/api/sinqloc/:id", function (req, res) {
     );
   });
 });
-app.get("/api/locmst/:id", function (req, res) {
+app.get("/locmst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -7179,7 +7182,7 @@ app.get("/api/locmst/:id", function (req, res) {
   });
 });
 
-app.get("/api/catlst", function (req, res) {
+app.get("/catlst", function (req, res) {
   connection.query(
 
     "select CAT_CODE, CAT_NAME" + " from cat_mst order by CAT_CODE",
@@ -7195,7 +7198,7 @@ app.get("/api/catlst", function (req, res) {
 });
 
 
-app.get("/api/catmst/:id", function (req, res) {
+app.get("/catmst/:id", function (req, res) {
 
   connection.query(
     "select CAT_CODE, CAT_NAME " + "FROM cat_mst WHERE CAT_CODE=?",
@@ -7216,7 +7219,7 @@ app.get("/api/catmst/:id", function (req, res) {
 //Save to cat_mst
 app.post("/api/save-catmst", (req, res) => {
   const data = req.body; // Receive data from frontend
-  console.log("Save-Cat_mst");
+  console.log("Save-cat_mst");
   if (!data || Object.keys(data).length === 0) {
     return res.status(400).json({ error: "No data provided" });
   }
@@ -7240,19 +7243,19 @@ app.post("/api/save-catmst", (req, res) => {
     res.json({ message: "Catg. Code inserted/updated successfully", result });
   });
 })
-app.get("/api/itmsubcat/:cat/:scat", function (req, res) {
+app.get("/itmsubcat/:cat/:scat", function (req, res) {
   console.log("itmscatent entered" + req.params.cat + " - " + req.params.scat);
 
   connection.query(
     "select a.CAT_CODE,b.CAT_NAME, a.SUB_CAT_CODE, a.SUB_CAT_NAME " +
-    "FROM item_subcat a, CAT_MST b WHERE a.cat_code = b.cat_code and a.CAT_CODE=? AND a.SUB_CAT_CODE =?",
+    "FROM item_subcat a, cat_mst b WHERE a.cat_code = b.cat_code and a.CAT_CODE=? AND a.SUB_CAT_CODE =?",
     [req.params.cat, req.params.scat],
 
     function (error, result) {
       if (error) {
         throw error;
       } else {
-        console.log("ITEM_SUBCAT ", result);
+        console.log("item_subcat ", result);
         res.json(result);
 
       }
@@ -7260,7 +7263,7 @@ app.get("/api/itmsubcat/:cat/:scat", function (req, res) {
   );
 });
 
-app.put("/api/itmscatedt", function (req, res, next) {
+app.put("/itmscatedt", function (req, res, next) {
   //--
   /*
   let bank1 = req.body;
@@ -7291,7 +7294,7 @@ app.put("/api/itmscatedt", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     //  console.log("Update Item scat on Server *1 " + bank1.catcode+"-"+bank1.scatcode + " * 1st "+bank1.scatname);
     conn.execute(
-      "UPDATE ITEM_SUBCAT SET  SUB_CAT_NAME = :1 " +
+      "UPDATE item_subcat SET  SUB_CAT_NAME = :1 " +
       " WHERE CAT_CODE = :2 AND SUB_CAT_CODE = :3",
       [bank1.scatname, bank1.catcode, bank1.scatcode],
       {
@@ -7307,7 +7310,7 @@ app.put("/api/itmscatedt", function (req, res, next) {
     );
   });
 });
-app.get("/api/sinqtypelst", function (req, res) {
+app.get("/sinqtypelst", function (req, res) {
   // console.log('Sales Enq.Type. ');
 
   connection.query(
@@ -7326,7 +7329,7 @@ app.get("/api/sinqtypelst", function (req, res) {
   );
 });
 
-app.get("/api/sinqtype/:id", function (req, res) {
+app.get("/sinqtype/:id", function (req, res) {
   connection.query(
     "select INQ_TYPE_CODE, INQ_TYPE_DESC " +
     "FROM inq_type_mst WHERE INQ_TYPE_CODE=?",
@@ -7369,7 +7372,7 @@ app.post("/api/save-sinqstat", (req, res) => {
     res.json({ message: "Inq Type Master  inserted/updated successfully", result });
   });
 })
-app.put("/api/sinqtype/:id", function (req, res, next) {
+app.put("/sinqtype/:id", function (req, res, next) {
   let bank1 = req.body;
   // console.log('Sinq Type edt', bank1);
 
@@ -7391,13 +7394,13 @@ app.put("/api/sinqtype/:id", function (req, res, next) {
     );
   });
 });
-app.get("/api/enqformlst", function (req, res) {
+app.get("/enqformlst", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('Sales Enq Form of enq. ');
 
     conn.execute(
-      "select RCP_CODE,RCP_DESC" + "  from sinq_rcpt_mst ORDER BY RCP_CODE",
+      "select RCP_CODE,RCP_DESC" + "  from sinq_rcpt_mstORDER BY RCP_CODE",
       {},
       {
         outFormat: orcl1.OBJECT,
@@ -7414,11 +7417,11 @@ app.get("/api/enqformlst", function (req, res) {
     );
   });
 });
-app.get("/api/enqformMst/:id", function (req, res) {
+app.get("/enqformMst/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select RCP_CODE, RCP_DESC " + " FROM sinq_rcpt_mst WHERE RCP_CODE=:id",
+      "select RCP_CODE, RCP_DESC " + " FROM sinq_rcpt_mstWHERE RCP_CODE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -7436,7 +7439,7 @@ app.get("/api/enqformMst/:id", function (req, res) {
   });
 });
 /*  */
-app.put("/api/enqformMst/:id", function (req, res, next) {
+app.put("/enqformMst/:id", function (req, res, next) {
   let bank1 = req.body;
   // console.log('Sman edt', bank1);
 
@@ -7446,7 +7449,7 @@ app.put("/api/enqformMst/:id", function (req, res, next) {
 
     // console.log("Tran type Update on Server *1 " + req.params.id + " * 1st ");
     conn.execute(
-      "UPDATE SINQ_RCPT_MST SET RCP_DESC=:1" + " where RCP_CODE=:2 ",
+      "UPDATE sinq_rcpt_mst SET RCP_DESC=:1" + " where RCP_CODE=:2 ",
       [bank1.rcpdesc, bank1.rcpcode],
       {
         outFormat: orcl1.OBJECT,
@@ -7461,7 +7464,7 @@ app.put("/api/enqformMst/:id", function (req, res, next) {
   });
 });
 /*    */
-app.get("/api/enqstatlist", function (req, res) {
+app.get("/enqstatlist", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     //console.log('Sales Enq List ');
@@ -7485,7 +7488,7 @@ app.get("/api/enqstatlist", function (req, res) {
     );
   });
 });
-app.get("/api/enqstat/:id", function (req, res) {
+app.get("/enqstat/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
@@ -7507,7 +7510,7 @@ app.get("/api/enqstat/:id", function (req, res) {
     );
   });
 });
-app.put("/api/enqstat/:id", function (req, res, next) {
+app.put("/enqstat/:id", function (req, res, next) {
   let bank1 = req.body;
   // console.log('Sman edt', bank1);
 
@@ -7517,7 +7520,7 @@ app.put("/api/enqstat/:id", function (req, res, next) {
 
     // console.log("Tran type Update on Server *1 " + req.params.id + " * 1st ");
     conn.execute(
-      "UPDATE SALES_INQUIRY_STATUS SET STAT_DESC=:1" + " where STAT_CODE=:2 ",
+      "UPDATE sales_inquiry_status SET STAT_DESC=:1" + " where STAT_CODE=:2 ",
       [bank1.statdesc, bank1.statcode],
       {
         outFormat: orcl1.OBJECT,
@@ -7532,7 +7535,7 @@ app.put("/api/enqstat/:id", function (req, res, next) {
   });
 });
 //
-app.post("/api/invhdrpost", function (req, res, next) {
+app.post("/invhdrpost", function (req, res, next) {
   // res.json(req.body);
   //var Pmode;
   var pool = orcl1.getPool();
@@ -7561,7 +7564,7 @@ app.post("/api/invhdrpost", function (req, res, next) {
   });
 });
 //
-app.put("/api/invhdrput/:id", (req, res, next) => {
+app.put("/invhdrput/:id", (req, res, next) => {
   // console.log(res.json(req.body));
   //var Pmode;
   console.log("InvHdrPut");
@@ -7584,7 +7587,7 @@ app.put("/api/invhdrput/:id", (req, res, next) => {
     console.log("InvDt=" + netsal.invDt);
 
     conn.execute(
-      "UPDATE NET_SALES  SET " +
+      "UPDATE net_sales  SET " +
       " CUST_CODE= :1 ,AMOUNT =:2 , ADDL_CUST_NAME=:3, SMAN_CODE =:4 , REMARKS1 = :5" +
       " WHERE INV_NO = :7 ",
       [
@@ -7627,7 +7630,7 @@ app.put("/api/invhdrput/:id", (req, res, next) => {
   });
 });
 //
-app.put("/api/sinvacc", function (req, res, next) {
+app.put("/sinvacc", function (req, res, next) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     //  console.log("Entered lpoud-cusent SERVER");
@@ -7643,7 +7646,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     dbCr = "D";
     //Delete
 
-    let sql = "DELETE FROM tran_acc WHERE TRAN_TYPE =:1 AND VCHR_NO=:2 ";
+    let sql = "DELETE FROM tran_acc WHERE tran_type =:1 AND VCHR_NO=:2 ";
 
     conn.execute(
       sql,
@@ -7659,7 +7662,7 @@ app.put("/api/sinvacc", function (req, res, next) {
         if (error) {
           throw error;
         } else {
-          console.log("Tran_acc sales inv  delete success", result);
+          console.log("tran_acc sales inv  delete success", result);
           res.end(JSON.stringify(result.rows));
           // conn.close();
         }
@@ -7669,7 +7672,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     //
     Pmode = "INSERT";
     conn.execute(
-      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  tran_type, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7703,7 +7706,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     dbCr = "C";
     //SALES cR 30101
     conn.execute(
-      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  tran_type, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7736,7 +7739,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     );
     //
     conn.execute(
-      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  tran_type, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7775,7 +7778,7 @@ app.put("/api/sinvacc", function (req, res, next) {
 
 
 //delete Cus DELETE RECORD
-app.delete("/api/cusDelete/:id", function (req, res, next) {
+app.delete("/cusDelete/:id", function (req, res, next) {
   var sql = "DELETE FROM cus_mst WHERE CUST_CODE = ?";
   connection.query(sql, [req.params.id], function (err, result) {
     if (err) throw err;
@@ -7783,7 +7786,7 @@ app.delete("/api/cusDelete/:id", function (req, res, next) {
   });
 });
 //Cmp Name
-app.get("/api/cmpname", function (req, res) {
+app.get("/cmpname", function (req, res) {
   connection.query(
     "select NAME, PLACE " + " FROM company ",
     [],
@@ -7798,7 +7801,7 @@ app.get("/api/cmpname", function (req, res) {
 
 
 // Item Master
-app.get("/api/itemlst/:catg", function (req, res) {
+app.get("/itemlst/:catg", function (req, res) {
   console.log("ITEMLST 11");
 
   connection.query(
@@ -7814,9 +7817,9 @@ app.get("/api/itemlst/:catg", function (req, res) {
   );
 });
 
-app.get("/api/itmlst", function (req, res) {
+app.get("/itmlst", function (req, res) {
   //console.log(catg)
-  //const tableName= 'ITEM_MST';
+  //const tableName= 'item_mst';
   connection.query(
     "select LOC_CODE, ITEM_CODE , ITEM_NAME1 ,OP_STOCK, CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND, cl_stock," +
     "COST_PRICE, ITEM_DATE, SUP_CODE,SALES_ACCOUNT  FROM item_mst  order by cat_code, sub_cat,item_code",
@@ -7833,7 +7836,7 @@ app.get("/api/itmlst", function (req, res) {
 });
 
 
-app.get("/api/items/:id", function (req, res) {
+app.get("/items/:id", function (req, res) {
 
   connection.query(
     "select  ITEM_CODE, ITEM_NAME1,LOC_CODE, CAT_CODE, SUB_CAT, OP_STOCK,OP_RATE, CL_STOCK, " +
@@ -7850,71 +7853,43 @@ app.get("/api/items/:id", function (req, res) {
     }
   );
 });
-app.get("/api/stkval", async function (req, res) {
+app.get("/stkval", function (req, res) {
   const endDt = req.query.end_date;
-  const catCode = req.query.ItemCat || null;  // ✅ optional filter
-
-  console.log('api = stkval  **** enddate =', endDt, ' cat_code =', catCode);
-
-  try {
-    // Step 1: Get items with stock
-    const stockSql = `
-      SELECT 
-        a.LOC_CODE,
-        a.ITEM_CODE,
-        a.ITEM_NAME1,
-        a.ITEM_UNIT,
-        a.CAT_CODE,
-        IFNULL(SUM(s.qty), 0) AS CL_STOCK
-      FROM item_mst AS a
-      LEFT JOIN stock_trans AS s ON a.item_code = s.item_code
-      WHERE (? IS NULL OR a.CAT_CODE = ?)    -- ✅ optional cat_code filter
-      GROUP BY a.LOC_CODE, a.ITEM_CODE, a.ITEM_NAME1, a.ITEM_UNIT, a.CAT_CODE
-      HAVING CL_STOCK <> 0
-      ORDER BY a.ITEM_NAME1
-    `;
-
-    const [stockResults] = await connection.promise().query(stockSql, [catCode, catCode]);
-    if (!stockResults.length) return res.json([]);
-
-    // Step 2: Call avgcost only for filtered items that have stock
-    const costSql = `
-      SELECT 
+  console.log('enddate =', endDt);
+  const sql = `
+    SELECT 
+      a.LOC_CODE, 
+      a.ITEM_CODE, 
+      a.ITEM_NAME1,
+      IFNULL(c.CL_STOCK, 0) AS CL_STOCK,
+      IFNULL(uc.UNIT_COST, 0) AS UNIT_COST,
+      ROUND(IFNULL(c.CL_STOCK, 0) * IFNULL(uc.UNIT_COST, 0),2) AS AMOUNT,
+      a.ITEM_UNIT,
+      a.CAT_CODE
+    from item_mst as a
+    left join (
+      select item_code, sum(qty) as cl_stock
+      from stock_trans
+      group by item_code
+    ) as c on a.item_code = c.item_code
+    left join (
+      select 
         item_code,
         loc_code,
-        avgcost(loc_code, item_code, ?) AS unit_cost
-      FROM item_mst
-      WHERE item_code IN (?)
-      AND (? IS NULL OR CAT_CODE = ?)        -- ✅ optional cat_code filter
-    `;
+        avgcost(loc_code, item_code, ?) as unit_cost
+      from item_mst
+    ) AS uc ON a.ITEM_CODE = uc.item_code AND a.LOC_CODE = uc.loc_code
+    ORDER BY a.ITEM_NAME1
+  `;
 
-    const itemCodes = [...new Set(stockResults.map((r) => r.ITEM_CODE))];
-    const [costResults] = await connection.promise().query(costSql, [endDt, itemCodes, catCode, catCode]);
-
-    // Step 3: Merge in JS
-    const costMap = {};
-    costResults.forEach((r) => {
-      costMap[`${r.loc_code}_${r.item_code}`] = r.unit_cost;
-    });
-
-    const finalData = stockResults.map((row) => {
-      const unitCost = costMap[`${row.LOC_CODE}_${row.ITEM_CODE}`] || 0;
-      return {
-        ...row,
-        UNIT_COST: unitCost,
-        AMOUNT: Math.round(row.CL_STOCK * unitCost * 100) / 100,
-      };
-    });
-
-    res.json(finalData);
-
-  } catch (error) {
-    console.error("Error in /api/stkval:", error);
-    res.status(500).json({ error: error.message });
-  }
+  connection.query(sql, [endDt], function (error, results) {
+    if (error) throw error;
+    console.log(results);
+    res.json(results);
+  });
 });
 
-app.get("/api/stkledOp/:id/:stdt", function (req, res) {
+app.get("/stkledOp/:id/:stdt", function (req, res) {
 
   connection.query(
     "select  sum(qty) as OPBAL  " +
@@ -7930,11 +7905,11 @@ app.get("/api/stkledOp/:id/:stdt", function (req, res) {
   );
 });
 
-app.get("/api/stkled/:id/:stdt/:enddt", function (req, res) {
+app.get("/stkled/:id/:stdt/:enddt", function (req, res) {
 
   connection.query(
     "select  DOC_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DOC_DATE,LOC_CODE, ITEM_CODE, " +
-    " JOB_NO, STD_COST,STOCK_TRAN_TYPE,SUP_CODE,NARRATION,SORT_ORD ," +
+    " JOB_NO, STD_COST,STOCK_tran_type,SUP_CODE,NARRATION,SORT_ORD ," +
     " CASE WHEN QTY>0 THEN QTY ELSE 0 END  AS QTY_IN ," +
     " CASE WHEN QTY<=0 THEN QTY ELSE 0 END  AS QTY_OUT ," +
     " CASE WHEN QTY<=0 THEN AVGCOST(LOC_CODE,ITEM_CODE,DOC_DATE)  ELSE STD_COST END  AS STD_COST " +
@@ -7975,7 +7950,7 @@ app.post("/api/save-itemmst", (req, res) => {
     res.json({ message: "Itens inserted/updated successfully", result });
   });
 });
-app.delete("/api/itemdel/:itmcd", function (req, res, next) {
+app.delete("/itemdel/:itmcd", function (req, res, next) {
   // res.json(req.body);
   //var Pmode;
 
@@ -8004,8 +7979,8 @@ app.delete("/api/itemdel/:itmcd", function (req, res, next) {
 // Sales man List
 
 
-app.get("/api/itmscatlst", function (req, res) {
-  //tableName ='ITEM_SUBCAT';
+app.get("/itmscatlst", function (req, res) {
+  //tableName ='item_subcat';
   connection.query(
     "select a.CAT_CODE, b.CAT_NAME, a.SUB_CAT_CODE, a.SUB_CAT_NAME" +
     " from item_subcat a LEFT OUTER JOIN cat_mst b ON b.CAT_CODE = a.CAT_CODE",
@@ -8023,7 +7998,7 @@ app.get("/api/itmscatlst", function (req, res) {
   );
 });
 
-app.get("/api/lpoitems/:po", function (req, res) {
+app.get("/lpoitems/:po", function (req, res) {
   console.log("LPO No=");
   console.log(req.params.po);
 
@@ -8036,13 +8011,13 @@ app.get("/api/lpoitems/:po", function (req, res) {
     function (error, results) {
       if (error) throw error;
       res.json(results);
-      console.log('Lpo_items ==>', results);
+      console.log('lpo_items ==>', results);
     }
   );
 });
 
 //lpoNet
-app.get("/api/lponet/:po", function (req, res) {
+app.get("/lponet/:po", function (req, res) {
   // console.log(req.params)
 
   connection.query(
@@ -8061,7 +8036,7 @@ app.get("/api/lponet/:po", function (req, res) {
   );
 });
 
-app.put("/api/lpoitemsput/:id", function (req, res, next) {
+app.put("/lpoitemsput/:id", function (req, res, next) {
   let lpoitem = req.body;
   // console.log("xxx y", lpoitem);
 
@@ -8069,7 +8044,7 @@ app.put("/api/lpoitemsput/:id", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     //console.log("LPO Items Update on Server *1 " + lpoitem.LPO_NO+" - " +lpoitem[0].SR_NO+ " * 1st ");
     conn.execute(
-      "UPDATE LPO_ITEMS SET  ITEM_CODE=:1 ," +
+      "UPDATE lpo_items SET  ITEM_CODE=:1 ," +
       " ITEM_NAME =:2, QTY = :3, RATE =:4 " +
       " where LPO_NO =:5 AND SR_NO = :6",
       [
@@ -8092,7 +8067,7 @@ app.put("/api/lpoitemsput/:id", function (req, res, next) {
     );
   });
 });
-app.put("/api/lpohdrput/:id", function (req, res, next) {
+app.put("/lpohdrput/:id", function (req, res, next) {
   let lpoitem = req.body;
   console.log("LPO No -Put- Update", lpoitem);
 
@@ -8100,7 +8075,7 @@ app.put("/api/lpohdrput/:id", function (req, res, next) {
   pool.getConnection(function (err, conn) {
     //console.log("LPO Items Update on Server *1 " + lpoitem[0].LPO_NO+" - " +lpoitem[0].SR_NO+ " * 1st ");
     conn.execute(
-      "UPDATE LPO_NET SET   SUP_CODE =:1, NARRATION =:2," +
+      "UPDATE lpo_net SET   SUP_CODE =:1, NARRATION =:2," +
       " AMOUNT =:3, DISCOUNT = :4,  PLACE_DLV = :5, ATTN=:6 ,SMAN_CODE=:7" +
       " where LPO_NO =:7 ",
       [
@@ -8126,7 +8101,7 @@ app.put("/api/lpohdrput/:id", function (req, res, next) {
     );
   });
 });
-app.put("/api/rvtranacc/:dat", function (req, res, next) {
+app.put("/rvtranacc/:dat", function (req, res, next) {
   let rcpitem = req.body;
   // console.log("rvtranacc- start - 1", rcpitem);
 
@@ -8151,7 +8126,7 @@ app.put("/api/rvtranacc/:dat", function (req, res, next) {
       if (putData[0].ROWID !== null) {
         //  console.log("Update ");
         conn.execute(
-          "UPDATE TRAN_ACC SET  SR_NO=:1 ," +
+          "UPDATE tran_acc SET  SR_NO=:1 ," +
           " ACC_CODE =:2, NARRATION1 = :3, JOB_NO =:4 , AMOUNT =:5, DB_CR =:6,DATTE =TO_DATE(:7,'DD-MM-YYYY') " +
           " WHERE  ROWID=:8 ",
           [
@@ -8183,11 +8158,11 @@ app.put("/api/rvtranacc/:dat", function (req, res, next) {
         // console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  tran_type, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
-              putData[0].TRAN_TYPE,
+              putData[0].tran_type,
               putData[0].VCHR_NO,
               putData[0].DATTE,
               putData[0].SR_NO,
@@ -8218,15 +8193,15 @@ app.put("/api/rvtranacc/:dat", function (req, res, next) {
     }
   });
 });
-app.delete("/api/rvdelrow", function (req, res, next) {
+app.delete("/rvdelrow", function (req, res, next) {
   var postData = req.body.dat;
   //console.log('Delete  req', req.body.dat);
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select rowid, TRAN_TYPE,VCHR_NO , AMOUNT, ACC_CODE, DB_CR" +
-      " FROM tran_acc WHERE TRAN_TYPE =:tp AND VCHR_NO =:vch",
-      [postData[0].TRAN_TYPE, postData[0].VCHR_NO],
+      "select rowid, tran_type,VCHR_NO , AMOUNT, ACC_CODE, DB_CR" +
+      " FROM tran_acc WHERE tran_type =:tp AND VCHR_NO =:vch",
+      [postData[0].tran_type, postData[0].VCHR_NO],
       {
         outFormat: orcl1.OBJECT,
       },
@@ -8267,7 +8242,7 @@ app.delete("/api/rvdelrow", function (req, res, next) {
     );
   });
 });
-app.put("/api/rvinvstl/:dat", function (req, res, next) {
+app.put("/rvinvstl/:dat", function (req, res, next) {
   let rcpitem = req.body;
   //console.log("rvinvstl- start - 1", rcpitem);
 
@@ -8324,11 +8299,11 @@ app.put("/api/rvinvstl/:dat", function (req, res, next) {
         //  console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  tran_type, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
-              putData[0].TRAN_TYPE,
+              putData[0].tran_type,
               putData[0].VCHR_NO,
               putData[0].DATTE,
               putData[0].SR_NO,
@@ -8362,7 +8337,7 @@ app.put("/api/rvinvstl/:dat", function (req, res, next) {
   });
 });
 ///
-app.put("/api/sivhdrupd/:hdr", function (req, res, next) {
+app.put("/sivhdrupd/:hdr", function (req, res, next) {
   let sivhdr = req.body;
   var pool = orcl1.getPool();
   // console.log("Siv HDR ", sivhdr);
@@ -8437,7 +8412,7 @@ app.put("/api/sivhdrupd/:hdr", function (req, res, next) {
 });
 
 //
-app.post("/api/invitmupd/:id", function (req, res, next) {
+app.post("/invitmupd/:id", function (req, res, next) {
   let bank1 = req.body;
   console.log("SAlES Inv Item.Edit");
 
@@ -8460,7 +8435,7 @@ app.post("/api/invitmupd/:id", function (req, res, next) {
   });
 });
 
-app.put("/api/updateInvoice", (req, res) => {
+app.put("/updateInvoice", (req, res) => {
   const updatedRows = req.body;
   console.log("Entered  updateInvoice");
   console.log(req.body);
@@ -8479,7 +8454,7 @@ app.put("/api/updateInvoice", (req, res) => {
 
   res.json({ message: "Data updated successfully" });
 });
-app.put("/api/sivitmupd/:dat", function (req, res, next) {
+app.put("/sivitmupd/:dat", function (req, res, next) {
   let sivitem = req.body;
   var pool = orcl1.getPool();
   // console.log("Siv Upd array length =", sivitem.length);
@@ -8492,7 +8467,7 @@ app.put("/api/sivitmupd/:dat", function (req, res, next) {
       if (sivitem[i].ROWID !== "null") {
         console.log("Update ROWID= ", sivitem[i].ROWID);
         conn.execute(
-          "UPDATE SIV_ITEMS SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
+          "UPDATE siv_items SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
           " JOB_NO =:3,ITEM_CODE =:4, QTY= :5  " +
           " WHERE  ROWID=:6 ",
           [
@@ -8555,7 +8530,7 @@ app.put("/api/sivitmupd/:dat", function (req, res, next) {
   });
 });
 // NgpNGP
-app.put("/api/ngphdrupd/:hdr", function (req, res, next) {
+app.put("/ngphdrupd/:hdr", function (req, res, next) {
   let sivhdr = req.body;
   var pool = orcl1.getPool();
   // console.log("NGP HDR Write ", sivhdr);
@@ -8570,7 +8545,7 @@ app.put("/api/ngphdrupd/:hdr", function (req, res, next) {
     if (sivhdr.ROWID !== null) {
       // console.log("Update NGPNET start ");
       conn.execute(
-        "UPDATE NGP_NET SET  PRCH_DATE =to_date(Substr(:1,1,10),'YYYY-MM-DD'), " +
+        "UPDATE ngp_net SET  PRCH_DATE =to_date(Substr(:1,1,10),'YYYY-MM-DD'), " +
         "  NARRATION= :2 , SUP_CODE =:3,INV_NO =:4, INV_DATE=to_date(substr(:5,1,10),'YYYY-MM-DD') " +
         " WHERE  ROWID=:6 ",
         [
@@ -8638,7 +8613,7 @@ app.put("/api/ngphdrupd/:hdr", function (req, res, next) {
 //
 //SRV - Start
 // app.put('/sivhdrupd/:hdr', function (req, res, next) {
-app.put("/api/srvhdrupd/:hdr", function (req, res, next) {
+app.put("/srvhdrupd/:hdr", function (req, res, next) {
   let sivhdr = req.body;
   var pool = orcl1.getPool();
 
@@ -8650,7 +8625,7 @@ app.put("/api/srvhdrupd/:hdr", function (req, res, next) {
     if (sivhdr.ROWID !== null) {
       //console.log("Update SRVHDR start ");
       conn.execute(
-        "UPDATE SRV_HDR SET  SRV_DATE =to_date(:1,'YYYY-MM-DD'), " +
+        "UPDATE srv_hdr SET  SRV_DATE =to_date(:1,'YYYY-MM-DD'), " +
         "  NARRATION= :2  " +
         " WHERE  ROWID=:3 ",
         [sivhdr.vchrdate, sivhdr.narr, sivhdr.ROWID],
@@ -8701,7 +8676,7 @@ app.put("/api/srvhdrupd/:hdr", function (req, res, next) {
 });
 
 //
-app.put("/api/srvitmupd/:dat", function (req, res, next) {
+app.put("/srvitmupd/:dat", function (req, res, next) {
   let sivitem = req.body;
   var pool = orcl1.getPool();
   // console.log("Siv Upd array length =", sivitem.length);
@@ -8714,7 +8689,7 @@ app.put("/api/srvitmupd/:dat", function (req, res, next) {
       if (sivitem[i].ROWID !== "null") {
         console.log("Update ROWID= ", sivitem[i].ROWID);
         conn.execute(
-          "UPDATE SIV_ITEMS SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
+          "UPDATE siv_items SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
           " JOB_NO =:3,ITEM_CODE =:4, QTY= :5  " +
           " WHERE  ROWID=:6 ",
           [
@@ -8776,7 +8751,7 @@ app.put("/api/srvitmupd/:dat", function (req, res, next) {
     }
   });
 });
-app.put("/api/ngptranupd/:dat", function (req, res, next) {
+app.put("/ngptranupd/:dat", function (req, res, next) {
   let sivitem = req.body;
   var pool = orcl1.getPool();
   //console.log("Ngp tranacc array length =", sivitem.length);
@@ -8789,7 +8764,7 @@ app.put("/api/ngptranupd/:dat", function (req, res, next) {
       if (sivitem[i].ROWID !== "null") {
         //   console.log("Update ROWID= ", sivitem[i].ROWID);
         conn.execute(
-          "UPDATE TRAN_ACC SET  DATTE =TO_DATE(Substr(:1,1,10),'DD-MM-YYYY'), SR_NO=:2 ," +
+          "UPDATE tran_acc SET  DATTE =TO_DATE(Substr(:1,1,10),'DD-MM-YYYY'), SR_NO=:2 ," +
           " JOB_NO =:3,ACC_CODE =:4, AMOUNT= :5  ,NARRATION1 =:6, DB_CR='D'" +
           " WHERE  ROWID=:7 ",
           [
@@ -8857,7 +8832,7 @@ app.put("/api/ngptranupd/:dat", function (req, res, next) {
 //SRV - End
 //Details
 //STK ADJ HDR Update
-app.put("/api/sadjhdrupd/:hdr", function (req, res, next) {
+app.put("/sadjhdrupd/:hdr", function (req, res, next) {
   let sivhdr = req.body;
   var pool = orcl1.getPool();
   //Hdr
@@ -8866,9 +8841,9 @@ app.put("/api/sadjhdrupd/:hdr", function (req, res, next) {
     // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID == null);
 
     if (sivhdr.ROWID !== null) {
-      // console.log("Update STK_HDR start ");
+      // console.log("Update stk_hdr start ");
       conn.execute(
-        "UPDATE STK_HDR SET  VCHR_DATE =to_date(:1,'DD/MM/RRRR'), " +
+        "UPDATE stk_hdr SET  VCHR_DATE =to_date(:1,'DD/MM/RRRR'), " +
         "  NARRATION= :2  " +
         " WHERE  ROWID=:3 ",
         [sivhdr.vchrdate, sivhdr.narr, sivhdr.ROWID],
@@ -8917,7 +8892,7 @@ app.put("/api/sadjhdrupd/:hdr", function (req, res, next) {
     //   }
   });
 });
-app.put("/api/sadjitmupd/:dat", function (req, res, next) {
+app.put("/sadjitmupd/:dat", function (req, res, next) {
   let sivitem = req.body;
   var pool = orcl1.getPool();
   //console.log("Sadj Upd array length =", sivitem.length);
@@ -9039,7 +9014,7 @@ app.get("/api/jobcard/:jobNo", function (req, res) {
   );
 });
 
-app.get("/api/jobanalysis", function (req, res) {
+app.get("/jobanalysis", function (req, res) {
   // console.log("Job list ");
   const { start_date, end_date } = req.query;
   const query = `SELECT 
@@ -9117,7 +9092,7 @@ app.get("/api/jobreg", function (req, res) {
                 CONSULTANT,
                 job_card.SMAN_CODE,
                 DATE_OF_APPROVAL
-            FROM job_card left outer join cus_mst on (JOB_CARD.cust_code = cus_mst.CUST_CODE)
+            FROM job_card left outer join cus_mst on (job_card.cust_code = cus_mst.CUST_CODE)
             where job_card.start_date between  ? and ?
             order by job_no desc
         `;
@@ -9135,7 +9110,7 @@ app.get("/api/jobreg", function (req, res) {
   );
 });
 
-app.get("/api/joblst", function (req, res) {
+app.get("/joblst", function (req, res) {
   // console.log("Job list ");
 
   connection.query(
@@ -9155,7 +9130,7 @@ app.get("/api/joblst", function (req, res) {
   );
 });
 
-app.get("/api/jobstatlst", function (req, res) {
+app.get("/jobstatlst", function (req, res) {
   connection.query(
     "select STAT_CODE, STAT_DESC" + " FROM job_status_mst  ORDER BY STAT_CODE ",
     {},
@@ -9171,7 +9146,7 @@ app.get("/api/jobstatlst", function (req, res) {
     }
   );
 });
-app.get("/api/jobstatmst/:id", function (req, res) {
+app.get("/jobstatmst/:id", function (req, res) {
   connection.query(
     "select STAT_CODE, STAT_DESC  FROM job_status_mst  where STAT_CODE =? ",
     [req.params.id],
@@ -9213,13 +9188,13 @@ app.post("/api/save-jobstat", (req, res) => {
     res.json({ message: "Job Status  inserted/updated successfully", result });
   });
 })
-//SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM VOUCHERS;
-app.get("/api/vchrlst/:tranId", function (req, res) {
+//SELECT tran_type, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM VOUCHERS;
+app.get("/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
+      "SELECT tran_type, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE TRAN_TYPE=? order by vchr_no desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE tran_type=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -9235,10 +9210,10 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
     );
   } else {
     connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
+      "SELECT tran_type, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
       " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       "DB_CR " +
-      "  from tran_acc WHERE TRAN_TYPE=? order by vchr_no desc",
+      "  from tran_acc WHERE tran_type=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -9256,7 +9231,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
   };
 });
 //app.get('/LedOp/:acode/:stdt', function (req, res) {
-app.get('/api/ledBal/:acode/:stdt', function (req, res) {
+app.get('/ledBal/:acode/:stdt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
 
@@ -9277,7 +9252,7 @@ app.get('/api/ledBal/:acode/:stdt', function (req, res) {
 }
 );
 
-app.get('/api/LedOp/:acode/:stdt', function (req, res) {
+app.get('/LedOp/:acode/:stdt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
 
@@ -9298,15 +9273,15 @@ app.get('/api/LedOp/:acode/:stdt', function (req, res) {
 }
 );
 
-app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
+app.get('/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const acCode = req.params.acode;
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
   console.log('Leddsp', acCode, stDt, endDt);
-  connection.query("select SR_NO,TRAN_TYPE,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
+  connection.query("select SR_NO,tran_type,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
     " CASE WHEN db_cr ='D' THEN AMOUNT ELSE 0 END AS AMOUNT_DR ," +
     " CASE WHEN db_cr ='C' THEN AMOUNT ELSE 0 END  AS AMOUNT_CR FROM tran_acc WHERE ACC_CODE = ? AND " +
-    " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), TRAN_TYPE ,VCHR_NO ", [acCode, stDt, endDt],
+    " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), tran_type ,VCHR_NO ", [acCode, stDt, endDt],
     function (error, result) {
       if (error) {
         console.log("Ledger data select error", error);
@@ -9319,7 +9294,7 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
     }
   );
 });
-app.get('/api/Tbal/:dt', function (req, res) {
+app.get('/Tbal/:dt', function (req, res) {
   console.log('Tbal query =', req.query); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9337,7 +9312,7 @@ app.get('/api/Tbal/:dt', function (req, res) {
     }
   });
 });
-app.get('/api/PandL/:dt', function (req, res) {
+app.get('/PandL/:dt', function (req, res) {
   console.log('P&L params =', req.params); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9364,7 +9339,7 @@ app.get('/api/PandL/:dt', function (req, res) {
     }
   });
 });
-app.get('/api/Blsht/:dt', function (req, res) {
+app.get('/Blsht/:dt', function (req, res) {
   console.log('BLSHT params =', req.params); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
   const endDate = req.params.dt;
@@ -9393,7 +9368,7 @@ app.get('/api/Blsht/:dt', function (req, res) {
 });
 
 
-app.get('/api/supbal', function (req, res) {
+app.get('/supbal', function (req, res) {
   //  const acCode = req.params.acode;
   const { end_date } = req.query;
 
@@ -9422,20 +9397,20 @@ app.get('/api/supbal', function (req, res) {
     });
 }
 );
-app.get("/api/tranlst", function (req, res) {
+app.get("/tranlst", function (req, res) {
   const { ItemCd, start_date, end_date } = req.query; // <-- ✅ Extract from query string
 
   console.log('params =', req.params);       // { tranId: 'something' }
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD, AMOUNT," +
+    "SELECT tran_type, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD, AMOUNT," +
     "IF(DB_CR='D', AMOUNT, 0) AS DR_AMOUNT, " +
     "IF(DB_CR='C', AMOUNT, 0) AS CR_AMOUNT, " +
     "DB_CR, NARRATION1, NARRATION2, JOB_NO " +
     "FROM tran_acc " +
     " JOIN  ac_list   on ac_code = acc_code " +
-    " WHERE TRAN_TYPE = ? AND DATTE BETWEEN ? AND ? " +
+    " WHERE tran_type = ? AND DATTE BETWEEN ? AND ? " +
     " ORDER BY VCHR_NO , db_cr desc",
     [ItemCd, start_date, end_date],
     function (error, result) {
@@ -9448,18 +9423,18 @@ app.get("/api/tranlst", function (req, res) {
   );
 
 });
-app.get("/api/trnprn/:tranId/:Vchr", function (req, res) {
+app.get("/trnprn/:tranId/:Vchr", function (req, res) {
   const { VchrNo } = req.query; // <-- ✅ Extract from query string
 
   console.log('params =', req.params);       // { tranId: 'something' }
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, a.ACC_CODE,b.AC_HEAD, a.AMOUNT," +
+    "SELECT a.tran_type, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, a.ACC_CODE,b.AC_HEAD, a.AMOUNT," +
     "IF(a.DB_CR='D', a.AMOUNT, 0) AS AMOUNT_DR, " +
     "IF(a.DB_CR='C', a.AMOUNT, 0) AS AMOUNT_CR, " +
     "a.DB_CR, a.NARRATION1, a.NARRATION2, a.JOB_NO " +
-    "FROM tran_acc a, AC_List b WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? " +
+    "FROM tran_acc a, ac_list b WHERE a.tran_type = ? AND a.VCHR_NO = ? " +
     "  and a.ACC_CODE = b.AC_CODE ORDER BY a.SR_NO ",
     [req.params.tranId, req.params.Vchr],
     function (error, result) {
@@ -9474,12 +9449,12 @@ app.get("/api/trnprn/:tranId/:Vchr", function (req, res) {
 });
 
 
-app.get('/api/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
+app.get('/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
   const jobNo = req.params.jobNo;
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
   console.log('Leddsp', jobNo, stDt, endDt);
-  connection.query("select DOC_TYPE AS TRAN_TYPE ,DOC_NO AS VCHR_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DATTE,JOB_NO, NARRATION1, CUST_CODE, " +
+  connection.query("select DOC_TYPE AS tran_type ,DOC_NO AS VCHR_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DATTE,JOB_NO, NARRATION1, CUST_CODE, " +
     " ITEM_DESC, QTY, UNIT_RATE, " +
     "  INCOME AS AMOUNT_DR ," +
     " EXPENSES AS AMOUNT_CR FROM v_job_ledger WHERE JOB_NO = ? AND " +
@@ -9499,7 +9474,7 @@ app.get('/api/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
 
 
 //
-app.get("/api/pcashlst/:id", function (req, res) {
+app.get("/pcashlst/:id", function (req, res) {
   console.log('Petty cash ');
   connection.query(
     "SELECT VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, PAY_VCHR_NO, PAY_VCHR_DATE, " +
@@ -9517,10 +9492,10 @@ app.get("/api/pcashlst/:id", function (req, res) {
     }
   )
 });
-app.get("/api/pdcrcdreg", function (req, res) {
+app.get("/pdcrcdreg", function (req, res) {
 
   connection.query(
-    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_rcd  where  chq_date BETWEEN ? AND ? ORDER BY CHQ_DATE",
@@ -9536,10 +9511,10 @@ app.get("/api/pdcrcdreg", function (req, res) {
     }
   );
 });
-app.get("/api/pdcrcdlst/:dys", function (req, res) {
+app.get("/pdcrcdlst/:dys", function (req, res) {
 
   connection.query(
-    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_rcd  where  chq_date >= CURDATE() - INTERVAL ? DAY ORDER BY CHQ_DATE",
@@ -9556,7 +9531,7 @@ app.get("/api/pdcrcdlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/pdcRcdBal/:cus", function (req, res) {
+app.get("/pdcRcdBal/:cus", function (req, res) {
 
   connection.query(
     "select CUST_CODE, SUM(AMOUNT)  AS BAL " +
@@ -9573,10 +9548,10 @@ app.get("/api/pdcRcdBal/:cus", function (req, res) {
     }
   );
 });
-app.get("/api/pdcisulst/:dys", function (req, res) {
+app.get("/pdcisulst/:dys", function (req, res) {
 
   connection.query(
-    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select tran_type,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, SUP_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_isu ORDER BY CHQ_DATE",
@@ -9592,6 +9567,4 @@ app.get("/api/pdcisulst/:dys", function (req, res) {
     }
   );
 });
-
-
 
