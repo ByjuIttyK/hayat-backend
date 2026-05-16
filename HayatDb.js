@@ -7818,7 +7818,7 @@ app.get("/api/itmlst", function (req, res) {
   //console.log(catg)
   //const tableName= 'ITEM_MST';
   connection.query(
-    "select LOC_CODE, ITEM_CODE , ITEM_NAME1 ,OP_STOCK, CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND, cl_stock," +
+    "select LOC_CODE, ITEM_CODE , ITEM_NAME1,ARTICLE_CODE,OP_STOCK, CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND, cl_stock," +
     "COST_PRICE, ITEM_DATE, SUP_CODE,SALES_ACCOUNT  FROM item_mst  order by cat_code, sub_cat,item_code",
     [],
 
