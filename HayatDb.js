@@ -3737,7 +3737,7 @@ app.post('/api/bankRecon/save', async (req, res) => {
         r.CHQ_NO || null,
         toMySQLDate(r.CHQ_DATE) || null,
         r.AMOUNT || 0,
-      
+
         toMySQLDate(r.CLEARED_DATE) || null,
       ]);
 
@@ -3764,7 +3764,7 @@ app.post('/api/bankRecon/save', async (req, res) => {
         index + 1,
         toMySQLDate(r.WDRAW_DATE) || null,
         r.CHQ_NO || null,
-        toMySQLDate(r.CHQ_DATE )|| null,
+        toMySQLDate(r.CHQ_DATE) || null,
         r.AMOUNT || 0,
         toMySQLDate(r.CLEARED_DATE) || null,
       ]);
@@ -6102,7 +6102,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , " +
-    "a.SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
+    " '' as SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
     " from purchase_hdr a, sup_mst b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.PJV_NO DESC",
     [req.params.dys],
@@ -7850,11 +7850,11 @@ app.get("/api/items/:id", function (req, res) {
     }
   );
 });
-app.get("/api/stkval", async function (req, res) {
+app.get("/api/stkval/:reptp", async function (req, res) {
   const endDt = req.query.end_date;
   const catCode = req.query.ItemCat || null;  // ✅ optional filter
-
-  console.log('api = stkval  **** enddate =', endDt, ' cat_code =', catCode);
+  const repType = req.params.reptp;
+  console.log('api = stkval  **** enddate =', endDt, ' cat_code =', catCode,'repType=',repType);
 
   try {
     // Step 1: Get items with stock
@@ -7876,9 +7876,9 @@ app.get("/api/stkval", async function (req, res) {
 
     const [stockResults] = await connection.promise().query(stockSql, [catCode, catCode]);
     if (!stockResults.length) return res.json([]);
-
-    // Step 2: Call avgcost only for filtered items that have stock
-    const costSql = `
+    if (repType === "STKVAL") {
+      // Step 2: Call avgcost only for filtered items that have stock
+      const costSql = `
       SELECT 
         item_code,
         loc_code,
@@ -7888,26 +7888,28 @@ app.get("/api/stkval", async function (req, res) {
       AND (? IS NULL OR CAT_CODE = ?)        -- ✅ optional cat_code filter
     `;
 
-    const itemCodes = [...new Set(stockResults.map((r) => r.ITEM_CODE))];
-    const [costResults] = await connection.promise().query(costSql, [endDt, itemCodes, catCode, catCode]);
+      const itemCodes = [...new Set(stockResults.map((r) => r.ITEM_CODE))];
+      const [costResults] = await connection.promise().query(costSql, [endDt, itemCodes, catCode, catCode]);
 
-    // Step 3: Merge in JS
-    const costMap = {};
-    costResults.forEach((r) => {
-      costMap[`${r.loc_code}_${r.item_code}`] = r.unit_cost;
-    });
+      // Step 3: Merge in JS
+      const costMap = {};
+      costResults.forEach((r) => {
+        costMap[`${r.loc_code}_${r.item_code}`] = r.unit_cost;
+      });
 
-    const finalData = stockResults.map((row) => {
-      const unitCost = costMap[`${row.LOC_CODE}_${row.ITEM_CODE}`] || 0;
-      return {
-        ...row,
-        UNIT_COST: unitCost,
-        AMOUNT: Math.round(row.CL_STOCK * unitCost * 100) / 100,
-      };
-    });
+      const finalData = stockResults.map((row) => {
+        const unitCost = costMap[`${row.LOC_CODE}_${row.ITEM_CODE}`] || 0;
+        return {
+          ...row,
+          UNIT_COST: unitCost,
+          AMOUNT: Math.round(row.CL_STOCK * unitCost * 100) / 100,
+        };
+      });
 
-    res.json(finalData);
-
+      res.json(finalData);
+    } else {
+      res.json(stockResults);
+    }
   } catch (error) {
     console.error("Error in /api/stkval:", error);
     res.status(500).json({ error: error.message });
