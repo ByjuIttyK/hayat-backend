@@ -2839,7 +2839,6 @@ app.get("/api/SupSt", function (req, res) {
 });
 
 app.get("/api/InvStlCust/:custcd", function (req, res) {
-  B
   console.log("InvStlCust", req.params.custcd);
   connection.query(
     "SELECT ACC_CODE CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
