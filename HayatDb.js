@@ -2841,9 +2841,9 @@ app.get("/api/SupSt", function (req, res) {
 app.get("/api/InvStlCust/:custcd", function (req, res) {
   console.log("InvStlCust", req.params.custcd);
   connection.query(
-    "SELECT ACC_CODE CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
+    "SELECT  CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM v_cust_outstanding_bill WHERE ACC_CODE = ?",
+    "FROM v_cust_outstanding_bill WHERE CUST_CODE = ?",
     [req.params.custcd],
     function (err, results) {
       if (err) {
@@ -2852,7 +2852,7 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
       }
 
       // Log the results (optional)
-      console.log("Query results:", results);
+      console.log("Query results InvStlCust:", results);
 
       // Send the results as JSON
       res.json(results);
@@ -3926,7 +3926,7 @@ app.get("/api/tranacc/:tp/:vchr", function (req, res) {
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc  a " +
     " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
-    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ?",
+    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? ORDER BY a.SR_NO",
     [req.params.tp, req.params.vchr],
     //LEFT JOIN = ALL ROWS OF LEFT TABLE  (TRAN_ACC Here)
     function (err, result) {
