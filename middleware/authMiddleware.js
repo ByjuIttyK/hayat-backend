@@ -1,4 +1,4 @@
-require("dotenv").config();
+//require("dotenv").config();
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET;
 //secret key above 
@@ -13,7 +13,7 @@ function authMiddleware(req, res, next) {
   }
 
   const token = authHeader.split(" ")[1]; // Bearer TOKEN
-
+console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded; // store user info

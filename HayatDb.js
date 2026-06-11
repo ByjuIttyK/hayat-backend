@@ -7,9 +7,9 @@ var http = require("http");
 var express = require("express");
 var app = express();
 //old
-var mysql = require("mysql2");  // Import MySQL client
+//var mysql = require("mysql2");  // Import MySQL client
 // 👇 new version for async/await queries
-const mysqlPromise = require("mysql2/promise");
+//const mysqlPromise = require("mysql2/promise");
 
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -17,6 +17,7 @@ const jwt = require("jsonwebtoken");
 var bodyParser = require("body-parser");
 const { error } = require("console");
 const JWT_SECRET = process.env.JWT_SECRET;
+
 //const express = require('express');
 //const app = express();
 
@@ -24,39 +25,23 @@ app.use(express.json());  // ✅ Enables JSON request body parsing
 app.use(express.urlencoded({ extended: true })); // ✅ Parses URL-encoded data
 
 dbIp = process.env.DB_HOST;
+const dbPort = '3306';
 console.log('dbIp===>', process.env.DB_HOST);
 //var dbIp = "192.168.1.11";  // MySQL server IP
 //var dbIp = "192.168.162.69";  // MySQL server IP
-var dbPort = "3306";         // Default MySQL port
+//var dbPort = "3306";         // Default MySQL port
 var dbAddr = "http://" + dbIp + ":" + dbPort;
 var clientAddr = "http://" + process.env.DB_HOST + ":3000";  // Client address for CORS
 //var clientAddr = "http://192.168.1.11:3000";  // Client address for CORS
 // MySQL connection details
-var connection = mysql.createPool({
-  host: dbIp,
-  port: dbPort,
-  user: 'root',         // Replace with your MySQL username
-  password: 'Digital@65',         // Replace with your MySQL password
-  database: 'hayat',    // Your database name
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  charset: 'utf8mb4',
-  //collation: 'utf8mb4_0900_ai_ci',
-  typeCast: function (field, next) {
-    if (field.type === 'JSON') {
-      return field.string('utf8'); // Return JSON as string with utf8 encoding
-    }
-    return next();
-  },
-});
 
 // Use CORS
 app.use(cors());
 app.use(function (req, res, next) {
   res.setHeader("Access-Control-Allow-Origin", clientAddr);  // React port
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-  res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type");
+  //res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type");
+  res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,Authorization");
   res.setHeader("Access-Control-Allow-Credentials", true);
   next();
 });
@@ -69,12 +54,15 @@ app.use(function (req, res, next) {
 /// End body-parser configuration
 //  Commented on 22/2/2025 - end 
 // Create app server
+
 var server = app.listen(3001, '0.0.0.0', function () {
   var host = server.address().address;
   var port = server.address().port;
 
   console.log("Server listening at http://%s:%s", host, port);
 });
+
+const connection = require('./db/connection');
 const authMiddleware = require("./middleware/authMiddleware");
 
 
@@ -3803,22 +3791,25 @@ app.post('/api/bankRecon/save', async (req, res) => {
     conn.release();
   }
 });
-
 app.get("/api/bankrecolst", function (req, res) {
-  // console.log('Sales Enq.Type. ');
-
   connection.query(
-    "select DOC_NO , ACC_HEAD AS BANK_NAME,   BANK_CODE, CLOS_DT  , STMT_BAL, CHQ_DPST , CHQ_INS , START_DT" +
-    "  from bnkrcnl_hdr join acc_mst ON (acc_code = bank_code) ORDER BY DOC_NO DESC",
-
+    `SELECT ST_NO AS DOC_NO,
+            ACC_HEAD AS BANK_NAME,
+            BANK_CODE,
+            DATE_FORMAT(FROM_DATE, '%d/%m/%Y') AS FROM_DATE,
+            DATE_FORMAT(TO_DATE,   '%d/%m/%Y') AS TO_DATE,
+            ST_OP_BAL,
+            GL_DR_TOTAL, GL_CR_TOTAL,
+            D_NIL_TOTAL, W_NIL_TOTAL,
+            ARRIVED_BAL, ST_CL_BAL,
+            VARIANCE,    RECO_STATUS,
+            DATE_FORMAT(CREATED_AT,'%d/%m/%Y') AS CREATED_AT,  UPDATED_AT,  CREATED_BY
+     FROM bank_st_hdr
+     JOIN acc_mst ON (acc_code = bank_code)
+     ORDER BY ST_NO DESC`,
     function (err, result) {
-      if (err) {
-        throw err;
-      } else {
-        //console.log("Oracle SmanMst", result);
-        res.json(result);
-        //  conn.close();
-      }
+      if (err) throw err;
+      res.json(result);
     }
   );
 });
@@ -4225,26 +4216,38 @@ app.get("/api/Gllst", function (req, res) {
 app.get("/api/banklst", function (req, res) {
   console.log("Bank List ");
   // const tableName= "BANK_MST";
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    conn.execute(
-      "select BANK_CODE,BANK_NAME from bank_mst ORDER BY BANK_NAME",
-      {},
-      {
-        outFormat: orcl1.OBJECT,
-      },
-      function (err, result) {
-        if (err) {
-          throw error;
-        } else {
-          console.log("Oracle Bank Mst", result);
-          res.end(JSON.stringify(result.rows));
-          conn.close();
-        }
+
+  connection.query(
+    "select BANK_CODE,BANK_NAME from bank_mst ORDER BY BANK_NAME",
+
+    function (err, result) {
+      if (err) {
+        throw error;
+      } else {
+        console.log("Bank Mst", result);
+        res.json(result);
       }
-    );
-  });
+    }
+  );
 });
+app.get("/api/bankonlylst", function (req, res) {
+  console.log("Bank List ");
+  // const tableName= "BANK_MST";
+
+  connection.query(
+    "select BANK_CODE,BANK_NAME from bank_mst WHERE CASH='B' and PDC_IND ='N' ORDER BY BANK_CODE",
+
+    function (err, result) {
+      if (err) {
+        throw error;
+      } else {
+        console.log("Bank Mst", result);
+        res.json(result);
+      }
+    }
+  );
+});
+
 app.get("/api/Aclist/:id", function (req, res) {
   console.log("Aclist ");
   var pool = orcl1.getPool();
@@ -4401,48 +4404,6 @@ app.post("/api/save-accmst", (req, res) => {
   });
 });
 
-app.get("/api/banklst", function (req, res) {
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    conn.execute(
-      "select BANK_CODE,BANK_NAME from bank_mst ORDER BY BANK_CODE",
-      {},
-      {
-        outFormat: orcl1.OBJECT,
-      },
-      function (err, result) {
-        if (err) {
-          throw error;
-        } else {
-          //console.log("Oracle gLmST", result);
-          res.end(JSON.stringify(result.rows));
-          conn.close();
-        }
-      }
-    );
-  });
-});
-app.get("/api/bankmst/:id", function (req, res) {
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    conn.execute(
-      "select BANK_CODE, BANK_NAME" + " FROM bank_mst WHERE BANK_CODE=:id",
-      [req.params.id],
-      {
-        outFormat: orcl1.OBJECT,
-      },
-      function (error, result) {
-        if (error) {
-          throw error;
-        } else {
-          console.log("Oracle  - Bank edt", result);
-          res.end(JSON.stringify(result.rows));
-          conn.close();
-        }
-      }
-    );
-  });
-});
 app.put("/api/bankmst/:id", function (req, res, next) {
   let bank1 = req.body;
   console.log("bank edt", bank1);
@@ -6321,14 +6282,14 @@ app.get("/api/getMaxDoc/:table/:field", async (req, res) => {
   const { table, field } = req.params;
 
   try {
-    const pool = mysqlPromise.createPool({
-      host: dbIp,
-      user: "root",
-      password: "Digital@65",
-      database: "hayat",
-    });
+    /*  const pool = mysqlPromise.createPool({
+        host: dbIp,
+        user: "root",
+        password: "Digital@65",
+        database: "hayat",
+      });*/
 
-    const [rows] = await pool.query(`CALL get_max_docno(?, ?)`, [table, field]);
+    const [rows] = await connection.promise().query(`CALL get_max_docno(?, ?)`, [table, field]);
     const result = rows[0][0].max_value;
     switch (table) {
       case "PRET_HDR":
@@ -7259,53 +7220,6 @@ app.get("/api/itmsubcat/:cat/:scat", function (req, res) {
   );
 });
 
-app.put("/api/itmscatedt", function (req, res, next) {
-  //--
-  /*
-  let bank1 = req.body;
-  console.log('Sman edt', bank1);
-
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    // console.log("Tran type Update on Server *1 " + req.params.id + " * 1st ");
-    conn.execute("UPDATE SMAN_MST SET SMAN_NAME=:1, SMAN_DESIGNATION =:2, SMAN_MOBILE =:3, SMAN_EMAIL = :4" +
-      " where SMAN_CODE=:5 ", [bank1.smanname, bank1.smandes, bank1.smanmobile,
-        bank1.smanemail, bank1.smancode
-      ], {
-        outFormat: orcl1.OBJECT,
-        autoCommit: true
-      },
-      function (error, results) {
-        if (error) throw error;
-        res.end(JSON.stringify(results));
-        conn.close();
-      });
-  });*/
-
-  //--
-  let bank1 = req.body;
-  // console.log('Item Scatg edt', bank1);
-
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    //  console.log("Update Item scat on Server *1 " + bank1.catcode+"-"+bank1.scatcode + " * 1st "+bank1.scatname);
-    conn.execute(
-      "UPDATE ITEM_SUBCAT SET  SUB_CAT_NAME = :1 " +
-      " WHERE CAT_CODE = :2 AND SUB_CAT_CODE = :3",
-      [bank1.scatname, bank1.catcode, bank1.scatcode],
-      {
-        outFormat: orcl1.OBJECT,
-        autoCommit: true,
-      },
-      function (error, results) {
-        // console.log ("Itmscatedt update over"+results.rows);
-        if (error) throw error;
-        res.end(JSON.stringify(results));
-        conn.close();
-      }
-    );
-  });
-});
 app.get("/api/sinqtypelst", function (req, res) {
   // console.log('Sales Enq.Type. ');
 
@@ -7853,7 +7767,7 @@ app.get("/api/stkval/:reptp", async function (req, res) {
   const endDt = req.query.end_date;
   const catCode = req.query.ItemCat || null;  // ✅ optional filter
   const repType = req.params.reptp;
-  console.log('api = stkval  **** enddate =', endDt, ' cat_code =', catCode,'repType=',repType);
+  console.log('api = stkval  **** enddate =', endDt, ' cat_code =', catCode, 'repType=', repType);
 
   try {
     // Step 1: Get items with stock
@@ -7916,7 +7830,7 @@ app.get("/api/stkval/:reptp", async function (req, res) {
 });
 
 app.get("/api/stkledOp/:id/:stdt", function (req, res) {
-
+  console.log('stkledOp===>', req.params.id)
   connection.query(
     "select  sum(qty) as OPBAL  " +
     " FROM stock_trans WHERE ITEM_CODE= ? and  DOC_DATE < ?",
@@ -8556,85 +8470,6 @@ app.put("/api/sivitmupd/:dat", function (req, res, next) {
   });
 });
 // NgpNGP
-app.put("/api/ngphdrupd/:hdr", function (req, res, next) {
-  let sivhdr = req.body;
-  var pool = orcl1.getPool();
-  // console.log("NGP HDR Write ", sivhdr);
-  // console.log("NGP HDR SRV No:", sivhdr.vchrno);
-  // console.log("NGP HDR ROWID:", sivhdr.ROWID);
-  // console.log("NGP Date:", sivhdr.vchrdate);
-  //Hdr
-  pool.getConnection(function (err, conn) {
-    //  for (let i = 0; i < sivitem.length; i++) {
-    // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID == null);
-
-    if (sivhdr.ROWID !== null) {
-      // console.log("Update NGPNET start ");
-      conn.execute(
-        "UPDATE NGP_NET SET  PRCH_DATE =to_date(Substr(:1,1,10),'YYYY-MM-DD'), " +
-        "  NARRATION= :2 , SUP_CODE =:3,INV_NO =:4, INV_DATE=to_date(substr(:5,1,10),'YYYY-MM-DD') " +
-        " WHERE  ROWID=:6 ",
-        [
-          sivhdr.prch_date,
-          sivhdr.narration,
-          sivhdr.sup_code,
-          sivhdr.inv_no,
-          sivhdr.inv_date,
-          sivhdr.ROWID,
-        ],
-        {
-          outFormat: orcl1.OBJECT,
-          autoCommit: true,
-        },
-
-        function (err, results) {
-          if (err) {
-            console.error("Ngpnet Updated ", err.message);
-            //callback(err.message)
-          } else {
-            console.log("Rows updated (NgpNet)" + results.rowsAffected);
-            res.end(JSON.stringify(results));
-            conn.close();
-          }
-        }
-      );
-    } else {
-      // console.log("Insert NGPNet");
-      if (sivhdr.vchrno !== 0) {
-        conn.execute(
-          "INSERT INTO  ngp_net  (  PRCH_NO, PRCH_DATE,  " +
-          " NARRATION, SUP_CODE,INV_NO, INV_DATE,LPO_NO )" +
-          " VALUES (LPAD(:1,10,'0'),TO_DATE(substr(:2,1,10),'DD-MM-YYYY'),:3 ,:4,:5,TO_DATE(substr(:6,1,10),'DD-MM-YYYY'),:7 ) ",
-          [
-            sivhdr.prch_no,
-            sivhdr.prch_date,
-            sivhdr.narration,
-            sivhdr.sup_code,
-            sivhdr.inv_no,
-            sivhdr.inv_date,
-            siv_hdr.lpo_no,
-          ],
-          {
-            outFormat: orcl1.OBJECT,
-            autoCommit: true,
-          },
-          function (err, results) {
-            if (err) {
-              console.error("Ngp Net insert ", err.message);
-              //callback(err.message)
-            } else {
-              console.log("Rows inserted (Ngpnet)" + results.rowsAffected);
-              res.end(JSON.stringify(results));
-              conn.close();
-            }
-            // conn.close();
-          }
-        );
-      }
-    }
-    //   }
-  });
-});
 
 //
 //SRV - Start
@@ -8701,299 +8536,6 @@ app.put("/api/srvhdrupd/:hdr", function (req, res, next) {
   });
 });
 
-//
-app.put("/api/srvitmupd/:dat", function (req, res, next) {
-  let sivitem = req.body;
-  var pool = orcl1.getPool();
-  // console.log("Siv Upd array length =", sivitem.length);
-  // console.log("Siv gUpd req.body =", req.body);
-  //Hdr
-  pool.getConnection(function (err, conn) {
-    for (let i = 0; i < sivitem.length; i++) {
-      // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID  == null);
-      //   console.log('ItemCode,  ROWID=', sivitem[i].ROWID);
-      if (sivitem[i].ROWID !== "null") {
-        console.log("Update ROWID= ", sivitem[i].ROWID);
-        conn.execute(
-          "UPDATE SIV_ITEMS SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
-          " JOB_NO =:3,ITEM_CODE =:4, QTY= :5  " +
-          " WHERE  ROWID=:6 ",
-          [
-            sivitem[i].SIV_DATE,
-            sivitem[i].SR_NO,
-            sivitem[i].JOB_NO,
-            sivitem[i].ITEM_CODE,
-            sivitem[i].QTY,
-            sivitem[i].ROWID,
-          ],
-          {
-            outFormat: orcl1.OBJECT,
-            autoCommit: true,
-          },
-          function (err, results) {
-            if (err) {
-              console.error("Siv Item Updated ", err.message);
-              //callback(err.message)
-            } else {
-              console.log("Rows updated (SivItems)" + results.rowsAffected);
-              res.end(JSON.stringify(results));
-              conn.close();
-            }
-          }
-        );
-      } else {
-        console.log("Insert SivItems", sivitem[i].ITEM_CODE);
-        if (sivitem[i].QTY !== 0 && sivitem[i].ITEM_CODE !== null) {
-          conn.execute(
-            "INSERT INTO  siv_items (  SIV_NO, SIV_DATE, SR_NO , " +
-            " JOB_NO  , ITEM_CODE ,QTY )" +
-            " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
-            [
-              sivitem[i].SIV_NO,
-              sivitem[i].SIV_DATE,
-              sivitem[i].SR_NO,
-              sivitem[i].JOB_NO,
-              sivitem[i].ITEM_CODE,
-              sivitem[i].QTY,
-            ],
-            {
-              outFormat: orcl1.OBJECT,
-              autoCommit: true,
-            },
-            function (err, results) {
-              if (err) {
-                console.error("Siv Items insert error:", err.message);
-                //callback(err.message)
-              } else {
-                console.log("Rows inserted (Sivitems)" + results.rowsAffected);
-                res.end(JSON.stringify(results));
-                conn.close();
-              }
-              // conn.close();
-            }
-          );
-        }
-      }
-    }
-  });
-});
-app.put("/api/ngptranupd/:dat", function (req, res, next) {
-  let sivitem = req.body;
-  var pool = orcl1.getPool();
-  //console.log("Ngp tranacc array length =", sivitem.length);
-  //console.log("Ngp tranacc Upd req.body =", req.body);
-  //Hdr
-  pool.getConnection(function (err, conn) {
-    for (let i = 0; i < sivitem.length; i++) {
-      // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID  == null);
-      //    console.log('Tranacc,  ROWID=', sivitem[i].ROWID);
-      if (sivitem[i].ROWID !== "null") {
-        //   console.log("Update ROWID= ", sivitem[i].ROWID);
-        conn.execute(
-          "UPDATE TRAN_ACC SET  DATTE =TO_DATE(Substr(:1,1,10),'DD-MM-YYYY'), SR_NO=:2 ," +
-          " JOB_NO =:3,ACC_CODE =:4, AMOUNT= :5  ,NARRATION1 =:6, DB_CR='D'" +
-          " WHERE  ROWID=:7 ",
-          [
-            sivitem[i].DATTE,
-            sivitem[i].SR_NO,
-            sivitem[i].JOB_NO,
-            sivitem[i].ACC_CODE,
-            sivitem[i].AMOUNT,
-            sivitem[i].NARRATION,
-            sivitem[i].ROWID,
-          ],
-          {
-            outFormat: orcl1.OBJECT,
-            autoCommit: true,
-          },
-          function (err, results) {
-            if (err) {
-              console.error("Ngp Tranacc Updated ", err.message);
-              //callback(err.message)
-            } else {
-              console.log("Rows updated (Tranacc Ngp)" + results.rowsAffected);
-              res.end(JSON.stringify(results));
-              conn.close();
-            }
-          }
-        );
-      } else {
-        //  console.log("Insert Tranacc", sivitem[i].ACC_CODE);
-        if (sivitem[i].AMOUNT !== 0 && sivitem[i].ACC_CODE !== null) {
-          conn.execute(
-            "INSERT INTO  tran_acc (  VCHR_NO, DATTE, SR_NO , " +
-            " JOB_NO  , ACC_CODE ,AMOUNT,DB_CR,NARRATION1 )" +
-            " VALUES (LPAD(:1,10,'0'),TO_DATE(SUBSTR(:2,1,10),'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
-            [
-              sivitem[i].PRCH_NO,
-              sivitem[i].PRCH_DATE,
-              sivitem[i].SR_NO,
-              sivitem[i].JOB_NO,
-              sivitem[i].ACC_CODE,
-              sivitem[i].AMOUNT,
-              "D",
-              sivitem[0].NARRATION,
-            ],
-            {
-              outFormat: orcl1.OBJECT,
-              autoCommit: true,
-            },
-            function (err, results) {
-              if (err) {
-                console.error("Tran acc:", err.message);
-                //callback(err.message)
-              } else {
-                console.log("Rows inserted (Sivitems)" + results.rowsAffected);
-                res.end(JSON.stringify(results));
-                conn.close();
-              }
-              // conn.close();
-            }
-          );
-        }
-      }
-    }
-  });
-});
-//SRV - End
-//Details
-//STK ADJ HDR Update
-app.put("/api/sadjhdrupd/:hdr", function (req, res, next) {
-  let sivhdr = req.body;
-  var pool = orcl1.getPool();
-  //Hdr
-  pool.getConnection(function (err, conn) {
-    //  for (let i = 0; i < sivitem.length; i++) {
-    // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID == null);
-
-    if (sivhdr.ROWID !== null) {
-      // console.log("Update STK_HDR start ");
-      conn.execute(
-        "UPDATE STK_HDR SET  VCHR_DATE =to_date(:1,'DD/MM/RRRR'), " +
-        "  NARRATION= :2  " +
-        " WHERE  ROWID=:3 ",
-        [sivhdr.vchrdate, sivhdr.narr, sivhdr.ROWID],
-        {
-          outFormat: orcl1.OBJECT,
-          autoCommit: true,
-        },
-
-        function (err, results) {
-          if (err) {
-            console.error("Sadj Hdr Updated ", err.message);
-            //callback(err.message)
-          } else {
-            console.log("Rows updated (SrvHdr)" + results.rowsAffected);
-            res.end(JSON.stringify(results));
-            conn.close();
-          }
-        }
-      );
-    } else {
-      // console.log("Insert Sadjhdr");
-      if (sivhdr.vchrno !== 0) {
-        conn.execute(
-          "INSERT INTO  stk_hdr (  VCHR_NO, VCHR_DATE,  " +
-          " NARRATION )" +
-          " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3 ) ",
-          [sivhdr.vchrno, sivhdr.vchrdate, sivhdr.narr],
-          {
-            outFormat: orcl1.OBJECT,
-            autoCommit: true,
-          },
-          function (err, results) {
-            if (err) {
-              console.error("Sadj hdr insert ", err.message);
-              //callback(err.message)
-            } else {
-              console.log("Rows inserted (Sadjhdr)" + results.rowsAffected);
-              res.end(JSON.stringify(results));
-              conn.close();
-            }
-            // conn.close();
-          }
-        );
-      }
-    }
-    //   }
-  });
-});
-app.put("/api/sadjitmupd/:dat", function (req, res, next) {
-  let sivitem = req.body;
-  var pool = orcl1.getPool();
-  //console.log("Sadj Upd array length =", sivitem.length);
-  //console.log("Sadj Upd req.body =", req.body);
-  //Hdr
-  pool.getConnection(function (err, conn) {
-    for (let i = 0; i < sivitem.length; i++) {
-      // console.log("ROWID=", sivitem[i].ROWID, sivitem[i].ROWID  == null);
-      // console.log('ItemCode,  ROWID=', sivitem[i].ROWID);
-      if (sivitem[i].ROWID !== "null") {
-        console.log("Update ROWID= ", sivitem[i].ROWID);
-        conn.execute(
-          "UPDATE STK_ADJ SET  VCHR_DATE =TO_DATE(SUBSTR(:1,1,10),'MM/DD/YYYY'), SR_NO=:2 ," +
-          " NARRATION =:3,ITEM_CODE =:4, QTY= :5  ,STD_COST = :6" +
-          " WHERE  ROWID=:7 ",
-          [
-            sivitem[i].VCHR_DATE,
-            sivitem[i].SR_NO,
-            sivitem[i].NARRATION,
-            sivitem[i].ITEM_CODE,
-            sivitem[i].QTY,
-            sivitem[i].STD_COST,
-            sivitem[i].ROWID,
-          ],
-          {
-            outFormat: orcl1.OBJECT,
-            autoCommit: true,
-          },
-          function (err, results) {
-            if (err) {
-              console.error("Sadj Item Updated ", err.message);
-              //callback(err.message)
-            } else {
-              console.log("Rows updated (SadjItems)" + results.rowsAffected);
-              res.end(JSON.stringify(results));
-              conn.close();
-            }
-          }
-        );
-      } else {
-        //  console.log("Insert SadjItems", sivitem[i].ITEM_CODE);
-        if (sivitem[i].QTY !== 0 && sivitem[i].ITEM_CODE !== null) {
-          conn.execute(
-            "INSERT INTO  stk_adj (  VCHR_NO, VCHR_DATE, SR_NO , " +
-            " NARRATION  , ITEM_CODE ,QTY )" +
-            " VALUES (LPAD(:1,10,'0'),TO_DATE(:2,'DD-MM-YYYY'),:3,:4,:5,:6 ) ",
-            [
-              sivitem[i].VCHR_NO,
-              sivitem[i].VCHR_DATE,
-              sivitem[i].SR_NO,
-              sivitem[i].NARRATION,
-              sivitem[i].ITEM_CODE,
-              sivitem[i].QTY,
-            ],
-            {
-              outFormat: orcl1.OBJECT,
-              autoCommit: true,
-            },
-            function (err, results) {
-              if (err) {
-                console.error("Sadj Items insert error:", err.message);
-                //callback(err.message)
-              } else {
-                console.log("Rows inserted (Sadjitems)" + results.rowsAffected);
-                res.end(JSON.stringify(results));
-                conn.close();
-              }
-              // conn.close();
-            }
-          );
-        }
-      }
-    }
-  });
-});
 
 app.get("/api/jobcard/:jobNo", function (req, res) {
   // console.log("Job list ");
@@ -9594,5 +9136,34 @@ app.get("/api/pdcisulst/:dys", function (req, res) {
   );
 });
 
+//Jv Routes
+const jvRoutes = require('./JvExcelEntryRoutes');
+app.use('/api/jv', jvRoutes);
 
+//RV Routes
+const rvXlRoutes = require('./rv_excel_api');
+const rvBuildRoute = require('./build_rv_excel');
+app.use('/api', rvXlRoutes);
+app.use('/api', rvBuildRoute);
+
+//PV Excel
+//const pvXlRoutes=require('./pv_excel_api.js');
+//app.use('/api',pvXlRoutes);
+//const pvBuildRoutes = require('./build_pv_excel');
+//app.use('/api',pvBuildRoutes);
+
+//
+const pvXlRoutes = require('./pv_excel_api');
+const pvBuildRoute = require('./build_pv_excel');
+app.use(pvXlRoutes);              // routes already include /api/
+app.use('/api', pvBuildRoute);    // exposes POST /api/build-pv-excel
+//
+const bnkRecoRoutes = require('./bankRecoRoutes');
+app.use( bnkRecoRoutes);
+
+//
+//const payChqApi = require("./routes/pay_chq_batch_api");
+const payChqApi = require("./pay_chq_batch_api");
+app.use("/pdc_batch", payChqApi);
+app.use("/pay_chq",   payChqApi.chqRouter);
 
