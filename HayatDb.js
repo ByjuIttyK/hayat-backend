@@ -21,8 +21,13 @@ const JWT_SECRET = process.env.JWT_SECRET;
 //const express = require('express');
 //const app = express();
 
-app.use(express.json());  // ✅ Enables JSON request body parsing
-app.use(express.urlencoded({ extended: true })); // ✅ Parses URL-encoded data
+//app.use(express.json());  // ✅ Enables JSON request body parsing
+//app.use(express.urlencoded({ extended: true })); // ✅ Parses URL-encoded data
+
+// The next 2 lines are added for Cheque .pdf scanning using Ai (claude)
+
+app.use(express.json({ limit: "10mb" }));  // ✅ JSON parsing, 10mb for cheque scans
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 dbIp = process.env.DB_HOST;
 const dbPort = '3306';
@@ -2698,6 +2703,27 @@ app.get("/api/suplst", function (req, res) {
   );
 });
 
+// Sample API: Get supplier list from MySQL database
+app.get("/api/paymentlov", function (req, res) {
+  console.log("Supplier List Request  (lov)");
+  //const tableName= "SUP_MST";
+  // Query to fetch supplier data from MySQL database
+  connection.query(
+    "SELECT SUP_CODE, SUP_NAME, SUP_ADR1, SUP_ADR2, SUP_ADR3, SUP_TEL1, " +
+    " SUP_PERS,VAT_REG_NO,CN_CODE  " +
+    " FROM sup_mst ORDER BY SUP_NAME",
+    function (err, results, fields) {
+      if (err) {
+        console.error("Error executing query: ", err.message);
+        return res.status(500).send("Error executing query.");
+      }
+      //console.log(results);
+      // Return the query result as a JSON response
+      res.json(results);
+    }
+  );
+});
+
 app.get("/api/cmpdetails", function (req, res) {
   // const tableName= "COMPANY";
   connection.query(
@@ -2851,9 +2877,9 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
 app.get("/api/InvStlSup/:custcd", function (req, res) {
   console.log("InvStlSup", req.params.custcd);
   connection.query(
-    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, '' AS NAR," +
+    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE,  NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ?",
+    "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ? ORDER BY DATTE ",
     [req.params.custcd],
     function (err, results) {
       if (err) {
@@ -6179,11 +6205,14 @@ app.get("/api/purchaseitems/:vch", function (req, res) {
 app.get("/api/purchaseItemsJob/:Job", function (req, res) {
   connection.query(
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
-    " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,a.LPO_NO,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
+    " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,p.LPO_NO,COALESCE(l.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.COST , ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
-    " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
-    " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
-    " WHERE  a.JOB_NO = ?  " +
+    " from purchase_items a  "+
+    "    left outer join purchase_hdr p on a.SRV_NO = p.PJV_NO "+
+    "    left outer join lpo_net l on p.LPO_NO = l.LPO_NO "+
+     "   left outer join acc_mst b on b.ACC_CODE = a.ACC_CODE " +
+    "    LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
+    " WHERE  l.JOB_NO = ?  " +
     " ORDER BY a.SR_NO",
     [req.params.Job],
 
@@ -9135,6 +9164,57 @@ app.get("/api/pdcisulst/:dys", function (req, res) {
     }
   );
 });
+//
+//  Cheque print layout setup
+// GET saved layout for a bank (returns {} if not yet calibrated → UI uses defaults)
+app.get("/api/chq_layout/:bankCode", function (req, res) {
+  connection.query(
+    "SELECT * FROM chq_print_layout WHERE BANK_CODE = ?",
+    [req.params.bankCode],
+    function (err, rows) {
+      if (err) { console.error("chq_layout GET:", err); return res.status(500).json({ error: err.message }); }
+      res.json(rows[0] || {});
+    }
+  );
+});
+
+// PUT (upsert) layout for a bank
+app.put("/api/chq_layout/:bankCode", function (req, res) {
+  const b = req.body || {};
+  const f = (o, k, d) => (o && o[k] != null ? o[k] : d);   // nested {x,y} → value
+  const vals = [
+    req.params.bankCode,
+    b.PAGE_W ?? 203, b.PAGE_H ?? 90, b.FONT_PT ?? 10, b.WORDS_MAXW ?? 150,
+    f(b.date, "x", 158),    f(b.date, "y", 22),
+    f(b.payee, "x", 36),    f(b.payee, "y", 40),
+    f(b.words1, "x", 26),   f(b.words1, "y", 51),
+    f(b.words2, "x", 12),   f(b.words2, "y", 59),
+    f(b.figures, "x", 188), f(b.figures, "y", 58),
+    (req.user && req.user.username) || "system",
+  ];
+  connection.query(
+    `INSERT INTO chq_print_layout
+       (BANK_CODE, PAGE_W, PAGE_H, FONT_PT, WORDS_MAXW,
+        DATE_X, DATE_Y, PAYEE_X, PAYEE_Y, WORDS1_X, WORDS1_Y,
+        WORDS2_X, WORDS2_Y, FIGURES_X, FIGURES_Y, UPDATED_BY)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     ON DUPLICATE KEY UPDATE
+       PAGE_W=VALUES(PAGE_W), PAGE_H=VALUES(PAGE_H), FONT_PT=VALUES(FONT_PT),
+       WORDS_MAXW=VALUES(WORDS_MAXW),
+       DATE_X=VALUES(DATE_X), DATE_Y=VALUES(DATE_Y),
+       PAYEE_X=VALUES(PAYEE_X), PAYEE_Y=VALUES(PAYEE_Y),
+       WORDS1_X=VALUES(WORDS1_X), WORDS1_Y=VALUES(WORDS1_Y),
+       WORDS2_X=VALUES(WORDS2_X), WORDS2_Y=VALUES(WORDS2_Y),
+       FIGURES_X=VALUES(FIGURES_X), FIGURES_Y=VALUES(FIGURES_Y),
+       UPDATED_BY=VALUES(UPDATED_BY)`,
+    vals,
+    function (err) {
+      if (err) { console.error("chq_layout PUT:", err); return res.status(500).json({ error: err.message }); }
+      res.json({ success: true });
+    }
+  );
+});
+//───────────────────────────────────────────────────────────────────────────── */
 
 //Jv Routes
 const jvRoutes = require('./JvExcelEntryRoutes');
@@ -9167,3 +9247,20 @@ const payChqApi = require("./pay_chq_batch_api");
 app.use("/pdc_batch", payChqApi);
 app.use("/pay_chq",   payChqApi.chqRouter);
 
+//
+const chequeScanRoutes = require("./ChequeScanRoutes");
+app.use("/ai", authMiddleware, chequeScanRoutes);
+//
+const rcpChqApi = require("./rcp_chq_batch_api");
+app.use("/rcp_batch", rcpChqApi);
+
+//app.use('/api', require('./boqTemplateRoute'));
+// HayatDb.js — one line to add:
+const boqTplRoute = require('./boqTemplateRoute')(connection);
+app.use('/api', boqTplRoute);
+//BoQ Save/Retrive routes
+const boqRoutes = require('./boqRoutes')(connection);
+app.use('/api', boqRoutes);
+//Doc Attach Save/Retrive routes
+const docAttachRoutes = require('./docAttachRoute')(connection);
+app.use('/api', docAttachRoutes);

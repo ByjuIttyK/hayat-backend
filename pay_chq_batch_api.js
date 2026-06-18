@@ -11,8 +11,8 @@
 const express = require("express");
 const router  = express.Router();
 //const db      = require("../db");   // mysql2/promise pool — adjust path if needed
-const db = require('./db/connection')
-
+const  connection = require('./db/connection')
+const db = connection.promise();
 // ─── Helper: run query, return rows ──────────────────────────────────────────
 const q = async (sql, params = []) => {
   const [rows] = await db.query(sql, params);
@@ -116,8 +116,8 @@ router.get("/:batchNo", async (req, res) => {
     if (!header) return res.status(404).json({ error: "Batch not found" });
 
     const cheques = await q(
-      `SELECT SEQ, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH, BANK_AC,
-              PDC_TYPE, PDC_AC, AMOUNT, CURRENCY, NARRATION, PRINT_STATUS, PRINT_DT
+      `SELECT SEQ, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH,CREDIT_AC,
+              PDC_TYPE, AMOUNT, CURRENCY, NARRATION, PRINT_STATUS, PRINT_DT
          FROM PAY_CHQ_BATCH_DET
         WHERE BATCH_NO = ?
         ORDER BY CHQ_DT, SEQ`,
@@ -172,56 +172,61 @@ router.post("/", async (req, res) => {
         header.NARRATION || "",
         header.STATUS    || "Draft",
         "",
-        header.CREATED_BY || req.user?.userId || "",
+        req.user?.username || "system", 
+        //header.CREATED_BY || req.user?.userId || "",
       ]
     );
 
+    // ── Insert cheque rows ────────────────────────────────────────────────
     // ── Insert cheque rows ────────────────────────────────────────────────
     const validCheques = cheques.filter(c => String(c.CHQ_NO || "").trim());
     for (let i = 0; i < validCheques.length; i++) {
       const c    = validCheques[i];
       const cDt  = toSqlDate(c.CHQ_DT);
       const type = pdcType(cDt, batchDt);
-      const ac   = pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
+      // single credit account: PDC Payable for post-dated, else the bank a/c
+      const creditAc = pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
 
       await conn.query(
         `INSERT INTO PAY_CHQ_BATCH_DET
            (BATCH_NO, SEQ, CHQ_NO, CHQ_DT,
-            BANK_NAME, BRANCH, BANK_AC,
-            PDC_TYPE, PDC_AC,
+            BANK_NAME, BRANCH, CREDIT_AC,
+            PDC_TYPE,
             AMOUNT, CURRENCY, NARRATION,
             PRINT_STATUS)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           header.BATCH_NO,
           c.SEQ || (i + 1),
           String(c.CHQ_NO).trim(),
           cDt,
-          c.BANK_NAME    || header.BANK_NAME || "",
-          c.BRANCH       || "",
-          c.BANK_AC      || header.BANK_AC   || "",
+          c.BANK_NAME || header.BANK_NAME || "",
+          c.BRANCH    || "",
+          creditAc,
           type,
-          ac,
-          parseFloat(c.AMOUNT)   || 0,
-          c.CURRENCY     || header.CURRENCY  || "AED",
-          c.NARRATION    || "",
+          parseFloat(c.AMOUNT) || 0,
+          c.CURRENCY  || header.CURRENCY || "AED",
+          c.NARRATION || "",
           c.PRINT_STATUS || "Pending",
         ]
       );
     }
-
     // ── Insert settlement rows ────────────────────────────────────────────
-    const validStl = settlement.filter(s => String(s.DOC_NO || "").trim());
+    // ── Insert settlement rows (only those actually set off) ──────────────
+    const validStl = settlement.filter(s =>
+      String(s.DOC_NO || "").trim() && (parseFloat(s.PV_AMT) || 0) > 0);
+   // const validStl = settlement.filter(s => String(s.DOC_NO || "").trim());
     for (let i = 0; i < validStl.length; i++) {
       const s = validStl[i];
       await conn.query(
         `INSERT INTO PAY_CHQ_BATCH_STL
-           (BATCH_NO, SEQ, DOC_NO, DOC_DT, DETAILS, INV_AMT, PV_AMT)
-         VALUES (?,?,?,?,?,?,?)`,
+           (BATCH_NO, SEQ, DOC_NO, DOC_TYPE, DOC_DT, DETAILS, INV_AMT, PV_AMT)
+         VALUES (?,?,?,?,?,?,?,?)`,
         [
           header.BATCH_NO,
           s.SEQ || (i + 1),
           String(s.DOC_NO).trim(),
+          s.DOC_TYPE || "",
           toSqlDate(s.DOC_DT),
           s.DETAILS || "",
           parseFloat(s.INV_AMT) || 0,
@@ -317,18 +322,17 @@ router.put("/:batchNo", async (req, res) => {
       await conn.query(
         `INSERT INTO PAY_CHQ_BATCH_DET
            (BATCH_NO, SEQ, CHQ_NO, CHQ_DT,
-            BANK_NAME, BRANCH, BANK_AC,
-            PDC_TYPE, PDC_AC,
+            BANK_NAME, BRANCH, CREDIT_AC,
+            PDC_TYPE,
             AMOUNT, CURRENCY, NARRATION,
             PRINT_STATUS)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE
            CHQ_DT       = VALUES(CHQ_DT),
            BANK_NAME    = VALUES(BANK_NAME),
            BRANCH       = VALUES(BRANCH),
-           BANK_AC      = VALUES(BANK_AC),
+           CREDIT_AC    = VALUES(CREDIT_AC),
            PDC_TYPE     = VALUES(PDC_TYPE),
-           PDC_AC       = VALUES(PDC_AC),
            AMOUNT       = VALUES(AMOUNT),
            CURRENCY     = VALUES(CURRENCY),
            NARRATION    = VALUES(NARRATION)`,
@@ -339,9 +343,8 @@ router.put("/:batchNo", async (req, res) => {
           cDt,
           c.BANK_NAME    || header.BANK_NAME || "",
           c.BRANCH       || "",
-          c.BANK_AC      || header.BANK_AC   || "",
-          type,
           ac,
+          type,
           parseFloat(c.AMOUNT)  || 0,
           c.CURRENCY     || header.CURRENCY  || "AED",
           c.NARRATION    || "",
@@ -350,18 +353,20 @@ router.put("/:batchNo", async (req, res) => {
       );
     }
 
-    // Re-insert settlement rows
-    const validStl = settlement.filter(s => String(s.DOC_NO || "").trim());
+    // Re-insert settlement rows (only those actually set off)
+    const validStl = settlement.filter(s =>
+      String(s.DOC_NO || "").trim() && (parseFloat(s.PV_AMT) || 0) > 0);
     for (let i = 0; i < validStl.length; i++) {
       const s = validStl[i];
       await conn.query(
         `INSERT INTO PAY_CHQ_BATCH_STL
-           (BATCH_NO, SEQ, DOC_NO, DOC_DT, DETAILS, INV_AMT, PV_AMT)
-         VALUES (?,?,?,?,?,?,?)`,
+           (BATCH_NO, SEQ, DOC_NO, DOC_TYPE, DOC_DT, DETAILS, INV_AMT, PV_AMT)
+         VALUES (?,?,?,?,?,?,?,?)`,
         [
           batchNo,
           s.SEQ || (i + 1),
           String(s.DOC_NO).trim(),
+          s.DOC_TYPE || "",
           toSqlDate(s.DOC_DT),
           s.DETAILS || "",
           parseFloat(s.INV_AMT) || 0,
@@ -611,6 +616,135 @@ chqRouter.put("/mark_printed/:chqNo", async (req, res) => {
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /pdc_batch/:batchNo/generate_pv ─────────────────────────────────────
+//  Assigns next PV (TRAN_TYPE '04'), writes VOUCHERS, TRAN_ACC, PDC_ISU, ADJ_DTL
+//  in one transaction, then stamps PV_NO + STATUS='PV Generated' on the batch.
+router.post("/:batchNo/generate_pv", async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { batchNo } = req.params;
+    const username = req.user?.username || "system";
+
+    const [[hdr]] = await conn.query(
+      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ? FOR UPDATE`, [batchNo]);
+    if (!hdr) throw new Error("Batch not found");
+    if (hdr.PV_NO) throw new Error(`PV ${hdr.PV_NO} already generated for this batch`);
+
+    const [cheques] = await conn.query(
+      `SELECT * FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+    const [settlement] = await conn.query(
+      `SELECT * FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+    if (!cheques.length) throw new Error("No cheques to post");
+
+    const [[mx]] = await conn.query(
+      `SELECT IFNULL(MAX(CAST(VCHR_NO AS UNSIGNED)),0)+1 AS NEXT_NO
+         FROM VOUCHERS WHERE TRAN_TYPE = '04'`);
+    const pvNo = String(mx.NEXT_NO).padStart(10, "0");
+
+    const pvDate = hdr.BATCH_DT;
+    const total  = cheques.reduce((t, c) => t + (Number(c.AMOUNT) || 0), 0);
+    const now    = new Date();
+    const trDate = now.toISOString().slice(0, 10);
+    const trTime = now.toTimeString().slice(0, 8);
+
+    // a) VOUCHERS
+    await conn.query(
+      `INSERT INTO VOUCHERS
+         (TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, AMOUNT,
+          NARRATION1, PAID_TO, CUR_CODE, REF_NO)
+       VALUES ('04',?,?,?,?,?,?,?,'AED',?)`,
+      [pvNo, pvDate, hdr.SUP_CODE, hdr.BANK_CODE, total,
+       hdr.NARRATION || "", hdr.SUP_NAME || "", hdr.BATCH_NO]);
+
+    // b) TRAN_ACC — credit (bank, total) + debit per cheque (supplier)
+    let sr = 1;
+    await conn.query(
+      `INSERT INTO TRAN_ACC
+         (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
+          NARRATION1, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
+       VALUES ('04',?,?,?,?,'C',?,?,?,?,?,?)`,
+      [pvNo, pvDate, hdr.BANK_CODE, total, hdr.NARRATION || "",
+       username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
+    for (const c of cheques) {
+      await conn.query(
+        `INSERT INTO TRAN_ACC
+           (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
+            NARRATION1, NARRATION2,USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
+         VALUES ('04',?,?,?,?,'D',?,?,?,?,?,?)`,
+        [pvNo, pvDate, hdr.SUP_CODE, Number(c.AMOUNT) || 0, hdr.NARRATION || "",
+         `Chq: ${c.CHQ_NO} Dt: ${c.CHQ_DT}`,
+         username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
+    }
+
+    // c) pdc_isu — one row per cheque
+    let psr = 1;
+    for (const c of cheques) {
+      await conn.query(
+        `INSERT INTO pdc_isu
+           (TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, CHQ_BANK,
+            PDC_CODE, SUP_CODE, AMOUNT, NARRATION, REALISED, MAIN_SR_NO)
+         VALUES ('04',?,?,?,?,?,?,?,?,?,'N',?)`,
+        [pvNo, pvDate, c.CHQ_NO, c.CHQ_DT, hdr.BANK_CODE,
+         hdr.BANK_CODE, hdr.SUP_CODE, Number(c.AMOUNT) || 0,
+         (c.NARRATION || "").slice(0, 40), psr++]);
+    }
+
+    // d) ADJ_DTL — one row per settled invoice (PV_AMT > 0)
+    let asr = 1;
+    for (const s of settlement) {
+      if (!(Number(s.PV_AMT) > 0)) continue;
+      await conn.query(
+        `INSERT INTO ADJ_DTL
+           (SOURCE_DOC, SOURCE_TYPE, SOURCE_DATE, ACC_CODE,
+            STLD_DOC, STLD_TYPE, STLD_AMT, STLD_DBCR, STLD_DATE,
+            MAIN_SR_NO, REF_NO)
+         VALUES (?,'04',?,?,?,?,?,'C',?,?,?)`,
+        [pvNo, pvDate, hdr.SUP_CODE,
+         s.DOC_NO, s.DOC_TYPE || "", Number(s.PV_AMT) || 0, s.DOC_DT,
+         asr++, hdr.BATCH_NO]);
+    }
+
+    await conn.query(
+      `UPDATE PAY_CHQ_BATCH SET PV_NO = ?, STATUS = 'PV Generated' WHERE BATCH_NO = ?`,
+      [pvNo, batchNo]);
+
+    await conn.commit();
+    console.log(`[generate_pv] Batch ${batchNo} → PV ${pvNo} (${cheques.length} chqs, total ${total})`);
+    res.json({ success: true, PV_NO: pvNo });
+  } catch (e) {
+    await conn.rollback();
+    console.error("[generate_pv]", e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
+  }
+});
+
+// ── PUT /pdc_batch/:batchNo/mark_printed ─────────────────────────────────────
+//  Flags all cheques in the batch as printed and advances STATUS to 'Printed'.
+router.put("/:batchNo/mark_printed", async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { batchNo } = req.params;
+    await conn.query(
+      `UPDATE PAY_CHQ_BATCH_DET SET PRINT_STATUS = 'Printed' WHERE BATCH_NO = ?`,
+      [batchNo]);
+    await conn.query(
+      `UPDATE PAY_CHQ_BATCH SET STATUS = 'Printed' WHERE BATCH_NO = ?`,
+      [batchNo]);
+    await conn.commit();
+    res.json({ success: true });
+  } catch (e) {
+    await conn.rollback();
+    console.error("[mark_printed]", e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    conn.release();
   }
 });
 
