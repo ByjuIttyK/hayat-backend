@@ -3458,7 +3458,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-      "select MAX(VCHR_NO)   MXVCHR  FROM tran_acc WHERE TRAN_TYPE =?",
+      "select MAX(VCHR_NO) as  MXVCHR  FROM tran_acc WHERE TRAN_TYPE =? and Substr(Vchr_no,1,1)<'A' ",
       [req.params.Tp],
 
       function (err, result) {
@@ -6109,6 +6109,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
     }
   );
 });
+
 app.get("/api/ngpnet/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
@@ -6176,7 +6177,7 @@ app.get("/api/purchaseHdr/:vch", function (req, res) {
 app.get("/api/purchaseitems/:vch", function (req, res) {
   connection.query(
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
-    " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,COALESCE(a.JOB_NO, 'N/A') AS JOB_NO, " +
+    " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,' ' AS JOB_NO, " +
     " a.QTY, a.COST AS RATE, ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
     " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
     " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
@@ -6207,10 +6208,10 @@ app.get("/api/purchaseItemsJob/:Job", function (req, res) {
     "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
     " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME1 ,p.LPO_NO,COALESCE(l.JOB_NO, 'N/A') AS JOB_NO, " +
     " a.QTY, a.COST , ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
-    " from purchase_items a  "+
-    "    left outer join purchase_hdr p on a.SRV_NO = p.PJV_NO "+
-    "    left outer join lpo_net l on p.LPO_NO = l.LPO_NO "+
-     "   left outer join acc_mst b on b.ACC_CODE = a.ACC_CODE " +
+    " from purchase_items a  " +
+    "    left outer join purchase_hdr p on a.SRV_NO = p.PJV_NO " +
+    "    left outer join lpo_net l on p.LPO_NO = l.LPO_NO " +
+    "   left outer join acc_mst b on b.ACC_CODE = a.ACC_CODE " +
     "    LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
     " WHERE  l.JOB_NO = ?  " +
     " ORDER BY a.SR_NO",
@@ -6461,6 +6462,30 @@ app.get("/api/prethdr/:vch", function (req, res) {
     }
   );
 });
+
+app.get("/api/nstklst/:dys", function (req, res) {
+  connection.query(
+    "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
+    " b.SUP_NAME, a.INV_NET_AMT, a.LPO_NO,a.DR_CODE,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
+    " from purchase_HDR_ns a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
+    " where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY   " +
+    " ORDER BY a.PJV_NO DESC",
+
+    [req.params.dys],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        //  console.log("Oracle Purchase LC LST", result.rows);
+        res.json(result)
+      }
+    }
+  );
+});
+
+
+
 
 app.get("/api/ngplst/:dys", function (req, res) {
   connection.query(
@@ -9185,10 +9210,10 @@ app.put("/api/chq_layout/:bankCode", function (req, res) {
   const vals = [
     req.params.bankCode,
     b.PAGE_W ?? 203, b.PAGE_H ?? 90, b.FONT_PT ?? 10, b.WORDS_MAXW ?? 150,
-    f(b.date, "x", 158),    f(b.date, "y", 22),
-    f(b.payee, "x", 36),    f(b.payee, "y", 40),
-    f(b.words1, "x", 26),   f(b.words1, "y", 51),
-    f(b.words2, "x", 12),   f(b.words2, "y", 59),
+    f(b.date, "x", 158), f(b.date, "y", 22),
+    f(b.payee, "x", 36), f(b.payee, "y", 40),
+    f(b.words1, "x", 26), f(b.words1, "y", 51),
+    f(b.words2, "x", 12), f(b.words2, "y", 59),
     f(b.figures, "x", 188), f(b.figures, "y", 58),
     (req.user && req.user.username) || "system",
   ];
@@ -9214,6 +9239,7 @@ app.put("/api/chq_layout/:bankCode", function (req, res) {
     }
   );
 });
+
 //───────────────────────────────────────────────────────────────────────────── */
 
 //Jv Routes
@@ -9239,17 +9265,20 @@ app.use(pvXlRoutes);              // routes already include /api/
 app.use('/api', pvBuildRoute);    // exposes POST /api/build-pv-excel
 //
 const bnkRecoRoutes = require('./bankRecoRoutes');
-app.use( bnkRecoRoutes);
+app.use(bnkRecoRoutes);
 
 //
 //const payChqApi = require("./routes/pay_chq_batch_api");
 const payChqApi = require("./pay_chq_batch_api");
 app.use("/pdc_batch", payChqApi);
-app.use("/pay_chq",   payChqApi.chqRouter);
+app.use("/pay_chq", payChqApi.chqRouter);
 
 //
 const chequeScanRoutes = require("./ChequeScanRoutes");
 app.use("/ai", authMiddleware, chequeScanRoutes);
+//
+const glSuggestApi = require('./gl_suggest_api')(connection);
+app.use('/api/gl-suggest', authMiddleware, glSuggestApi);
 //
 const rcpChqApi = require("./rcp_chq_batch_api");
 app.use("/rcp_batch", rcpChqApi);
@@ -9263,4 +9292,39 @@ const boqRoutes = require('./boqRoutes')(connection);
 app.use('/api', boqRoutes);
 //Doc Attach Save/Retrive routes
 const docAttachRoutes = require('./docAttachRoute')(connection);
+
+//bank1_lov_api.js — Serves the "primary bank" list (bank_mst rows where
+//  ACC_INDICATOR = 'BANK1') for the lovmetadata-driven LOV picker.
 app.use('/api', docAttachRoutes);
+const bank1LovApi = require('./bank1_lov_api')(connection);
+app.use('/api', bank1LovApi);
+//
+const pinvNsScanRoutes = require('./pinv_ns_scan_api')(connection);
+app.use('/api/ai', pinvNsScanRoutes);   // → POST /api/ai/pinv_ns_scan
+//
+const pinvNsRoutes = require('./pinv_ns_api')(connection);
+app.use('/api', pinvNsRoutes);
+//
+const fabInvPrint = require('./routes/fabInvPrint_route');
+app.use('/api', fabInvPrint);
+//
+const analyticsRoutes=require('./routes/analyticsRoutes')(connection);
+ app.use('/api/analytics', analyticsRoutes);
+ //
+ const acPeriodRoute = require('./routes/ac_period_api')(connection);
+ app.use('/api/ac-period',acPeriodRoute);
+ //
+ const { startAuditArchiver } = require('./utils/auditArchiver');
+startAuditArchiver(connection);   // auto cron inside same HayatDb process
+//
+app.use('/api/audit', require('./routes/audit_api')(connection));
+//NL Dispatcher
+const nlDispatch = require('./routes/nlDispatchRoutes')(connection);
+app.use('/api/nl-dispatch', nlDispatch);
+
+///const nlDispatch = require('./routes/nlDispatchRoutes')(connection);
+const agentRoutes = require('./routes/agentRoutes')(connection);
+app.use('/api/agent', authMiddleware, agentRoutes);
+
+const  faRoutes = require('./routes/fa_routes')(connection);
+app.use('/api',faRoutes);
