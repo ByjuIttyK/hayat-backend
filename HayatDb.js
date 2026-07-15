@@ -5572,7 +5572,7 @@ app.get("/api/quothdr/:id", function (req, res) {
   const sql = `
     SELECT 
       a.QUOT_NO,
-      DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y) AS QUOT_DATE,
+      DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y') AS QUOT_DATE,
       a.CUST_CODE,
       a.ATTN,
       a.NARRATION,
@@ -5609,7 +5609,7 @@ app.get("/api/quothdr/:id", function (req, res) {
 app.get("/api/quotitem/:id", function (req, res) {
 
   connection.query(
-    "select QUOT_NO,  DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y) AS QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
+    "select QUOT_NO,  DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y') AS QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
     " round(qty*rate,2) AMOUNT" +
     " FROM quot_item  WHERE QUOT_NO = ? " +
     "  order by sr_no",
@@ -9328,3 +9328,12 @@ app.use('/api/agent', authMiddleware, agentRoutes);
 
 const  faRoutes = require('./routes/fa_routes')(connection);
 app.use('/api',faRoutes);
+
+const faDepRoutes =require("./routes/fa_dep_run_api")(connection);
+app.use('/api',faDepRoutes);
+//
+const faTransferRoutes = require('./routes/fa_asset_transfer_api')(connection);
+app.use('/api/fa-transfer', faTransferRoutes);
+//
+const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
+   app.use('/api/fa-disposal', faDisposalRoutes);
