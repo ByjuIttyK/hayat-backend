@@ -9337,3 +9337,8 @@ app.use('/api/fa-transfer', faTransferRoutes);
 //
 const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
    app.use('/api/fa-disposal', faDisposalRoutes);
+
+ const ledgerDrillRoutes = require('./LedgerDrillRoutes')(connection);
+   app.use(ledgerDrillRoutes);
+//
+   app.use(require('./FabInvSuggestRoutes')(connection))
