@@ -42,7 +42,7 @@ router.get("/match_customer", (req, res) => {
   if (!scanned.trim()) return res.json({ matches: [] });
 
   connection.query(
-    "SELECT CUST_CODE, CUST_NAME FROM CUS_MST",
+    "SELECT CUST_CODE, CUST_NAME FROM cus_mst",
     (err, rows) => {
       if (err) {
         console.error("match_customer:", err.message);

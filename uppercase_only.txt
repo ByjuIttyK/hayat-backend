@@ -1,0 +1,94 @@
+CustomerMatchRoutes.js:45:    "SELECT CUST_CODE, CUST_NAME FROM CUS_MST",
+FabInvSuggestRoutes.js:1091:             FROM SRV_HDR
+FabInvSuggestRoutes.js:1124:             FROM SRV_ITEMS s
+HayatDb.js:3087:        "UPDATE LPO_ITEMS SET ITEM_CODE = :1, ITEM_NAME = :2, QTY = :3, RATE = :4, UNIT = :5, CAT_CODE = :6 WHERE LPO_NO = :7 AND SR_NO = :8",
+HayatDb.js:3196:// INSERT /UPDATE SUPPLIER 
+HayatDb.js:3487:      //FROM CUS_MST WHERE CUST_CODE=?
+HayatDb.js:3651:    " a.CHQ_NO as CHQ_NO,DATE_FORMAT(a.CHQ_DATE,'%d/%m/%Y') AS CHQ_DATE, DEBIT,CREDIT FROM V_BANK_RECO a  " +
+HayatDb.js:3848:    " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM TRAN_ACC, V_ALL_CHEQUES b "+
+HayatDb.js:4335:      "UPDATE GL_MST SET GL_HEAD=:1, GL_CODE=:2 ," +
+HayatDb.js:4436:      "UPDATE BANK_MST SET BANK_NAME=:1 " + " where BANK_CODE=:2 ",
+HayatDb.js:4583:      "UPDATE TRAN_TYPE SET TYPE_DES=:1, TRAN_TYPE=:2 ," +
+HayatDb.js:7343:      "UPDATE INQ_TYPE_MST SET INQ_TYPE_DESC=:1 " + " where INQ_TYPE_CODE=:2 ",
+HayatDb.js:7412:      "UPDATE SINQ_RCPT_MST SET RCP_DESC=:1" + " where RCP_CODE=:2 ",
+HayatDb.js:7483:      "UPDATE SALES_INQUIRY_STATUS SET STAT_DESC=:1" + " where STAT_CODE=:2 ",
+HayatDb.js:7550:      "UPDATE NET_SALES  SET " +
+HayatDb.js:8037:      "UPDATE LPO_ITEMS SET  ITEM_CODE=:1 ," +
+HayatDb.js:8068:      "UPDATE LPO_NET SET   SUP_CODE =:1, NARRATION =:2," +
+HayatDb.js:8119:          "UPDATE TRAN_ACC SET  SR_NO=:1 ," +
+HayatDb.js:8260:          "UPDATE ADJ_DTL SET  SR_NO=:1 ," +
+HayatDb.js:8343:        "UPDATE SIV_HDR SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), " +
+HayatDb.js:8413:      "UPDATE INVOICE  SET INV_RATE=:1 " + " where INV_NO=:2  AND SR_NO =:3",
+HayatDb.js:8460:          "UPDATE SIV_ITEMS SET  SIV_DATE =TO_DATE(:1,'DD-MM-YYYY'), SR_NO=:2 ," +
+HayatDb.js:8539:        "UPDATE SRV_HDR SET  SRV_DATE =to_date(:1,'YYYY-MM-DD'), " +
+HayatDb.js:8809://SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM VOUCHERS;
+agents/agentPdcPayable.js:40:     LEFT JOIN SUP_MST s ON s.SUP_CODE = p.SUP_CODE
+agents/agentPdcRealise.js:40:     LEFT JOIN CUS_MST c ON c.CUST_CODE = p.CUST_CODE
+gl_suggest_api.js:138:        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
+gl_suggest_api.js:139:        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM SUP_MST ORDER BY SUP_NAME LIMIT 300'),
+gl_suggest_api.js:265:        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
+gl_suggest_api.js:266:        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM CUS_MST ORDER BY CUST_NAME LIMIT 300'),
+gl_suggest_api.js:404:        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
+gl_suggest_api.js:405:        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM CUS_MST ORDER BY CUST_NAME LIMIT 200'),
+gl_suggest_api.js:406:        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM SUP_MST ORDER BY SUP_NAME LIMIT 200'),
+pay_chq_batch_api.js:59:         FROM PAY_CHQ_BATCH
+pay_chq_batch_api.js:92:       FROM PAY_CHQ_BATCH b
+pay_chq_batch_api.js:93:       LEFT JOIN PAY_CHQ_BATCH_DET d ON d.BATCH_NO = b.BATCH_NO
+pay_chq_batch_api.js:113:      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:121:         FROM PAY_CHQ_BATCH_DET
+pay_chq_batch_api.js:129:         FROM PAY_CHQ_BATCH_STL
+pay_chq_batch_api.js:159:      `INSERT INTO PAY_CHQ_BATCH
+pay_chq_batch_api.js:191:        `INSERT INTO PAY_CHQ_BATCH_DET
+pay_chq_batch_api.js:222:        `INSERT INTO PAY_CHQ_BATCH_STL
+pay_chq_batch_api.js:268:      `SELECT STATUS FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+pay_chq_batch_api.js:278:      `UPDATE PAY_CHQ_BATCH SET
+pay_chq_batch_api.js:305:      `DELETE FROM PAY_CHQ_BATCH_DET
+pay_chq_batch_api.js:310:      `DELETE FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:323:        `INSERT INTO PAY_CHQ_BATCH_DET
+pay_chq_batch_api.js:362:        `INSERT INTO PAY_CHQ_BATCH_STL
+pay_chq_batch_api.js:404:      `SELECT STATUS FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+pay_chq_batch_api.js:410:    await conn.query(`DELETE FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ?`, [batchNo]);
+pay_chq_batch_api.js:411:    await conn.query(`DELETE FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ?`, [batchNo]);
+pay_chq_batch_api.js:412:    await conn.query(`DELETE FROM PAY_CHQ_BATCH     WHERE BATCH_NO = ?`, [batchNo]);
+pay_chq_batch_api.js:434:      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+pay_chq_batch_api.js:441:      `SELECT * FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ? ORDER BY CHQ_DT, SEQ`, [batchNo]
+pay_chq_batch_api.js:444:      `SELECT * FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]
+pay_chq_batch_api.js:450:      `SELECT PV_NO FROM GL_VOUCHER
+pay_chq_batch_api.js:466:      `INSERT INTO GL_VOUCHER
+pay_chq_batch_api.js:483:        `INSERT INTO GL_VOU_CHQ
+pay_chq_batch_api.js:498:        `INSERT INTO GL_VOU_STL
+pay_chq_batch_api.js:507:      `UPDATE PAY_CHQ_BATCH SET STATUS = 'PV Done', PV_NO = ? WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:538:         FROM PAY_CHQ_BATCH_DET d
+pay_chq_batch_api.js:539:         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+pay_chq_batch_api.js:554:         FROM PAY_CHQ_BATCH_DET d
+pay_chq_batch_api.js:555:         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+pay_chq_batch_api.js:562:         FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:577:         FROM PAY_CHQ_BATCH_DET d
+pay_chq_batch_api.js:578:         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+pay_chq_batch_api.js:585:         FROM PAY_CHQ_BATCH WHERE PV_NO = ? LIMIT 1`,
+pay_chq_batch_api.js:611:      `UPDATE PAY_CHQ_BATCH_DET
+pay_chq_batch_api.js:633:      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ? FOR UPDATE`, [batchNo]);
+pay_chq_batch_api.js:638:      `SELECT * FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+pay_chq_batch_api.js:640:      `SELECT * FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+pay_chq_batch_api.js:645:         FROM VOUCHERS WHERE TRAN_TYPE = '04'`);
+pay_chq_batch_api.js:656:      `INSERT INTO VOUCHERS
+pay_chq_batch_api.js:666:      `INSERT INTO TRAN_ACC
+pay_chq_batch_api.js:674:        `INSERT INTO TRAN_ACC
+pay_chq_batch_api.js:701:        `INSERT INTO ADJ_DTL
+pay_chq_batch_api.js:712:      `UPDATE PAY_CHQ_BATCH SET PV_NO = ?, STATUS = 'PV Generated' WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:735:      `UPDATE PAY_CHQ_BATCH_DET SET PRINT_STATUS = 'Printed' WHERE BATCH_NO = ?`,
+pay_chq_batch_api.js:738:      `UPDATE PAY_CHQ_BATCH SET STATUS = 'Printed' WHERE BATCH_NO = ?`,
+pv_excel_api.js:71:     ON DUPLICATE KEY UPDATE STATUS = STATUS`,
+rcp_chq_batch_api.js:267:         FROM VOUCHERS WHERE TRAN_TYPE = '03'`);
+rcp_chq_batch_api.js:278:      `INSERT INTO VOUCHERS
+rcp_chq_batch_api.js:288:      `INSERT INTO TRAN_ACC
+rcp_chq_batch_api.js:296:        `INSERT INTO TRAN_ACC
+rcp_chq_batch_api.js:323:        `INSERT INTO ADJ_DTL
+routes/agentRoutes.js:250:        `SELECT ACC_CODE, ACC_HEAD FROM ACC_MST
+routes/fabInvPrint_route.js:18:       FROM COMPANY LIMIT 1`
+routes/fabInvPrint_route.js:23:      `SELECT VAT_REG_NO, VAT_PERC FROM VAT_MST LIMIT 1`
+routes/fabInvPrint_route.js:28:      `SELECT * FROM FAB_INV_HDR WHERE INV_NO = ?`, [invNo]
+routes/fabInvPrint_route.js:39:       FROM CUS_MST WHERE CUST_CODE = ?`, [hdr.CUST_CODE]
+routes/fabInvPrint_route.js:46:       FROM FAB_INV_DTL WHERE INV_NO = ? ORDER BY SR_NO`, [invNo]
+routes/fabInvPrint_route.js:54:         FROM SALES_BANK_DTL WHERE BANK_CODE = ?`, [hdr.BANK_CODE]
+rv_excel_api.js:133:     ON DUPLICATE KEY UPDATE STATUS = STATUS`,   // no-op if somehow called twice

@@ -15,17 +15,17 @@ router.get('/fab-inv/print-data/:invNo', async (req, res) => {
     // 1. Company info
     const [[company]] = await db.promise().query(
       `SELECT NAME, ADDRESS1, ADDRESS2, PLACE, PHONE, FAX, EMAIL, WEB_SITE
-       FROM COMPANY LIMIT 1`
+       FROM company LIMIT 1`
     );
 
     // 2. Company VAT
     const [[vatMst]] = await db.promise().query(
-      `SELECT VAT_REG_NO, VAT_PERC FROM VAT_MST LIMIT 1`
+      `SELECT VAT_REG_NO, VAT_PERC FROM vat_mst LIMIT 1`
     );
 
     // 3. Invoice header
     const [[hdr]] = await db.promise().query(
-      `SELECT * FROM FAB_INV_HDR WHERE INV_NO = ?`, [invNo]
+      `SELECT * FROM fab_inv_hdr WHERE INV_NO = ?`, [invNo]
     );
     if (!hdr) return res.status(404).json({ error: 'Invoice not found' });
 
@@ -36,14 +36,14 @@ router.get('/fab-inv/print-data/:invNo', async (req, res) => {
       `SELECT CUST_NAME, CUST_ADR1, CUST_ADR2, CUST_ADR3, CUST_ADR4,
               CUS_TEL1, CUS_FAX1,
               COALESCE(VAT_REG_NO, '') AS CUST_TRN
-       FROM CUS_MST WHERE CUST_CODE = ?`, [hdr.CUST_CODE]
+       FROM cus_mst WHERE CUST_CODE = ?`, [hdr.CUST_CODE]
     );
 
     // 5. Line items
     const [items] = await db.promise().query(
       `SELECT SR_NO, INV_ITEM_DESC, INV_QTY, INV_UNIT,
               INV_RATE, VAT_PERC, DIS_COUNT
-       FROM FAB_INV_DTL WHERE INV_NO = ? ORDER BY SR_NO`, [invNo]
+       FROM fab_inv_dtl WHERE INV_NO = ? ORDER BY SR_NO`, [invNo]
     );
 
     // 6. Bank details
@@ -51,7 +51,7 @@ router.get('/fab-inv/print-data/:invNo', async (req, res) => {
     if (hdr.BANK_CODE) {
       const [[bankRow]] = await db.promise().query(
         `SELECT BANK_CODE, BANK_DETAILS
-         FROM SALES_BANK_DTL WHERE BANK_CODE = ?`, [hdr.BANK_CODE]
+         FROM sales_bank_dtl WHERE BANK_CODE = ?`, [hdr.BANK_CODE]
       );
       bank = bankRow || null;
     }

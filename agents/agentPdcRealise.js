@@ -37,7 +37,7 @@ async function previewPdcRealise(db, params) {
        p.CUST_CODE, c.CUST_NAME,
        p.AMOUNT, p.NARRATION
      FROM   pdc_rcd p
-     LEFT JOIN CUS_MST c ON c.CUST_CODE = p.CUST_CODE
+     LEFT JOIN cus_mst c ON c.CUST_CODE = p.CUST_CODE
      WHERE  (p.REALISED IS NULL OR p.REALISED != 'Y')
      AND    DATE(p.CHQ_DATE) <= ?
      ORDER  BY p.CHQ_DATE, p.CUST_CODE`,

@@ -247,7 +247,7 @@ Return ONLY this JSON:
   router.get('/banks', async (req, res) => {
     try {
       const [rows] = await db.query(
-        `SELECT ACC_CODE, ACC_HEAD FROM ACC_MST
+        `SELECT ACC_CODE, ACC_HEAD FROM acc_mst
          WHERE ACC_TYPE = 'B'
          ORDER BY ACC_HEAD`
       );

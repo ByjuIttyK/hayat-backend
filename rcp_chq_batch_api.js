@@ -264,7 +264,7 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
 
     const [[mx]] = await conn.query(
       `SELECT IFNULL(MAX(CAST(VCHR_NO AS UNSIGNED)),0)+1 AS NEXT_NO
-         FROM VOUCHERS WHERE TRAN_TYPE = '03'`);
+         FROM vouchers WHERE TRAN_TYPE = '03'`);
     const rvNo = String(mx.NEXT_NO).padStart(10, "0");
 
     const rvDate = hdr.BATCH_DT;
@@ -275,7 +275,7 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
 
     // a) VOUCHERS — RV header. ACC_CODE = bank (the receiving account).
     await conn.query(
-      `INSERT INTO VOUCHERS
+      `INSERT INTO vouchers
          (TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, AMOUNT,
           NARRATION1, PAID_TO, CUR_CODE, REF_NO)
        VALUES ('03',?,?,?,?,?,?,?,'AED',?)`,
@@ -285,7 +285,7 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
     // b) TRAN_ACC — Debit bank (total) + Credit customer per cheque
     let sr = 1;
     await conn.query(
-      `INSERT INTO TRAN_ACC
+      `INSERT INTO tran_acc
          (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
           NARRATION1, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
        VALUES ('03',?,?,?,?,'D',?,?,?,?,?,?)`,
@@ -293,7 +293,7 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
        username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
     for (const c of cheques) {
       await conn.query(
-        `INSERT INTO TRAN_ACC
+        `INSERT INTO tran_acc
            (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
             NARRATION1, NARRATION2, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
          VALUES ('03',?,?,?,?,'C',?,?,?,?,?,?,?)`,
@@ -320,7 +320,7 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
     for (const s of settlement) {
       if (!(Number(s.RV_AMT) > 0)) continue;
       await conn.query(
-        `INSERT INTO ADJ_DTL
+        `INSERT INTO adj_dtl
            (SOURCE_DOC, SOURCE_TYPE, SOURCE_DATE, ACC_CODE,
             STLD_DOC, STLD_TYPE, STLD_AMT, STLD_DBCR, STLD_DATE, MAIN_SR_NO, REF_NO)
          VALUES (?,'03',?,?,?,?,?,'D',?,?,?)`,

@@ -135,9 +135,9 @@ module.exports = function (connection) {
 
       // ── 1. Load account + supplier master for context ─────────────────────
       const [accounts, suppliers, supplierCandidates] = await Promise.all([
-        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
-        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM SUP_MST ORDER BY SUP_NAME LIMIT 300'),
-        findCandidates(connection, 'SUP_MST', 'SUP_CODE', 'SUP_NAME', narration),
+        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM acc_mst ORDER BY ACC_CODE LIMIT 400'),
+        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM sup_mst ORDER BY SUP_NAME LIMIT 300'),
+        findCandidates(connection, 'sup_mst', 'SUP_CODE', 'SUP_NAME', narration),
       ]);
 
       const accList = accounts.map(r => `${r.ACC_CODE} - ${r.ACC_HEAD}`).join('\n');
@@ -262,9 +262,9 @@ Return ONLY this JSON:
 
       // ── 1. Load account + customer master for context ─────────────────────
       const [accounts, customers, customerCandidates] = await Promise.all([
-        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
-        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM CUS_MST ORDER BY CUST_NAME LIMIT 300'),
-        findCandidates(connection, 'CUS_MST', 'CUST_CODE', 'CUST_NAME', narration),
+        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM acc_mst ORDER BY ACC_CODE LIMIT 400'),
+        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM cus_mst ORDER BY CUST_NAME LIMIT 300'),
+        findCandidates(connection, 'cus_mst', 'CUST_CODE', 'CUST_NAME', narration),
       ]);
 
       const accList = accounts.map(r => `${r.ACC_CODE} - ${r.ACC_HEAD}`).join('\n');
@@ -401,11 +401,11 @@ Return ONLY this JSON:
 
       // ── 1. Load accounts, customers and suppliers for context ─────────────
       const [accounts, customers, suppliers, custCandidates, supCandidates] = await Promise.all([
-        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM ACC_MST ORDER BY ACC_CODE LIMIT 400'),
-        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM CUS_MST ORDER BY CUST_NAME LIMIT 200'),
-        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM SUP_MST ORDER BY SUP_NAME LIMIT 200'),
-        findCandidates(connection, 'CUS_MST', 'CUST_CODE', 'CUST_NAME', narration),
-        findCandidates(connection, 'SUP_MST', 'SUP_CODE', 'SUP_NAME', narration),
+        dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM acc_mst ORDER BY ACC_CODE LIMIT 400'),
+        dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM cus_mst ORDER BY CUST_NAME LIMIT 200'),
+        dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM sup_mst ORDER BY SUP_NAME LIMIT 200'),
+        findCandidates(connection, 'cus_mst', 'CUST_CODE', 'CUST_NAME', narration),
+        findCandidates(connection, 'sup_mst', 'SUP_CODE', 'SUP_NAME', narration),
       ]);
 
       const accList  = accounts.map(r => `${r.ACC_CODE} - ${r.ACC_HEAD}`).join('\n');

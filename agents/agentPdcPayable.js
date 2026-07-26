@@ -37,7 +37,7 @@ async function previewPdcPayable(db, params) {
        p.SUP_CODE, s.SUP_NAME,
        p.AMOUNT, p.NARRATION
      FROM   pdc_isu p
-     LEFT JOIN SUP_MST s ON s.SUP_CODE = p.SUP_CODE
+     LEFT JOIN sup_mst s ON s.SUP_CODE = p.SUP_CODE
      WHERE  (p.REALISED IS NULL OR p.REALISED != 'Y')
      AND    DATE(p.CHQ_DATE) <= ?
      ORDER  BY p.CHQ_DATE, p.SUP_CODE`,

@@ -1088,7 +1088,7 @@ Text: """${text}"""`;
                   SUP_CODE, LPO_NO, PO_NO, INV_NO,
                   DATE_FORMAT(INV_DATE,'%Y-%m-%d') AS INV_DATE,
                   NARRATION, DISCOUNT, VAT_AMOUNT, INV_AMOUNT, PJV_NO
-             FROM SRV_HDR
+             FROM srv_hdr
             WHERE SRV_NO = ?
             LIMIT 1`,
           [srvNo]
@@ -1121,7 +1121,7 @@ Text: """${text}"""`;
                   s.SR_NO, s.LOC_CODE, s.ITEM_CODE, s.QTY, s.COST,
                   s.ITEM_UNIT, s.ACC_CODE, s.JOB_NO, s.PO_NO,
                   COALESCE(i.ITEM_NAME1, '') AS ITEM_NAME
-             FROM SRV_ITEMS s
+             FROM srv_items s
              LEFT JOIN (SELECT ITEM_CODE, MIN(ITEM_NAME1) AS ITEM_NAME1
                           FROM item_mst GROUP BY ITEM_CODE) i
                ON i.ITEM_CODE = s.ITEM_CODE

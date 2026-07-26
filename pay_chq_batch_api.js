@@ -56,7 +56,7 @@ router.get("/next_no", async (req, res) => {
     const year = new Date().getFullYear();
     const rows = await q(
       `SELECT BATCH_NO
-         FROM PAY_CHQ_BATCH
+         FROM pay_chq_batch
         WHERE BATCH_NO LIKE ?
         ORDER BY BATCH_NO DESC
         LIMIT 1`,
@@ -89,8 +89,8 @@ router.get("/", async (req, res) => {
          COUNT(d.SEQ)                                  AS CHQ_COUNT,
          COALESCE(SUM(d.AMOUNT), 0)                    AS CHQ_TOTAL,
          SUM(d.PRINT_STATUS IN ('Printed','Cleared'))  AS PRINTED_COUNT
-       FROM PAY_CHQ_BATCH b
-       LEFT JOIN PAY_CHQ_BATCH_DET d ON d.BATCH_NO = b.BATCH_NO
+       FROM pay_chq_batch b
+       LEFT JOIN pay_chq_batch_det d ON d.BATCH_NO = b.BATCH_NO
        GROUP BY b.BATCH_NO,
                 b.BATCH_DT, b.SUP_CODE, b.SUP_NAME,
                 b.BANK_CODE, b.BANK_NAME, b.CURRENCY,
@@ -110,7 +110,7 @@ router.get("/:batchNo", async (req, res) => {
     const { batchNo } = req.params;
 
     const [header] = await q(
-      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`,
+      `SELECT * FROM pay_chq_batch WHERE BATCH_NO = ?`,
       [batchNo]
     );
     if (!header) return res.status(404).json({ error: "Batch not found" });
@@ -118,7 +118,7 @@ router.get("/:batchNo", async (req, res) => {
     const cheques = await q(
       `SELECT SEQ, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH,CREDIT_AC,
               PDC_TYPE, AMOUNT, CURRENCY, NARRATION, PRINT_STATUS, PRINT_DT
-         FROM PAY_CHQ_BATCH_DET
+         FROM pay_chq_batch_det
         WHERE BATCH_NO = ?
         ORDER BY CHQ_DT, SEQ`,
       [batchNo]
@@ -126,7 +126,7 @@ router.get("/:batchNo", async (req, res) => {
 
     const settlement = await q(
       `SELECT SEQ, DOC_NO, DOC_DT, DETAILS, INV_AMT, PV_AMT
-         FROM PAY_CHQ_BATCH_STL
+         FROM pay_chq_batch_stl
         WHERE BATCH_NO = ?
         ORDER BY SEQ`,
       [batchNo]
@@ -156,7 +156,7 @@ router.post("/", async (req, res) => {
 
     // ── Insert header ──────────────────────────────────────────────────────
     await conn.query(
-      `INSERT INTO PAY_CHQ_BATCH
+      `INSERT INTO pay_chq_batch
          (BATCH_NO, BATCH_DT, SUP_CODE, SUP_NAME,
           BANK_CODE, BANK_NAME, CURRENCY, NARRATION, STATUS, PV_NO,
           CREATED_BY)
@@ -188,7 +188,7 @@ router.post("/", async (req, res) => {
       const creditAc = pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
 
       await conn.query(
-        `INSERT INTO PAY_CHQ_BATCH_DET
+        `INSERT INTO pay_chq_batch_det
            (BATCH_NO, SEQ, CHQ_NO, CHQ_DT,
             BANK_NAME, BRANCH, CREDIT_AC,
             PDC_TYPE,
@@ -219,7 +219,7 @@ router.post("/", async (req, res) => {
     for (let i = 0; i < validStl.length; i++) {
       const s = validStl[i];
       await conn.query(
-        `INSERT INTO PAY_CHQ_BATCH_STL
+        `INSERT INTO pay_chq_batch_stl
            (BATCH_NO, SEQ, DOC_NO, DOC_TYPE, DOC_DT, DETAILS, INV_AMT, PV_AMT)
          VALUES (?,?,?,?,?,?,?,?)`,
         [
@@ -265,7 +265,7 @@ router.put("/:batchNo", async (req, res) => {
 
     // Guard: cannot edit PV Done or Closed
     const [existing] = await q(
-      `SELECT STATUS FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+      `SELECT STATUS FROM pay_chq_batch WHERE BATCH_NO = ?`, [batchNo]
     );
     if (!existing) return res.status(404).json({ error: "Batch not found" });
     if (["PV Done","Closed"].includes(existing.STATUS))
@@ -275,7 +275,7 @@ router.put("/:batchNo", async (req, res) => {
 
     // ── Update header ──────────────────────────────────────────────────────
     await conn.query(
-      `UPDATE PAY_CHQ_BATCH SET
+      `UPDATE pay_chq_batch SET
          BATCH_DT   = ?,
          SUP_CODE   = ?,
          SUP_NAME   = ?,
@@ -302,12 +302,12 @@ router.put("/:batchNo", async (req, res) => {
     // ── Delete old detail rows, re-insert ─────────────────────────────────
     // Only delete cheque rows that are NOT already Printed/Cleared
     await conn.query(
-      `DELETE FROM PAY_CHQ_BATCH_DET
+      `DELETE FROM pay_chq_batch_det
         WHERE BATCH_NO = ? AND PRINT_STATUS = 'Pending'`,
       [batchNo]
     );
     await conn.query(
-      `DELETE FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ?`,
+      `DELETE FROM pay_chq_batch_stl WHERE BATCH_NO = ?`,
       [batchNo]
     );
 
@@ -320,7 +320,7 @@ router.put("/:batchNo", async (req, res) => {
       const ac   = c.PDC_AC   || pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
 
       await conn.query(
-        `INSERT INTO PAY_CHQ_BATCH_DET
+        `INSERT INTO pay_chq_batch_det
            (BATCH_NO, SEQ, CHQ_NO, CHQ_DT,
             BANK_NAME, BRANCH, CREDIT_AC,
             PDC_TYPE,
@@ -359,7 +359,7 @@ router.put("/:batchNo", async (req, res) => {
     for (let i = 0; i < validStl.length; i++) {
       const s = validStl[i];
       await conn.query(
-        `INSERT INTO PAY_CHQ_BATCH_STL
+        `INSERT INTO pay_chq_batch_stl
            (BATCH_NO, SEQ, DOC_NO, DOC_TYPE, DOC_DT, DETAILS, INV_AMT, PV_AMT)
          VALUES (?,?,?,?,?,?,?,?)`,
         [
@@ -401,15 +401,15 @@ router.delete("/:batchNo", async (req, res) => {
     const { batchNo } = req.params;
 
     const [existing] = await q(
-      `SELECT STATUS FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+      `SELECT STATUS FROM pay_chq_batch WHERE BATCH_NO = ?`, [batchNo]
     );
     if (!existing) return res.status(404).json({ error: "Batch not found" });
     if (["PV Done","Closed"].includes(existing.STATUS))
       return res.status(400).json({ error: `Cannot delete a ${existing.STATUS} batch` });
 
-    await conn.query(`DELETE FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ?`, [batchNo]);
-    await conn.query(`DELETE FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ?`, [batchNo]);
-    await conn.query(`DELETE FROM PAY_CHQ_BATCH     WHERE BATCH_NO = ?`, [batchNo]);
+    await conn.query(`DELETE FROM pay_chq_batch_stl WHERE BATCH_NO = ?`, [batchNo]);
+    await conn.query(`DELETE FROM pay_chq_batch_det WHERE BATCH_NO = ?`, [batchNo]);
+    await conn.query(`DELETE FROM pay_chq_batch     WHERE BATCH_NO = ?`, [batchNo]);
 
     await conn.commit();
     console.log(`[DELETE] Batch ${batchNo} deleted`);
@@ -431,23 +431,23 @@ router.post("/:batchNo/gen_pv", async (req, res) => {
     const { batchNo } = req.params;
 
     const [batch] = await q(
-      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`, [batchNo]
+      `SELECT * FROM pay_chq_batch WHERE BATCH_NO = ?`, [batchNo]
     );
     if (!batch) return res.status(404).json({ error: "Batch not found" });
     if (batch.STATUS === "PV Done")
       return res.status(400).json({ error: "PV already generated for this batch" });
 
     const cheques    = await q(
-      `SELECT * FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ? ORDER BY CHQ_DT, SEQ`, [batchNo]
+      `SELECT * FROM pay_chq_batch_det WHERE BATCH_NO = ? ORDER BY CHQ_DT, SEQ`, [batchNo]
     );
     const settlement = await q(
-      `SELECT * FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]
+      `SELECT * FROM pay_chq_batch_stl WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]
     );
     const chqTotal = cheques.reduce((s, c) => s + parseFloat(c.AMOUNT), 0);
 
     // Generate next PV number
     const [lastPv] = await q(
-      `SELECT PV_NO FROM GL_VOUCHER
+      `SELECT PV_NO FROM gl_voucher
         WHERE TRAN_TYPE = '04'
         ORDER BY PV_NO DESC LIMIT 1`
     );
@@ -463,7 +463,7 @@ router.post("/:batchNo/gen_pv", async (req, res) => {
 
     // Insert GL_VOUCHER header
     await conn.query(
-      `INSERT INTO GL_VOUCHER
+      `INSERT INTO gl_voucher
          (PV_NO, TRAN_TYPE, VOU_DT, ACC_CODE_DR, ACC_CODE_CR,
           AMOUNT_LC, CURRENCY, NARRATION, STATUS, BATCH_NO)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -480,7 +480,7 @@ router.post("/:batchNo/gen_pv", async (req, res) => {
     // Insert cheque rows into GL_VOU_CHQ
     for (const c of cheques) {
       await conn.query(
-        `INSERT INTO GL_VOU_CHQ
+        `INSERT INTO gl_vou_chq
            (PV_NO, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH, BANK_AC,
             PDC_TYPE, PDC_AC, AMOUNT, CURRENCY, NARRATION, STATUS)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -495,7 +495,7 @@ router.post("/:batchNo/gen_pv", async (req, res) => {
     for (const s of settlement) {
       if (!s.DOC_NO) continue;
       await conn.query(
-        `INSERT INTO GL_VOU_STL
+        `INSERT INTO gl_vou_stl
            (PV_NO, DOC_NO, DOC_DT, DETAILS, INV_AMT, PV_AMT)
          VALUES (?,?,?,?,?,?)`,
         [pvNo, s.DOC_NO, s.DOC_DT, s.DETAILS, s.INV_AMT, s.PV_AMT]
@@ -504,7 +504,7 @@ router.post("/:batchNo/gen_pv", async (req, res) => {
 
     // Update batch status
     await conn.query(
-      `UPDATE PAY_CHQ_BATCH SET STATUS = 'PV Done', PV_NO = ? WHERE BATCH_NO = ?`,
+      `UPDATE pay_chq_batch SET STATUS = 'PV Done', PV_NO = ? WHERE BATCH_NO = ?`,
       [pvNo, batchNo]
     );
 
@@ -535,8 +535,8 @@ chqRouter.get("/", async (req, res) => {
               d.NARRATION, d.PRINT_STATUS, d.PRINT_DT,
               d.BATCH_NO, b.PV_NO,
               b.SUP_NAME AS PAYEE, b.SUP_CODE
-         FROM PAY_CHQ_BATCH_DET d
-         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+         FROM pay_chq_batch_det d
+         JOIN pay_chq_batch b ON b.BATCH_NO = d.BATCH_NO
         ORDER BY d.CHQ_DT DESC, d.CHQ_NO DESC`
     );
     res.json(rows);
@@ -551,15 +551,15 @@ chqRouter.get("/print_queue/batch/:batchNo", async (req, res) => {
     const { batchNo } = req.params;
     const cheques = await q(
       `SELECT d.*, b.SUP_NAME AS PAYEE, b.SUP_CODE, b.PV_NO
-         FROM PAY_CHQ_BATCH_DET d
-         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+         FROM pay_chq_batch_det d
+         JOIN pay_chq_batch b ON b.BATCH_NO = d.BATCH_NO
         WHERE d.BATCH_NO = ?
         ORDER BY d.CHQ_DT, d.SEQ`,
       [batchNo]
     );
     const [batchInfo] = await q(
       `SELECT BATCH_NO, PV_NO, SUP_NAME, BANK_NAME
-         FROM PAY_CHQ_BATCH WHERE BATCH_NO = ?`,
+         FROM pay_chq_batch WHERE BATCH_NO = ?`,
       [batchNo]
     );
     res.json({ cheques, batchInfo: batchInfo || {} });
@@ -574,15 +574,15 @@ chqRouter.get("/print_queue/pv/:pvNo", async (req, res) => {
     const { pvNo } = req.params;
     const cheques = await q(
       `SELECT d.*, b.SUP_NAME AS PAYEE, b.SUP_CODE, b.PV_NO
-         FROM PAY_CHQ_BATCH_DET d
-         JOIN PAY_CHQ_BATCH b ON b.BATCH_NO = d.BATCH_NO
+         FROM pay_chq_batch_det d
+         JOIN pay_chq_batch b ON b.BATCH_NO = d.BATCH_NO
         WHERE b.PV_NO = ?
         ORDER BY d.CHQ_DT, d.SEQ`,
       [pvNo]
     );
     const [batchInfo] = await q(
       `SELECT BATCH_NO, PV_NO, SUP_NAME, BANK_NAME
-         FROM PAY_CHQ_BATCH WHERE PV_NO = ? LIMIT 1`,
+         FROM pay_chq_batch WHERE PV_NO = ? LIMIT 1`,
       [pvNo]
     );
     res.json({ cheques, batchInfo: batchInfo || {} });
@@ -608,7 +608,7 @@ chqRouter.put("/mark_printed/:chqNo", async (req, res) => {
   try {
     const { chqNo } = req.params;
     await q(
-      `UPDATE PAY_CHQ_BATCH_DET
+      `UPDATE pay_chq_batch_det
           SET PRINT_STATUS = 'Printed', PRINT_DT = NOW()
         WHERE CHQ_NO = ?`,
       [chqNo]
@@ -630,19 +630,19 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
     const username = req.user?.username || "system";
 
     const [[hdr]] = await conn.query(
-      `SELECT * FROM PAY_CHQ_BATCH WHERE BATCH_NO = ? FOR UPDATE`, [batchNo]);
+      `SELECT * FROM pay_chq_batch WHERE BATCH_NO = ? FOR UPDATE`, [batchNo]);
     if (!hdr) throw new Error("Batch not found");
     if (hdr.PV_NO) throw new Error(`PV ${hdr.PV_NO} already generated for this batch`);
 
     const [cheques] = await conn.query(
-      `SELECT * FROM PAY_CHQ_BATCH_DET WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+      `SELECT * FROM pay_chq_batch_det WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
     const [settlement] = await conn.query(
-      `SELECT * FROM PAY_CHQ_BATCH_STL WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
+      `SELECT * FROM pay_chq_batch_stl WHERE BATCH_NO = ? ORDER BY SEQ`, [batchNo]);
     if (!cheques.length) throw new Error("No cheques to post");
 
     const [[mx]] = await conn.query(
       `SELECT IFNULL(MAX(CAST(VCHR_NO AS UNSIGNED)),0)+1 AS NEXT_NO
-         FROM VOUCHERS WHERE TRAN_TYPE = '04'`);
+         FROM vouchers WHERE TRAN_TYPE = '04'`);
     const pvNo = String(mx.NEXT_NO).padStart(10, "0");
 
     const pvDate = hdr.BATCH_DT;
@@ -653,7 +653,7 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
 
     // a) VOUCHERS
     await conn.query(
-      `INSERT INTO VOUCHERS
+      `INSERT INTO vouchers
          (TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, AMOUNT,
           NARRATION1, PAID_TO, CUR_CODE, REF_NO)
        VALUES ('04',?,?,?,?,?,?,?,'AED',?)`,
@@ -663,7 +663,7 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
     // b) TRAN_ACC — credit (bank, total) + debit per cheque (supplier)
     let sr = 1;
     await conn.query(
-      `INSERT INTO TRAN_ACC
+      `INSERT INTO tran_acc
          (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
           NARRATION1, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
        VALUES ('04',?,?,?,?,'C',?,?,?,?,?,?)`,
@@ -671,7 +671,7 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
        username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
     for (const c of cheques) {
       await conn.query(
-        `INSERT INTO TRAN_ACC
+        `INSERT INTO tran_acc
            (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
             NARRATION1, NARRATION2,USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
          VALUES ('04',?,?,?,?,'D',?,?,?,?,?,?)`,
@@ -698,7 +698,7 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
     for (const s of settlement) {
       if (!(Number(s.PV_AMT) > 0)) continue;
       await conn.query(
-        `INSERT INTO ADJ_DTL
+        `INSERT INTO adj_dtl
            (SOURCE_DOC, SOURCE_TYPE, SOURCE_DATE, ACC_CODE,
             STLD_DOC, STLD_TYPE, STLD_AMT, STLD_DBCR, STLD_DATE,
             MAIN_SR_NO, REF_NO)
@@ -709,7 +709,7 @@ router.post("/:batchNo/generate_pv", async (req, res) => {
     }
 
     await conn.query(
-      `UPDATE PAY_CHQ_BATCH SET PV_NO = ?, STATUS = 'PV Generated' WHERE BATCH_NO = ?`,
+      `UPDATE pay_chq_batch SET PV_NO = ?, STATUS = 'PV Generated' WHERE BATCH_NO = ?`,
       [pvNo, batchNo]);
 
     await conn.commit();
@@ -732,10 +732,10 @@ router.put("/:batchNo/mark_printed", async (req, res) => {
     await conn.beginTransaction();
     const { batchNo } = req.params;
     await conn.query(
-      `UPDATE PAY_CHQ_BATCH_DET SET PRINT_STATUS = 'Printed' WHERE BATCH_NO = ?`,
+      `UPDATE pay_chq_batch_det SET PRINT_STATUS = 'Printed' WHERE BATCH_NO = ?`,
       [batchNo]);
     await conn.query(
-      `UPDATE PAY_CHQ_BATCH SET STATUS = 'Printed' WHERE BATCH_NO = ?`,
+      `UPDATE pay_chq_batch SET STATUS = 'Printed' WHERE BATCH_NO = ?`,
       [batchNo]);
     await conn.commit();
     res.json({ success: true });
