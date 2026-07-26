@@ -2156,7 +2156,7 @@ app.post("/api/save-rcp", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
-               INSERT INTO vouchers (tran_tyoe, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
+               INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
                                      CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
                                       AMOUNT) 
                VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
@@ -2196,7 +2196,7 @@ app.post("/api/save-rcp", async (req, res) => {
               chq.ChqNo && chq.ChqNo.trim() !== "")) {
               const chqQuery = `
                   INSERT INTO pdc_rcd (
-                    tran_tyoe, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
+                    TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
                     PDC_CODE, CUST_CODE, CHQ_BANK, AMOUNT, NARRATION
                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE
@@ -2240,7 +2240,7 @@ app.post("/api/save-rcp", async (req, res) => {
           for (const trn of tranaccData) {
             const tranQuery = `
                   INSERT INTO tran_acc (
-                    tran_tyoe, VCHR_NO, DATTE, SR_NO,ACC_CODE,
+                    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
                      AMOUNT, DB_CR,NARRATION1,NARRATION2
                   ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?)
                   ON DUPLICATE KEY UPDATE
@@ -2793,7 +2793,7 @@ app.get("/api/CustSt", function (req, res) {
 
   console.log("CustSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT CUST_CODE, tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
+  let sql = "SELECT CUST_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
     " NAR, DR_AMT, CR_AMT, BALANCE" +
     " FROM v_cust_outstanding_bill" +
     " WHERE DATTE < ?";
@@ -2823,7 +2823,7 @@ app.get("/api/SupSt", function (req, res) {
 
   console.log("SupSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT ACC_CODE, tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
+  let sql = "SELECT ACC_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
     "  DR_AMT, CR_AMT, BALANCE,'' AS NAR" +
     " FROM v_sup_outstanding_bill" +
     " WHERE DATTE < ?";
@@ -2850,7 +2850,7 @@ app.get("/api/SupSt", function (req, res) {
 app.get("/api/InvStlCust/:custcd", function (req, res) {
   console.log("InvStlCust", req.params.custcd);
   connection.query(
-    "SELECT  CUST_CODE, VCHR_NO DOC_NO, tran_tyoe DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
+    "SELECT  CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
     "FROM v_cust_outstanding_bill WHERE CUST_CODE = ?",
     [req.params.custcd],
@@ -2872,7 +2872,7 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
 app.get("/api/InvStlSup/:custcd", function (req, res) {
   console.log("InvStlSup", req.params.custcd);
   connection.query(
-    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, tran_tyoe DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE,  NAR," +
+    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE,  NAR," +
     "DR_AMT, CR_AMT, BALANCE INV_AMT " +
     "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ? ORDER BY DATTE ",
     [req.params.custcd],
@@ -3453,7 +3453,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-      "select MAX(VCHR_NO) as  MXVCHR  FROM tran_acc WHERE tran_tyoe =? and Substr(Vchr_no,1,1)<'A' ",
+      "select MAX(VCHR_NO) as  MXVCHR  FROM tran_acc WHERE TRAN_TYPE =? and Substr(Vchr_no,1,1)<'A' ",
       [req.params.Tp],
 
       function (err, result) {
@@ -3515,12 +3515,12 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
 app.get("/api/vouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
-    "select a.tran_tyoe,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
+    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  cus_mst b ON a.CUST_CODE = b.CUST_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
-    " WHERE a.tran_tyoe = ? AND a.VCHR_NO =?   ",
+    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO =?   ",
     [req.params.tp, req.params.vchr],
     function (err, results, fields) {
       if (err) {
@@ -3537,12 +3537,12 @@ app.get("/api/vouchers/:tp/:vchr", function (req, res) {
 app.get("/api/payvouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
-    "select a.tran_tyoe,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
+    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
-    " WHERE a.tran_tyoe = ? AND a.VCHR_NO =?   ",
+    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO =?   ",
     [req.params.tp, req.params.vchr],
     function (err, results, fields) {
       if (err) {
@@ -3645,7 +3645,7 @@ app.get("/api/bankRecon/ledger/", function (req, res) {
 
   console.log("Bank Reco:", bankCode, startDate, endDate);
   connection.query(
-    "select a.tran_tyoe AS tran_tyoe,a.VCHR_NO AS VCHR_NO ," +
+    "select a.TRAN_TYPE AS TRAN_TYPE,a.VCHR_NO AS VCHR_NO ," +
     "DATE_FORMAT(a.DATTE,'%d/%m/%Y') as DATTE, " +
     " a.NARRATION1 AS DETAILS," +
     " a.CHQ_NO as CHQ_NO,DATE_FORMAT(a.CHQ_DATE,'%d/%m/%Y') AS CHQ_DATE, DEBIT,CREDIT FROM v_bank_reco a  " +
@@ -3840,22 +3840,22 @@ app.get("/api/accled/:acc/:dt1/:dt2", function (req, res) {
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
-    /*select tran_acc.ROWID,ROWNUM SR_NO,tran_tyoe,VCHR_NO,"+
+    /*select tran_acc.ROWID,ROWNUM SR_NO,TRAN_TYPE,VCHR_NO,"+
     "To_char(DATTE,'DD/MM/YYYY') DATTE, TO_CHAR(DATTE,'YY/MM/DD') DTSORT,"+
     " ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
     " NARRATION2, JOB_NO,USERNAME," +
     " DECODE(DB_CR,'D', AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', AMOUNT, 0 ) CREDIT_AMT,  " +
     " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc, V_ALL_CHEQUES b "+
-    " WHERE tran_acc.tran_tyoe=b.tran_tyoe(+) AND tran_acc.VCHR_NO=b.VCHR_NO(+) " +
+    " WHERE tran_acc.TRAN_TYPE=b.TRAN_TYPE(+) AND tran_acc.VCHR_NO=b.VCHR_NO(+) " +
     " AND tran_acc.ACC_CODE = :1 ORDER BY 6"*/
     conn.execute(
-      "select a.ROWID,ROWNUM SR_NO,a.tran_tyoe,a.VCHR_NO," +
+      "select a.ROWID,ROWNUM SR_NO,a.TRAN_TYPE,a.VCHR_NO," +
       "To_char(a.DATTE,'DD/MM/YYYY') DATTE, TO_CHAR(a.DATTE,'YY/MM/DD') DTSORT," +
       "a.ACC_CODE,a.AMOUNT, a.DB_CR, a.NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME,   " +
       " DECODE(DB_CR,'D', a.AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', a.AMOUNT, 0 ) CREDIT_AMT, " +
       " b.CHQ_NO, b.CHQ_DATE, 0 BAL FROM tran_acc a, V_ALL_CHEQUES b  " +
-      "WHERE a.tran_tyoe=b.tran_tyoe(+) AND a.VCHR_NO=b.VCHR_NO(+) " +
+      "WHERE a.TRAN_TYPE=b.TRAN_TYPE(+) AND a.VCHR_NO=b.VCHR_NO(+) " +
       "AND a.ACC_CODE = :1 " +
       "AND a.DATTE BETWEEN TO_DATE(:2,'DD/MM/YY') AND  TO_DATE(:3,'DD/MM/YY') ORDER BY 6",
       [req.params.acc, req.params.dt1, req.params.dt2],
@@ -3931,14 +3931,14 @@ app.get("/api/ledopbal/:acc/:dt1", function (req, res) {
 app.get("/api/tranacc/:tp/:vchr", function (req, res) {
   console.log("tranacc entered :", req.params);
   connection.query(
-    "  SELECT a.SR_NO, a.tran_tyoe,a.VCHR_NO, DATE_FORMAT(a.DATTE, '%d/%m/%Y')  DATTE," +
+    "  SELECT a.SR_NO, a.TRAN_TYPE,a.VCHR_NO, DATE_FORMAT(a.DATTE, '%d/%m/%Y')  DATTE," +
     "   a.ACC_CODE, a.AMOUNT,  a.DB_CR, a.NARRATION1,a.NARRATION2, a.JOB_NO, " +
     "   a.USERNAME,b.AC_HEAD AS ACC_HEAD , " +
     "   CASE WHEN a.DB_CR = 'D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc  a " +
     " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
-    " WHERE a.tran_tyoe = ? AND a.VCHR_NO = ? ORDER BY a.SR_NO",
+    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? ORDER BY a.SR_NO",
     [req.params.tp, req.params.vchr],
     //LEFT JOIN = ALL ROWS OF LEFT TABLE  (tran_acc Here)
     function (err, result) {
@@ -3960,10 +3960,10 @@ app.get("/api/tranaccDR/:tp/:vchr", function (req, res) {
   pool.getConnection(function (err, conn) {
     //
     conn.execute(
-      "select tran_acc.ROWID,ROWNUM SR_NO,tran_tyoe,VCHR_NO,DATTE, ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
+      "select tran_acc.ROWID,ROWNUM SR_NO,TRAN_TYPE,VCHR_NO,DATTE, ACC_CODE,AMOUNT, DB_CR, NARRATION1," +
       "NARRATION2, JOB_NO,USERNAME," +
       "DECODE(DB_CR,'D', AMOUNT, 0 ) DEBIT_AMT, DECODE(DB_CR,'C', AMOUNT, 0 ) CREDIT_AMT,  " +
-      "AC_NAME ACC_HEAD FROM tran_acc, ac_list  WHERE ACC_CODE = AC_CODE AND tran_tyoe = :1 AND VCHR_NO =:2  and DB_CR='D'",
+      "AC_NAME ACC_HEAD FROM tran_acc, ac_list  WHERE ACC_CODE = AC_CODE AND TRAN_TYPE = :1 AND VCHR_NO =:2  and DB_CR='D'",
       [req.params.tp, req.params.vchr],
       {
         outFormat: orcl1.OBJECT,
@@ -3985,10 +3985,10 @@ app.get("/api/pdcrcd/:tp/:vchr", function (req, res) {
   console.log("Cheque", req.params);
 
   connection.query(
-    "select MAIN_SR_NO SR_NO ,tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_rcd WHERE tran_tyoe = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -4009,10 +4009,10 @@ app.get("/api/pdcisu/:tp/:vchr", function (req, res) {
   console.log("Cheque", req.params);
 
   connection.query(
-    "select MAIN_SR_NO SR_NO ,tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_isu WHERE tran_tyoe = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -4031,10 +4031,10 @@ app.get("/api/pdcrcdreg/:tp/", function (req, res) {
   console.log("tranacc", req.params);
   const { start_date, end_date } = req.query;
   connection.query(
-    "select MAIN_SR_NO SR_NO ,tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_rcd WHERE tran_tyoe = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
+    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
     [req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
@@ -4580,9 +4580,9 @@ app.put("/api/trantypent/:id", function (req, res, next) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "UPDATE tran_tyoe SET TYPE_DES=:1, tran_tyoe=:2 ," +
+      "UPDATE TRAN_TYPE SET TYPE_DES=:1, TRAN_TYPE=:2 ," +
       " TYPE_ABBR =:3" +
-      " where tran_tyoe=:4 ",
+      " where TRAN_TYPE=:4 ",
       [bank1.typedes, bank1.trantype, bank1.typeabbr, bank1.trantype],
       {
         outFormat: orcl1.OBJECT,
@@ -6963,7 +6963,7 @@ app.get("/api/supdueinv", function (req, res) {
     SELECT 
       a.ACC_CODE, 
       a.VCHR_NO, 
-      a.tran_tyoe, 
+      a.TRAN_TYPE, 
       DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, 
       b.SUP_NAME,
       a.DR_AMT, 
@@ -7078,9 +7078,9 @@ app.get("/api/trnlst/:tp/:dys/:dbcr", function (req, res) {
     // console.log('TRAN List. ', req.params.tp, req.params.dys);
 
     conn.execute(
-      "select a.tran_tyoe,a.VCHR_NO,To_char(a.DATTE,'DD/MM/RRRR') DATTE, a.ACC_CODE," +
+      "select a.TRAN_TYPE,a.VCHR_NO,To_char(a.DATTE,'DD/MM/RRRR') DATTE, a.ACC_CODE," +
       " b.AC_NAME, a.AMOUNT, a.DB_CR,a.NARRATION1,a.NARRATION2,a.JOB_NO, a.PANEL_NO,  a.USERNAME " +
-      " from tran_acc a, ac_list b where  a.tran_tyoe =:tp and a.DATTE >= SYSDATE - :dys and " +
+      " from tran_acc a, ac_list b where  a.TRAN_TYPE =:tp and a.DATTE >= SYSDATE - :dys and " +
       " a.DB_cr = NVL(:dbcr,'C') AND a.ACC_CODE = b.AC_CODE ORDER BY a.VCHR_NO DESC",
       [req.params.tp, req.params.dys, req.params.dbcr],
       {
@@ -7606,7 +7606,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     dbCr = "D";
     //Delete
 
-    let sql = "DELETE FROM tran_acc WHERE tran_tyoe =:1 AND VCHR_NO=:2 ";
+    let sql = "DELETE FROM tran_acc WHERE TRAN_TYPE =:1 AND VCHR_NO=:2 ";
 
     conn.execute(
       sql,
@@ -7632,7 +7632,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     //
     Pmode = "INSERT";
     conn.execute(
-      "INSERT INTO  tran_acc (  tran_tyoe, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7666,7 +7666,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     dbCr = "C";
     //SALES cR 30101
     conn.execute(
-      "INSERT INTO  tran_acc (  tran_tyoe, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7699,7 +7699,7 @@ app.put("/api/sinvacc", function (req, res, next) {
     );
     //
     conn.execute(
-      "INSERT INTO  tran_acc (  tran_tyoe, VCHR_NO, DATTE, " +
+      "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE, " +
       " ACC_CODE , NARRATION1 , NARRATION2, AMOUNT , DB_CR )" +
       " VALUES (:1,:2,TO_DATE(:3,'YYYY-MM-DD'),:4,:5,:6,:7,:8) ",
       [
@@ -7899,7 +7899,7 @@ app.get("/api/stkled/:id/:stdt/:enddt", function (req, res) {
 
   connection.query(
     "select  DOC_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DOC_DATE,LOC_CODE, ITEM_CODE, " +
-    " JOB_NO, STD_COST,STOCK_tran_tyoe,SUP_CODE,NARRATION,SORT_ORD ," +
+    " JOB_NO, STD_COST,STOCK_TRAN_TYPE,SUP_CODE,NARRATION,SORT_ORD ," +
     " CASE WHEN QTY>0 THEN QTY ELSE 0 END  AS QTY_IN ," +
     " CASE WHEN QTY<=0 THEN QTY ELSE 0 END  AS QTY_OUT ," +
     " CASE WHEN QTY<=0 THEN AVGCOST(LOC_CODE,ITEM_CODE,DOC_DATE)  ELSE STD_COST END  AS STD_COST " +
@@ -8148,11 +8148,11 @@ app.put("/api/rvtranacc/:dat", function (req, res, next) {
         // console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  tran_acc (  tran_tyoe, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
-              putData[0].tran_tyoe,
+              putData[0].TRAN_TYPE,
               putData[0].VCHR_NO,
               putData[0].DATTE,
               putData[0].SR_NO,
@@ -8189,9 +8189,9 @@ app.delete("/api/rvdelrow", function (req, res, next) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select rowid, tran_tyoe,VCHR_NO , AMOUNT, ACC_CODE, DB_CR" +
-      " FROM tran_acc WHERE tran_tyoe =:tp AND VCHR_NO =:vch",
-      [postData[0].tran_tyoe, postData[0].VCHR_NO],
+      "select rowid, TRAN_TYPE,VCHR_NO , AMOUNT, ACC_CODE, DB_CR" +
+      " FROM tran_acc WHERE TRAN_TYPE =:tp AND VCHR_NO =:vch",
+      [postData[0].TRAN_TYPE, postData[0].VCHR_NO],
       {
         outFormat: orcl1.OBJECT,
       },
@@ -8289,11 +8289,11 @@ app.put("/api/rvinvstl/:dat", function (req, res, next) {
         //  console.log("Insert ", amt);
         if (amt !== 0) {
           conn.execute(
-            "INSERT INTO  tran_acc (  tran_tyoe, VCHR_NO, DATTE,SR_NO , " +
+            "INSERT INTO  tran_acc (  TRAN_TYPE, VCHR_NO, DATTE,SR_NO , " +
             " ACC_CODE , NARRATION1 , JOB_NO  , AMOUNT , DB_CR )" +
             " VALUES (:1,:2,TO_DATE(:3,'DD-MM-YYYY'),:4,:5,:6,:7,:8,:9 ) ",
             [
-              putData[0].tran_tyoe,
+              putData[0].TRAN_TYPE,
               putData[0].VCHR_NO,
               putData[0].DATTE,
               putData[0].SR_NO,
@@ -8806,7 +8806,7 @@ app.post("/api/save-jobstat", (req, res) => {
     res.json({ message: "Job Status  inserted/updated successfully", result });
   });
 })
-//SELECT tran_tyoe, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
+//SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
@@ -8828,10 +8828,10 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
     );
   } else {
     connection.query(
-      "SELECT tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
+      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
       " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       "DB_CR " +
-      "  from tran_acc WHERE tran_tyoe=? order by vchr_no desc",
+      "  from tran_acc WHERE TRAN_TYPE=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -8896,10 +8896,10 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
   console.log('Leddsp', acCode, stDt, endDt);
-  connection.query("select SR_NO,tran_tyoe,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
+  connection.query("select SR_NO,TRAN_TYPE,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
     " CASE WHEN db_cr ='D' THEN AMOUNT ELSE 0 END AS AMOUNT_DR ," +
     " CASE WHEN db_cr ='C' THEN AMOUNT ELSE 0 END  AS AMOUNT_CR FROM tran_acc WHERE ACC_CODE = ? AND " +
-    " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), tran_tyoe ,VCHR_NO ", [acCode, stDt, endDt],
+    " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), TRAN_TYPE ,VCHR_NO ", [acCode, stDt, endDt],
     function (error, result) {
       if (error) {
         console.log("Ledger data select error", error);
@@ -9022,13 +9022,13 @@ app.get("/api/tranlst", function (req, res) {
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD, AMOUNT," +
+    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD, AMOUNT," +
     "IF(DB_CR='D', AMOUNT, 0) AS DR_AMOUNT, " +
     "IF(DB_CR='C', AMOUNT, 0) AS CR_AMOUNT, " +
     "DB_CR, NARRATION1, NARRATION2, JOB_NO " +
     "FROM tran_acc " +
     " JOIN  ac_list   on ac_code = acc_code " +
-    " WHERE tran_tyoe = ? AND DATTE BETWEEN ? AND ? " +
+    " WHERE TRAN_TYPE = ? AND DATTE BETWEEN ? AND ? " +
     " ORDER BY VCHR_NO , db_cr desc",
     [ItemCd, start_date, end_date],
     function (error, result) {
@@ -9048,11 +9048,11 @@ app.get("/api/trnprn/:tranId/:Vchr", function (req, res) {
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT a.tran_tyoe, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, a.ACC_CODE,b.AC_HEAD, a.AMOUNT," +
+    "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, a.ACC_CODE,b.AC_HEAD, a.AMOUNT," +
     "IF(a.DB_CR='D', a.AMOUNT, 0) AS AMOUNT_DR, " +
     "IF(a.DB_CR='C', a.AMOUNT, 0) AS AMOUNT_CR, " +
     "a.DB_CR, a.NARRATION1, a.NARRATION2, a.JOB_NO " +
-    "FROM tran_acc a, AC_List b WHERE a.tran_tyoe = ? AND a.VCHR_NO = ? " +
+    "FROM tran_acc a, AC_List b WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? " +
     "  and a.ACC_CODE = b.AC_CODE ORDER BY a.SR_NO ",
     [req.params.tranId, req.params.Vchr],
     function (error, result) {
@@ -9072,7 +9072,7 @@ app.get('/api/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
   console.log('Leddsp', jobNo, stDt, endDt);
-  connection.query("select DOC_TYPE AS tran_tyoe ,DOC_NO AS VCHR_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DATTE,JOB_NO, NARRATION1, CUST_CODE, " +
+  connection.query("select DOC_TYPE AS TRAN_TYPE ,DOC_NO AS VCHR_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DATTE,JOB_NO, NARRATION1, CUST_CODE, " +
     " ITEM_DESC, QTY, UNIT_RATE, " +
     "  INCOME AS AMOUNT_DR ," +
     " EXPENSES AS AMOUNT_CR FROM v_job_ledger WHERE JOB_NO = ? AND " +
@@ -9113,7 +9113,7 @@ app.get("/api/pcashlst/:id", function (req, res) {
 app.get("/api/pdcrcdreg", function (req, res) {
 
   connection.query(
-    "select tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_rcd  where  chq_date BETWEEN ? AND ? ORDER BY CHQ_DATE",
@@ -9132,7 +9132,7 @@ app.get("/api/pdcrcdreg", function (req, res) {
 app.get("/api/pdcrcdlst/:dys", function (req, res) {
 
   connection.query(
-    "select tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_rcd  where  chq_date >= CURDATE() - INTERVAL ? DAY ORDER BY CHQ_DATE",
@@ -9169,7 +9169,7 @@ app.get("/api/pdcRcdBal/:cus", function (req, res) {
 app.get("/api/pdcisulst/:dys", function (req, res) {
 
   connection.query(
-    "select tran_tyoe,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, SUP_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION " +
     "FROM pdc_isu ORDER BY CHQ_DATE",
