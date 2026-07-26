@@ -2156,7 +2156,7 @@ app.post("/api/save-rcp", async (req, res) => {
           // ✅ Step 1: Insert/Update NGP_NET table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
-               INSERT INTO voucherss (tran_tyoe, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
+               INSERT INTO vouchers (tran_tyoe, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
                                      CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
                                       AMOUNT) 
                VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
@@ -2183,7 +2183,7 @@ app.post("/api/save-rcp", async (req, res) => {
                 if (err) {
                   return reject(err);
                 }
-                console.log("vouchersS Insert/Update:", result);
+                console.log("vouchers Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -3489,7 +3489,7 @@ app.get("/api/lpoitemget", function (req, res) {
   );
 });
 app.get("/api/invadj/:tp/:vchr", function (req, res) {
-  console.log("voucherss", req.params);
+  console.log("vouchers", req.params);
 
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
@@ -3512,12 +3512,12 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
     );
   });
 });
-app.get("/api/voucherss/:tp/:vchr", function (req, res) {
-  console.log("voucherss", req.params);
+app.get("/api/vouchers/:tp/:vchr", function (req, res) {
+  console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.tran_tyoe,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
-    " FROM voucherss a " +
+    " FROM vouchers a " +
     " LEFT OUTER JOIN  cus_mst b ON a.CUST_CODE = b.CUST_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
     " WHERE a.tran_tyoe = ? AND a.VCHR_NO =?   ",
@@ -3535,11 +3535,11 @@ app.get("/api/voucherss/:tp/:vchr", function (req, res) {
   );
 });
 app.get("/api/payvouchers/:tp/:vchr", function (req, res) {
-  console.log("voucherss", req.params);
+  console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.tran_tyoe,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
-    " FROM voucherss a " +
+    " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
     " WHERE a.tran_tyoe = ? AND a.VCHR_NO =?   ",
@@ -8806,13 +8806,13 @@ app.post("/api/save-jobstat", (req, res) => {
     res.json({ message: "Job Status  inserted/updated successfully", result });
   });
 })
-//SELECT tran_tyoe, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchersS;
+//SELECT tran_tyoe, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
       "SELECT tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM voucherss WHERE tran_tyoe=? order by vchr_no desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE tran_tyoe=? order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
