@@ -8810,7 +8810,7 @@ app.post("/api/save-jobstat", (req, res) => {
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
-      "SELECT tran_tyoe, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
+      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       " BANK_NAME, PAID_TO, CAN_CEL," +
       " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE tran_tyoe=? order by vchr_no desc",
       [req.params.tranId],
