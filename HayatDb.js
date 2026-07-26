@@ -138,7 +138,8 @@ app.post("/api/login", (req, res) => {
   );
 });
 /* Public API (NO token required) */
-app.post("/api/register", async (req, res) => {
+//app.post("/api/register", async (req, res) => {
+  app.post("/api/register", authMiddleware, authMiddleware.requireAdmin, async (req, res) => {
   const { username, password, role = "user" } = req.body;
 
   if (!username || !password) {
@@ -179,7 +180,7 @@ app.post("/api/register", async (req, res) => {
 });
 
 /* Protect everything below */
-//app.use("/api", authMiddleware);
+app.use("/api", authMiddleware);
 app.get('/api/column-metadata/:tableId', (req, res) => {
   //  console.log("Fetching column metadata");
   const { tableId } = req.params;
@@ -1176,14 +1177,10 @@ app.post("/api/save-qtDoc", async (req, res) => {
 
 app.post("/api/save-quotation", async (req, res) => {
   try {
-    console.log("Save-Quote-items ==>", req.body);
     const { qtHdr, lpoItems } = req.body;
-    /* if (!Array.isArray(lpoItems) || lpoItems.length === 0) {
- 
-       return res.status(400).json({ message: "Invalid Quotation data format" });
-     }*/
     console.log("Qt Hdr. ==>", qtHdr);
-    console.log("Qt Items. ==>", lpoItems);
+    console.log("Qt Items. ==>", (lpoItems || []).length, "rows");
+
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
@@ -1194,98 +1191,96 @@ app.post("/api/save-quotation", async (req, res) => {
         try {
           if (err) {
             console.error("Qt.Save.Transaction Error:", err);
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             return res.status(500).json({ message: "Transaction error", error: err });
           }
 
+          const q = (sql, params) =>
+            new Promise((resolve, reject) =>
+              conn.query(sql, params, (e, r) => (e ? reject(e) : resolve(r)))
+            );
+
+          /* ── 1) header upsert (QUOT_HDR has QUOT_NO as PK, so ON
+                 DUPLICATE KEY UPDATE is correct here) ─────────────── */
           const hdrQuery = `
-            INSERT INTO QUOT_HDR 
-              (QUOT_NO, CUST_CODE, PAYMENT_TERMS, ENGG_CODE, ATTN, YOUR_REF, SUBJECT, 
-                PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO)
-            VALUES (?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?)
+            INSERT INTO QUOT_HDR
+              (QUOT_NO, QUOT_DATE, CUST_CODE, PAYMENT_TERMS, ENGG_CODE, ATTN,
+               YOUR_REF, SUBJECT, PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
+              QUOT_DATE     = COALESCE(VALUES(QUOT_DATE), QUOT_DATE),
               CUST_CODE     = VALUES(CUST_CODE),
               PAYMENT_TERMS = VALUES(PAYMENT_TERMS),
-              ENGG_CODE      = VALUES(ENGG_CODE),
+              ENGG_CODE     = VALUES(ENGG_CODE),
               ATTN          = VALUES(ATTN),
               YOUR_REF      = VALUES(YOUR_REF),
               SUBJECT       = VALUES(SUBJECT),
-              PROJECT_NAME     = VALUES(PROJECT_NAME),
+              PROJECT_NAME  = VALUES(PROJECT_NAME),
               CURR_CODE     = VALUES(CURR_CODE),
               REV_NO        = VALUES(REV_NO),
               INQ_NO        = VALUES(INQ_NO),
               TEL_NO        = VALUES(TEL_NO)
           `;
-
-          const hdrValues = [
-            qtHdr.QtNo, qtHdr.CustCd, qtHdr.PayTrm, qtHdr.EngCd,
+          await q(hdrQuery, [
+            qtHdr.QtNo, qtHdr.QtDt || null, qtHdr.CustCd, qtHdr.PayTrm, qtHdr.EngCd,
             qtHdr.Attn, qtHdr.YourRef, qtHdr.Subject, qtHdr.ProjName,
-            qtHdr.CurrCd, qtHdr.RevNo, qtHdr.inqNo, qtHdr.TelNo
-          ];
+            qtHdr.CurrCd, qtHdr.RevNo, qtHdr.inqNo, qtHdr.TelNo,
+          ]);
 
-          await new Promise((resolve, reject) => {
-            conn.query(hdrQuery, hdrValues, (err, result) => {
-              if (err) {
-                console.error("HDR Query Error:", err);
-                return reject(err);
-              }
-              console.log("QUOT_HDR Insert/Update:", result);
-              resolve(result);
-            });
-          });
+          /* ── 2) items: wipe this quotation's rows, then re-insert the
+                 grid exactly as it stands. Runs inside the transaction,
+                 so a failed insert rolls the delete back too. ───────── */
+          await q(`DELETE FROM quot_item WHERE QUOT_NO = ?`, [qtHdr.QtNo]);
 
+          // skip blank grid lines (no code and no description)
+          const rows = (Array.isArray(lpoItems) ? lpoItems : []).filter(
+            (r) =>
+              (r.ITEM_CODE && String(r.ITEM_CODE).trim()) ||
+              (r.ITEM_NAME && String(r.ITEM_NAME).trim())
+          );
 
-          if (Array.isArray(lpoItems) && lpoItems.length > 0) {
-            //
-            const itemQuery = `
-              INSERT INTO quot_item (QUOT_NO, SR_NO, LOC_CODE, ITEM_CODE, ITEM_NAME, QTY, RATE)
-              VALUES ? 
-              ON DUPLICATE KEY UPDATE 
-                LOC_CODE  = COALESCE(VALUES(LOC_CODE), LOC_CODE),
-                ITEM_CODE = VALUES(ITEM_CODE),
-                ITEM_NAME = VALUES(ITEM_NAME),
-                QTY       = VALUES(QTY),
-                RATE      = VALUES(RATE)
-            `;
-            const values = lpoItems.map(row => [
-              qtHdr.QtNo, row.SR_NO, row.LOC_CODE, row.ITEM_CODE, row.ITEM_NAME, row.QTY, row.RATE
+          if (rows.length > 0) {
+            const values = rows.map((row) => [
+              qtHdr.QtNo, row.SR_NO, row.LOC_CODE, row.ITEM_CODE,
+              row.ITEM_NAME, row.QTY, row.RATE,
             ]);
+            const result = await q(
+              `INSERT INTO quot_item
+                 (QUOT_NO, SR_NO, LOC_CODE, ITEM_CODE, ITEM_NAME, QTY, RATE)
+               VALUES ?`,
+              [values]
+            );
+            console.log("quot_item inserted:", result.affectedRows, "rows");
+          }
 
-            await new Promise((resolve, reject) => {
-              conn.query(itemQuery, [values], (err, result) => {  // ✅ query string, not lpoItems
-                if (err) return reject(err);
-                console.log("quot_ITEMS Insert/Update:", result);
-                resolve(result);
-              });
-            });
-          };
-          //
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.json({ message: "Quot saved successfully!" });
           });
-
-
         } catch (error) {
-          console.error("Qout.Transaction Failed:", error);
+          console.error("Quot.Transaction Failed:", error);
           conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.status(500).json({ message: "Transaction failed, rolled back", error });
           });
-        };
+        }
       });
-
     });
-
   } catch (error) {
-    console.log("QT  save - internal error :", error)
+    console.log("QT save - internal error :", error);
     res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
   }
 });
+
+
+
 app.post("/api/save-qtTermsCond", async (req, res) => {
   try {
     // console.log("save-Quote-Terms -cond ==>", req.body);
@@ -5609,7 +5604,7 @@ app.get("/api/quothdr/:id", function (req, res) {
 app.get("/api/quotitem/:id", function (req, res) {
 
   connection.query(
-    "select QUOT_NO,  DATE_FORMAT(a.QUOT_DATE,'%d/%m/%Y') AS QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
+    "select QUOT_NO,  DATE_FORMAT(QUOT_DATE,'%d/%m/%Y')  QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
     " round(qty*rate,2) AMOUNT" +
     " FROM quot_item  WHERE QUOT_NO = ? " +
     "  order by sr_no",
@@ -5617,7 +5612,8 @@ app.get("/api/quotitem/:id", function (req, res) {
 
     function (error, results) {
       if (error) throw error;
-      console.log('quotitem', results);
+     // console.log('quotitem', results);
+      console.log('quotitem',req.params.id);
       res.json(results);
 
     }
