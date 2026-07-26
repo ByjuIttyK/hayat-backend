@@ -4532,10 +4532,10 @@ app.post("/api/save-nationmst", (req, res) => {
 
 
 app.get("/api/trantypelst", function (req, res) {
-  // const tableName= "tran_type";
+  // const tableName= "TRAN_TYPE";
 
   connection.query(
-    "select tran_tyoe,TYPE_DES, TYPE_ABBR from tran_type ORDER BY tran_tyoe",
+    "select TRAN_TYPE,TYPE_DES, TYPE_ABBR from tran_type ORDER BY TRAN_TYPE",
     [],
 
     function (error, result) {
@@ -4555,8 +4555,8 @@ app.get("/api/trantypent/:id", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select tran_tyoe, TYPE_DES, TYPE_ABBR" +
-      " FROM tran_type WHERE tran_tyoe=:id",
+      "select TRAN_TYPE, TYPE_DES, TYPE_ABBR" +
+      " FROM tran_type WHERE TRAN_TYPE=:id",
       [req.params.id],
       {
         outFormat: orcl1.OBJECT,
@@ -8812,7 +8812,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE tran_tyoe=? order by vchr_no desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE TRAN_TYPE=? order by VCHR_NO desc",
       [req.params.tranId],
 
       function (error, result) {
