@@ -4311,7 +4311,7 @@ app.get("/api/Aclist", function (req, res) {
   console.log("Aclist ");
 
   connnection.execute(
-    "select AC_CODE, AC_NAME" + " FROM ac_list   ORDER BY AC_NAME",
+    "select AC_CODE, AC_NAME" + " FROM ac_list  ORDER BY AC_NAME",
     {},
 
     function (error, results, fields) {
@@ -4380,7 +4380,6 @@ app.get("/api/acclist", function (req, res) {
     " SELECT A.REPORT_LN, A.GL_CODE, B.GL_HEAD, A.ACC_CODE, A.ACC_HEAD " +
     " FROM acc_mst A " +
     " LEFT OUTER JOIN gl_mst B ON A.REPORT_LN = B.REPORT_LN AND A.GL_CODE = B.GL_CODE " +
-    "  AND A.REPORT_LN NOT IN ('126','401','501') "+
     " ORDER BY A.REPORT_LN, A.GL_CODE, A.ACC_CODE ",
     {},
     function (err, results, fields) {
