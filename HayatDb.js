@@ -672,6 +672,22 @@ app.post("/api/jobcard-save", async (req, res) => {
   }
 });
 
+// ✅ Returns the next available JOB_NO (plain number, e.g. "1025") for
+// pre-filling a new Job Card in ADD mode. CAST(...AS UNSIGNED) guards
+// against any stray non-numeric JOB_NO values already in the table.
+app.get("/api/jobcard-nextno", function (req, res) {
+  const query = `SELECT COALESCE(MAX(CAST(JOB_NO AS UNSIGNED)), 0) + 1 AS nextJobNo FROM job_card`;
+  connection.query(query, function (error, result) {
+    if (error) {
+      console.error("Error fetching next job no:", error);
+      return res.status(500).json({ message: "Error fetching next job number" });
+    }
+    const nextJobNo = result?.[0]?.nextJobNo ?? 1;
+    console.log("➡️ Next JOB_NO:", nextJobNo);
+    res.json({ jobNo: String(nextJobNo) });
+  });
+});
+
 app.post("/api/save-fpo", async (req, res) => {
   try {
     console.log("save-fpo ==>", req.body);
@@ -4295,7 +4311,7 @@ app.get("/api/Aclist", function (req, res) {
   console.log("Aclist ");
 
   connnection.execute(
-    "select AC_CODE, AC_NAME" + " FROM ac_list  ORDER BY AC_NAME",
+    "select AC_CODE, AC_NAME" + " FROM ac_list   ORDER BY AC_NAME",
     {},
 
     function (error, results, fields) {
@@ -4364,6 +4380,7 @@ app.get("/api/acclist", function (req, res) {
     " SELECT A.REPORT_LN, A.GL_CODE, B.GL_HEAD, A.ACC_CODE, A.ACC_HEAD " +
     " FROM acc_mst A " +
     " LEFT OUTER JOIN gl_mst B ON A.REPORT_LN = B.REPORT_LN AND A.GL_CODE = B.GL_CODE " +
+    "  AND A.REPORT_LN NOT IN ('126','401','501') "+
     " ORDER BY A.REPORT_LN, A.GL_CODE, A.ACC_CODE ",
     {},
     function (err, results, fields) {
