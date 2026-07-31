@@ -9354,3 +9354,6 @@ const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
    app.use(ledgerDrillRoutes);
 //
    app.use(require('./FabInvSuggestRoutes')(connection))
+
+   app.use('/api/srno-sync', require('./routes/srnoSyncRoutes')(connection));
+   //
