@@ -9357,3 +9357,10 @@ const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
 
    app.use('/api/srno-sync', require('./routes/srnoSyncRoutes')(connection));
    //
+   app.use('/api/pdc-rcd-reversal', require('./routes/pdcRcdReversalRoutes')(connection));
+   //
+   app.use('/api/pdc-isu-reversal', require('./routes/pdcIsuReversalRoutes')(connection));
+   //
+   app.use('/api', require('./routes/itemTransactionCheckRoutes')(connection));
+   //
+   app.use('/api', require('./routes/tranTypeRoutes')(connection));
