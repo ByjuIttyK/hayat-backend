@@ -6479,7 +6479,7 @@ app.get("/api/nstklst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_NET_AMT, a.LPO_NO,a.DR_CODE,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
-    " from purchase_HDR_ns a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
+    " from purchase_hdr_ns a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
     " where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY   " +
     " ORDER BY a.PJV_NO DESC",
 
