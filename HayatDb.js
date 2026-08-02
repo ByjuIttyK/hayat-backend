@@ -6543,6 +6543,26 @@ app.get("/api/pretlst/:dys", function (req, res) {
     }
   );
 });
+
+app.get("/api/nextQuotNo", function (req, res) {
+  connection.query(
+    "SELECT (MAX(CAST(LEFT(a.QUOT_NO, 10) AS UNSIGNED)) + 1) AS NextQt " +
+    "FROM quot_hdr a",
+    function (err, results) {
+      if (err) {
+        console.error("nextQuotNo error:", err);
+        return res.status(500).json({ message: "Failed to get next quote number" });
+      }
+      const nextQt = results[0].NextQt || 1; // empty table -> MAX is NULL -> default to 1
+      const strQt = String(nextQt).padStart(10, "0");
+      console.log("Next Quot No:", nextQt, "Str Quote =>", strQt);
+
+      res.json({ strQt, maxValue: nextQt });
+    }
+  );
+});
+
+
 app.get("/api/nextdo", function (req, res) {
   connection.query(
     "select (Max(a.INV_NO)+1) AS NextDo " +
