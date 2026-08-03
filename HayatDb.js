@@ -9384,3 +9384,7 @@ const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
    app.use('/api', require('./routes/itemTransactionCheckRoutes')(connection));
    //
    app.use('/api', require('./routes/tranTypeRoutes')(connection));
+   //
+   app.use('/api', require('./routes/salesInquiryRoutes')(connection));
+   //
+   app.use('/api', require('./routes/lovRoutes')(connection));
