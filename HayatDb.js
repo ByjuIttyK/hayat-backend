@@ -139,7 +139,7 @@ app.post("/api/login", (req, res) => {
 });
 /* Public API (NO token required) */
 //app.post("/api/register", async (req, res) => {
-  app.post("/api/register", authMiddleware, authMiddleware.requireAdmin, async (req, res) => {
+app.post("/api/register", authMiddleware, authMiddleware.requireAdmin, async (req, res) => {
   const { username, password, role = "user" } = req.body;
 
   if (!username || !password) {
@@ -2252,22 +2252,23 @@ app.post("/api/save-rcp", async (req, res) => {
               });
             }
           }
-          console.log('tran_acc insert start', tranaccData);
+    console.log('tran_acc insert start', tranaccData);
           for (const trn of tranaccData) {
             const tranQuery = `
-                  INSERT INTO tran_acc (
-                    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
-                     AMOUNT, DB_CR,NARRATION1,NARRATION2
-                  ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?)
-                  ON DUPLICATE KEY UPDATE
-                    DATTE = VALUES(DATTE),
-                    ACC_CODE = VALUES(ACC_CODE),
-                    AMOUNT = VALUES(AMOUNT),
-                    DB_CR = VALUES(DB_CR),
-                    AMOUNT = VALUES(AMOUNT),
-                    NARRATION1 = VALUES(NARRATION1),
-                    NARRATION2 = VALUES(NARRATION2);
-                  `;
+  INSERT INTO tran_acc (
+    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
+    AMOUNT, DB_CR,NARRATION1,NARRATION2, JOB_NO
+  ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?,?)
+  ON DUPLICATE KEY UPDATE
+    DATTE = VALUES(DATTE),
+    ACC_CODE = VALUES(ACC_CODE),
+    AMOUNT = VALUES(AMOUNT),
+    DB_CR = VALUES(DB_CR),
+    AMOUNT = VALUES(AMOUNT),
+    NARRATION1 = VALUES(NARRATION1),
+    NARRATION2 = VALUES(NARRATION2),
+    JOB_NO = VALUES(JOB_NO);
+`;
 
             await new Promise((resolve, reject) => {
               conn.query(
@@ -2275,13 +2276,14 @@ app.post("/api/save-rcp", async (req, res) => {
                 [
                   trn.TranType,
                   trn.VchrNo,
-                  vchrData.VchrDate,   // still assuming it's a valid date string like '2025-05-15'
+                  vchrData.VchrDate,
                   trn.SrNo,
                   trn.AccCode,
                   trn.Amount,
                   trn.DbCr,
                   trn.Narration1,
-                  trn.Narration2
+                  trn.Narration2,
+                  trn.JobNo,
                 ],
                 (err, result) => {
                   if (err) {
@@ -2295,8 +2297,8 @@ app.post("/api/save-rcp", async (req, res) => {
             });
           }
           console.log("InvStl INSERT START:");
-          for (const trn of InvStlData) {
-            const stlQuery = `
+    for (const trn of InvStlData) {
+      const stlQuery = `
                   INSERT INTO adj_dtl (
                     SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
                      STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT
@@ -2309,56 +2311,56 @@ app.post("/api/save-rcp", async (req, res) => {
                    STLD_DATE = VALUES(STLD_DATE),
                    STLD_AMT = VALUES(STLD_AMT)
                   `;
-            //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
-            await new Promise((resolve, reject) => {
-              conn.query(
-                stlQuery,
-                [
-                  trn.TranType,
-                  trn.SourceDoc,
-                  trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
-                  trn.AccCode,
-                  trn.StldType,
-                  trn.StldDoc,
-                  trn.StldDate,
-                  trn.Amount
-                ],
-                (err, result) => {
-                  if (err) {
-                    console.error("Error inserting/updating adj_dtl row:", trn, err);
-                    return reject(err);
-                  }
-                  console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
-                  resolve(result);
-                }
-              );
-            });
-          }
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
+      //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
+      await new Promise((resolve, reject) => {
+        conn.query(
+          stlQuery,
+          [
+            trn.TranType,
+            trn.SourceDoc,
+            trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
+            trn.AccCode,
+            trn.StldType,
+            trn.StldDoc,
+            trn.StldDate,
+            trn.Amount
+          ],
+          (err, result) => {
             if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              console.error("Error inserting/updating adj_dtl row:", trn, err);
+              return reject(err);
             }
-            console.log('PDC_RCD insert end');
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Receipt vouchers failed to save:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
-          });
-        }
+            console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
+            resolve(result);
+          }
+        );
       });
+    }
+
+    // ✅ Commit transaction if everything is successful
+    conn.commit((err) => {
+      if (err) {
+        console.error("Commit Error:", err);
+        return res.status(500).json({ message: "Commit error", error: err });
+      }
+      console.log('PDC_RCD insert end');
+      conn.release(); // Release the connection back to the pool
+      res.json({ message: "Data saved successfully!" });
+    });
+
+  } catch (error) {
+    console.error("Receipt vouchers failed to save:", error);
+    conn.rollback(() => {
+      conn.release(); // Release the connection back to the pool
+      res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
+    });
+  }
+});
     });
   } catch (error) {
-    console.error("Server Error Foreign Purchase:", error);
-    res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
-  }
+  console.error("Server Error Foreign Purchase:", error);
+  res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
+}
 })
 app.post("/api/save-frgnpurch", async (req, res) => {
   try {
@@ -5628,8 +5630,8 @@ app.get("/api/quotitem/:id", function (req, res) {
 
     function (error, results) {
       if (error) throw error;
-     // console.log('quotitem', results);
-      console.log('quotitem',req.params.id);
+      // console.log('quotitem', results);
+      console.log('quotitem', req.params.id);
       res.json(results);
 
     }
@@ -9340,13 +9342,13 @@ app.use('/api', pinvNsRoutes);
 const fabInvPrint = require('./routes/fabInvPrint_route');
 app.use('/api', fabInvPrint);
 //
-const analyticsRoutes=require('./routes/analyticsRoutes')(connection);
- app.use('/api/analytics', analyticsRoutes);
- //
- const acPeriodRoute = require('./routes/ac_period_api')(connection);
- app.use('/api/ac-period',acPeriodRoute);
- //
- const { startAuditArchiver } = require('./utils/auditArchiver');
+const analyticsRoutes = require('./routes/analyticsRoutes')(connection);
+app.use('/api/analytics', analyticsRoutes);
+//
+const acPeriodRoute = require('./routes/ac_period_api')(connection);
+app.use('/api/ac-period', acPeriodRoute);
+//
+const { startAuditArchiver } = require('./utils/auditArchiver');
 startAuditArchiver(connection);   // auto cron inside same HayatDb process
 //
 app.use('/api/audit', require('./routes/audit_api')(connection));
@@ -9358,33 +9360,33 @@ app.use('/api/nl-dispatch', nlDispatch);
 const agentRoutes = require('./routes/agentRoutes')(connection);
 app.use('/api/agent', authMiddleware, agentRoutes);
 
-const  faRoutes = require('./routes/fa_routes')(connection);
-app.use('/api',faRoutes);
+const faRoutes = require('./routes/fa_routes')(connection);
+app.use('/api', faRoutes);
 
-const faDepRoutes =require("./routes/fa_dep_run_api")(connection);
-app.use('/api',faDepRoutes);
+const faDepRoutes = require("./routes/fa_dep_run_api")(connection);
+app.use('/api', faDepRoutes);
 //
 const faTransferRoutes = require('./routes/fa_asset_transfer_api')(connection);
 app.use('/api/fa-transfer', faTransferRoutes);
 //
 const faDisposalRoutes = require('./routes/fa_disposal_api')(connection);
-   app.use('/api/fa-disposal', faDisposalRoutes);
+app.use('/api/fa-disposal', faDisposalRoutes);
 
- const ledgerDrillRoutes = require('./LedgerDrillRoutes')(connection);
-   app.use(ledgerDrillRoutes);
+const ledgerDrillRoutes = require('./LedgerDrillRoutes')(connection);
+app.use(ledgerDrillRoutes);
 //
-   app.use(require('./FabInvSuggestRoutes')(connection))
+app.use(require('./FabInvSuggestRoutes')(connection))
 
-   app.use('/api/srno-sync', require('./routes/srnoSyncRoutes')(connection));
-   //
-   app.use('/api/pdc-rcd-reversal', require('./routes/pdcRcdReversalRoutes')(connection));
-   //
-   app.use('/api/pdc-isu-reversal', require('./routes/pdcIsuReversalRoutes')(connection));
-   //
-   app.use('/api', require('./routes/itemTransactionCheckRoutes')(connection));
-   //
-   app.use('/api', require('./routes/tranTypeRoutes')(connection));
-   //
-   app.use('/api', require('./routes/salesInquiryRoutes')(connection));
-   //
-   app.use('/api', require('./routes/lovRoutes')(connection));
+app.use('/api/srno-sync', require('./routes/srnoSyncRoutes')(connection));
+//
+app.use('/api/pdc-rcd-reversal', require('./routes/pdcRcdReversalRoutes')(connection));
+//
+app.use('/api/pdc-isu-reversal', require('./routes/pdcIsuReversalRoutes')(connection));
+//
+app.use('/api', require('./routes/itemTransactionCheckRoutes')(connection));
+//
+app.use('/api', require('./routes/tranTypeRoutes')(connection));
+//
+app.use('/api', require('./routes/salesInquiryRoutes')(connection));
+//
+app.use('/api', require('./routes/lovRoutes')(connection));
