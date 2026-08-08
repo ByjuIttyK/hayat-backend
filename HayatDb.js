@@ -9388,3 +9388,6 @@ app.use('/api', require('./routes/lovRoutes')(connection));
 //
 const lpoSaveRoutes = require('./LpoSaveRoutes')(connection);
 app.use('/api', lpoSaveRoutes);
+//
+const quotTermsCondRoutes = require('./QuotTermsCondRoutes')(connection);
+app.use('/api', quotTermsCondRoutes);
