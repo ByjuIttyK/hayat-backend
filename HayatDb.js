@@ -4139,27 +4139,25 @@ app.post("/api/lpoHdrUpd", function (req, res, next) {
   });
 });
 app.get("/api/fpoMaxNo", function (req, res) {
-  console.log("fpoMaxNo");
-  var pool = orcl1.getPool();
-  pool.getConnection(function (err, conn) {
-    //
-    conn.execute(
-      "select MAX(FPO_NO)   MXLPO  FROM fpo_net",
-      {},
-      {
-        outFormat: orcl1.OBJECT,
-      },
-      function (err, result) {
-        if (err) {
-          throw error;
-        } else {
-          //console.log("Oracle gLmST", result);
-          res.end(JSON.stringify(result.rows));
-          conn.close();
-        }
+
+  connection.query(
+    "select MAX(FPO_NO) MXLPO FROM fpo_net",
+
+    function (err, result) {
+      if (err) {
+        console.error("Error fetching max LPO No:", err);
+        return res.status(500).json({ message: "Error fetching max LPO No" });
       }
-    );
-  });
+
+      const currentMax = result[0]?.MXLPO;
+      const nextLpoNo = (currentMax === null || currentMax === undefined)
+        ? 1
+        : Number(currentMax) + 1;
+
+      console.log("Next Lpo ", nextLpoNo);
+      res.json({ maxValue: nextLpoNo });
+    }
+  );
 });
 
 app.get("/api/Rplnlst", function (req, res) {
