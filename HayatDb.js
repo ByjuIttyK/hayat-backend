@@ -1190,7 +1190,6 @@ app.post("/api/save-qtDoc", async (req, res) => {
     res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
   }
 });
-
 app.post("/api/save-quotation", async (req, res) => {
   try {
     const { qtHdr, lpoItems } = req.body;
@@ -1218,11 +1217,17 @@ app.post("/api/save-quotation", async (req, res) => {
 
           /* ── 1) header upsert (QUOT_HDR has QUOT_NO as PK, so ON
                  DUPLICATE KEY UPDATE is correct here) ─────────────── */
+          // Added AMOUNT / DISCOUNT / ROUND_OFF / VAT_PERC / VAT_AMOUNT — the
+          // frontend's Discount/Taxable/VAT/Round Off/NET summary block was
+          // already sending these (as Amount/Discount/RoundOff/VatPerc/
+          // VatAmount), but this INSERT never included the columns, so they
+          // were silently dropped on every save.
           const hdrQuery = `
             INSERT INTO quot_hdr
               (QUOT_NO, QUOT_DATE, CUST_CODE, PAYMENT_TERMS, ENGG_CODE, ATTN,
-               YOUR_REF, SUBJECT, PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               YOUR_REF, SUBJECT, PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO,
+               AMOUNT, DISCOUNT, ROUND_OFF, VAT_PERC, VAT_AMOUNT)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
               QUOT_DATE     = COALESCE(VALUES(QUOT_DATE), QUOT_DATE),
               CUST_CODE     = VALUES(CUST_CODE),
@@ -1235,12 +1240,19 @@ app.post("/api/save-quotation", async (req, res) => {
               CURR_CODE     = VALUES(CURR_CODE),
               REV_NO        = VALUES(REV_NO),
               INQ_NO        = VALUES(INQ_NO),
-              TEL_NO        = VALUES(TEL_NO)
+              TEL_NO        = VALUES(TEL_NO),
+              AMOUNT        = VALUES(AMOUNT),
+              DISCOUNT      = VALUES(DISCOUNT),
+              ROUND_OFF     = VALUES(ROUND_OFF),
+              VAT_PERC      = VALUES(VAT_PERC),
+              VAT_AMOUNT    = VALUES(VAT_AMOUNT)
           `;
           await q(hdrQuery, [
             qtHdr.QtNo, qtHdr.QtDt || null, qtHdr.CustCd, qtHdr.PayTrm, qtHdr.EngCd,
             qtHdr.Attn, qtHdr.YourRef, qtHdr.Subject, qtHdr.ProjName,
             qtHdr.CurrCd, qtHdr.RevNo, qtHdr.inqNo, qtHdr.TelNo,
+            qtHdr.Amount || 0, qtHdr.Discount || 0, qtHdr.RoundOff || 0,
+            qtHdr.VatPerc || 0, qtHdr.VatAmount || 0,
           ]);
 
           /* ── 2) items: wipe this quotation's rows, then re-insert the
@@ -5594,7 +5606,8 @@ app.get("/api/quothdr/:id", function (req, res) {
       b.SMAN_NAME,c.CUS_QUOTE_LIMIT,
       a.TEL_NO,
       a.FAX_NO,a.CURR_CODE,
-      a.INQ_NO,a.REV_NO,a.QUOT_APPROVED,a.QUOT_APPROVED_BY,a.QUOT_LIMIT_APPROVED_BY
+      a.INQ_NO,a.REV_NO,a.QUOT_APPROVED,a.QUOT_APPROVED_BY,a.QUOT_LIMIT_APPROVED_BY,
+      a.AMOUNT,a.DISCOUNT,a.ROUND_OFF,a.VAT_PERC,a.VAT_AMOUNT
 
     from quot_hdr a
     left join sman_mst b on a.engg_code = b.sman_code
