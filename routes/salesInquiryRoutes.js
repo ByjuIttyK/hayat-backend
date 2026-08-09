@@ -9,10 +9,21 @@
 //   GET    /api/sales-inquiry/next-no        -> generate next INQ_NO
 //   GET    /api/sales-inquiry/:inqNo         -> single row, with joined LOV
 //                                                descriptions for display
-//   POST   /api/sales-inquiry                -> create (ADD)
-//   PUT    /api/sales-inquiry/:inqNo         -> update (EDIT)
-//   DELETE /api/sales-inquiry/:inqNo         -> delete (DELETE)
+//   GET    /api/sales-inquiry/:inqNo/items   -> sinq_items rows for the grid
+//   POST   /api/sales-inquiry                -> create (ADD), header + items
+//   PUT    /api/sales-inquiry/:inqNo         -> update (EDIT), header + items
+//   DELETE /api/sales-inquiry/:inqNo         -> delete (DELETE), header + items
 //   POST   /api/sales-inquiry/upload         -> attachment upload (multipart)
+//
+// sinq_items: composite PK (INQ_NO, SR_NO). POST/PUT accept an `items` array
+// in the body — [{ SR_NO, FG_ITEM_DESC, FG_UNIT, QTY }, ...] — from the
+// entry-screen grid. FG_ITEM_CODE is NOT trusted from the client: it's
+// always rebuilt here as Int(INQ_NO) + "-" + SR_NO (e.g. INQ_NO
+// "0000006340" + SR_NO "001" -> "6340-001"), which is what guarantees it
+// can never collide with another inquiry's items. Each save does a full
+// delete-then-reinsert of that inquiry's items inside the same transaction
+// as the header write, so the grid is always a mirror of what was submitted
+// (blank rows the user cleared out just disappear on save).
 //
 // *** VERIFY BEFORE USE ***
 // The LEFT JOINs below use the same LOV_CONFIG table/column guesses as
@@ -80,6 +91,38 @@ module.exports = function (connection) {
   `;
 
   // -------------------------------------------------------------------------
+  // Replace an inquiry's sinq_items inside an open transaction.
+  // FG_ITEM_CODE is always derived here as Int(INQ_NO)-SR_NO, e.g.
+  // INQ_NO "0000006340" + SR_NO "001" -> "6340-001" — never taken from the
+  // client — so it can never duplicate across inquiries.
+  // `conn` must be a connection already inside conn.beginTransaction().
+  // -------------------------------------------------------------------------
+  const buildFgItemCode = (inqNo, srNo) => `${parseInt(inqNo, 10)}-${srNo}`;
+
+  const replaceSinqItems = async (conn, inqNo, items) => {
+    await conn.query(`DELETE FROM sinq_items WHERE INQ_NO = ?`, [inqNo]);
+
+    const hasContent = (r) =>
+      (r.FG_ITEM_DESC && String(r.FG_ITEM_DESC).trim() !== "") ||
+      (r.FG_UNIT && String(r.FG_UNIT).trim() !== "") ||
+      (r.QTY !== "" && r.QTY !== null && r.QTY !== undefined);
+
+    const rows = Array.isArray(items)
+      ? items.filter((r) => r && String(r.SR_NO ?? "").trim() !== "" && hasContent(r))
+      : [];
+    if (rows.length === 0) return;
+
+    for (const r of rows) {
+      const srNo = String(r.SR_NO).trim();
+      await conn.query(
+        `INSERT INTO sinq_items (INQ_NO, SR_NO, FG_ITEM_CODE, FG_ITEM_DESC, FG_UNIT, QTY)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [inqNo, srNo, buildFgItemCode(inqNo, srNo), r.FG_ITEM_DESC ?? null, r.FG_UNIT ?? null, r.QTY === "" ? null : r.QTY ?? null]
+      );
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // GET /api/sales-inquiry
   // -------------------------------------------------------------------------
   router.get("/sales-inquiry", async (req, res) => {
@@ -145,6 +188,23 @@ module.exports = function (connection) {
     }
   });
 
+  // -------------------------------------------------------------------------
+  // GET /api/sales-inquiry/:inqNo/items
+  // -------------------------------------------------------------------------
+  router.get("/sales-inquiry/:inqNo/items", async (req, res) => {
+    try {
+      const [rows] = await db.query(
+        `SELECT SR_NO, FG_ITEM_CODE, FG_ITEM_DESC, FG_UNIT, QTY
+         FROM sinq_items WHERE INQ_NO = ? ORDER BY SR_NO`,
+        [req.params.inqNo]
+      );
+      res.json(rows);
+    } catch (err) {
+      console.error("[sales-inquiry/:inqNo/items] fetch failed:", err);
+      res.status(500).json({ message: "Failed to fetch enquiry items" });
+    }
+  });
+
   const FIELDS = [
     "INQ_NO", "INQ_DATE", "INQ_TYPE", "CUST_CODE", "SUBJECT", "ESTIMATE_BY",
     "QUOTE_NO", "QUOTE_DATE", "CLOSING_DATE", "REGRET", "REGRET_REASON",
@@ -166,24 +226,35 @@ module.exports = function (connection) {
     if (!body.CUST_CODE) {
       return res.status(400).json({ message: "CUST_CODE is required" });
     }
+
+    const conn = await db.getConnection();
     try {
-      const [existing] = await db.query(`SELECT INQ_NO FROM sales_inquiry WHERE INQ_NO = ?`, [body.INQ_NO]);
+      const [existing] = await conn.query(`SELECT INQ_NO FROM sales_inquiry WHERE INQ_NO = ?`, [body.INQ_NO]);
       if (existing.length > 0) {
         return res.status(409).json({ message: `Enquiry No "${body.INQ_NO}" already exists` });
       }
+
+      await conn.beginTransaction();
 
       const cols = FIELDS.join(", ");
       const placeholders = FIELDS.map(() => "?").join(", ");
       const values = FIELDS.map((f) => nullify(body[f]));
 
-      await db.query(
+      await conn.query(
         `INSERT INTO sales_inquiry (${cols}) VALUES (${placeholders})`,
         values
       );
+
+      await replaceSinqItems(conn, body.INQ_NO, body.items);
+
+      await conn.commit();
       res.status(201).json({ message: "Sales inquiry created", INQ_NO: body.INQ_NO });
     } catch (err) {
+      await conn.rollback().catch(() => {});
       console.error("[sales-inquiry] create failed:", err);
       res.status(500).json({ message: "Failed to create sales inquiry" });
+    } finally {
+      conn.release();
     }
   });
 
@@ -195,22 +266,34 @@ module.exports = function (connection) {
     const { inqNo } = req.params;
     const body = req.body || {};
     const updatableFields = FIELDS.filter((f) => f !== "INQ_NO");
+
+    const conn = await db.getConnection();
     try {
+      await conn.beginTransaction();
+
       const setClause = updatableFields.map((f) => `${f} = ?`).join(", ");
       const values = updatableFields.map((f) => nullify(body[f]));
       values.push(inqNo);
 
-      const [result] = await db.query(
+      const [result] = await conn.query(
         `UPDATE sales_inquiry SET ${setClause} WHERE INQ_NO = ?`,
         values
       );
       if (result.affectedRows === 0) {
+        await conn.rollback();
         return res.status(404).json({ message: "Sales inquiry not found" });
       }
+
+      await replaceSinqItems(conn, inqNo, body.items);
+
+      await conn.commit();
       res.json({ message: "Sales inquiry updated", INQ_NO: inqNo });
     } catch (err) {
+      await conn.rollback().catch(() => {});
       console.error("[sales-inquiry/:inqNo] update failed:", err);
       res.status(500).json({ message: "Failed to update sales inquiry" });
+    } finally {
+      conn.release();
     }
   });
 
@@ -218,15 +301,26 @@ module.exports = function (connection) {
   // DELETE /api/sales-inquiry/:inqNo  (DELETE)
   // -------------------------------------------------------------------------
   router.delete("/sales-inquiry/:inqNo", async (req, res) => {
+    const conn = await db.getConnection();
     try {
-      const [result] = await db.query(`DELETE FROM sales_inquiry WHERE INQ_NO = ?`, [req.params.inqNo]);
+      await conn.beginTransaction();
+
+      await conn.query(`DELETE FROM sinq_items WHERE INQ_NO = ?`, [req.params.inqNo]);
+      const [result] = await conn.query(`DELETE FROM sales_inquiry WHERE INQ_NO = ?`, [req.params.inqNo]);
+
       if (result.affectedRows === 0) {
+        await conn.rollback();
         return res.status(404).json({ message: "Sales inquiry not found" });
       }
+
+      await conn.commit();
       res.json({ message: "Sales inquiry deleted" });
     } catch (err) {
+      await conn.rollback().catch(() => {});
       console.error("[sales-inquiry/:inqNo] delete failed:", err);
       res.status(500).json({ message: "Failed to delete sales inquiry" });
+    } finally {
+      conn.release();
     }
   });
 
