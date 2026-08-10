@@ -2376,6 +2376,24 @@ app.post("/api/save-rcp", async (req, res) => {
 })
 
 //
+// ── Settlements already applied by a voucher ───────────────────────────
+// Used on EDIT so the Invoice Settlements grid can show what this voucher
+// previously settled. adj_dtl is keyed by the SOURCE (paying) voucher.
+app.get("/api/adjdtl/:tp/:vchr", (req, res) => {
+  const sql =
+    "SELECT SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE, " +
+    "       STLD_TYPE, STLD_DOC, STLD_DATE, STLD_AMT, MAIN_SR_NO " +
+    "FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
+    "ORDER BY MAIN_SR_NO";
+  connection.query(sql, [req.params.tp, req.params.vchr], (err, rows) => {
+    if (err) {
+      console.error("adj_dtl fetch failed:", err);
+      return res.status(500).json({ message: "Error reading adj_dtl", error: err });
+    }
+    res.json(rows);
+  });
+});
+
 app.post("/api/save-payment", async (req, res) => {
   console.log("SAVE PAYMENTS");
   try {
@@ -2559,8 +2577,8 @@ app.post("/api/save-payment", async (req, res) => {
             const stlQuery = `
                   INSERT INTO adj_dtl (
                     SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
-                     STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT
-                  ) VALUES (?, ?, ?, ?, ?,?, ?, ?)
+                     STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT, MAIN_SR_NO
+                  ) VALUES (?, ?, ?, ?, ?,?, ?, ?, ?)
                   ON DUPLICATE KEY UPDATE
                    SOURCE_DATE=VALUES(SOURCE_DATE),
                    ACC_CODE=VALUES(ACC_CODE),
@@ -2581,7 +2599,12 @@ app.post("/api/save-payment", async (req, res) => {
                   trn.StldType,
                   trn.StldDoc,
                   trn.StldDate,
-                  trn.Amount
+                  trn.Amount,
+                  // MAIN_SR_NO is part of the key (SOURCE_TYPE, SOURCE_DOC,
+                  // MAIN_SR_NO). It was never supplied, so every settlement
+                  // line of a voucher shared one key and ON DUPLICATE KEY
+                  // UPDATE overwrote the last — only one row survived.
+                  trn.MainSrNo ?? null
                 ],
                 (err, result) => {
                   if (err) {
