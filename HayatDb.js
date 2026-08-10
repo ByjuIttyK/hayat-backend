@@ -2264,7 +2264,7 @@ app.post("/api/save-rcp", async (req, res) => {
               });
             }
           }
-    console.log('tran_acc insert start', tranaccData);
+          console.log('tran_acc insert start', tranaccData);
           for (const trn of tranaccData) {
             const tranQuery = `
   INSERT INTO tran_acc (
@@ -2309,8 +2309,8 @@ app.post("/api/save-rcp", async (req, res) => {
             });
           }
           console.log("InvStl INSERT START:");
-    for (const trn of InvStlData) {
-      const stlQuery = `
+          for (const trn of InvStlData) {
+            const stlQuery = `
                   INSERT INTO adj_dtl (
                     SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
                      STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT
@@ -2323,57 +2323,304 @@ app.post("/api/save-rcp", async (req, res) => {
                    STLD_DATE = VALUES(STLD_DATE),
                    STLD_AMT = VALUES(STLD_AMT)
                   `;
-      //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
-      await new Promise((resolve, reject) => {
-        conn.query(
-          stlQuery,
-          [
-            trn.TranType,
-            trn.SourceDoc,
-            trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
-            trn.AccCode,
-            trn.StldType,
-            trn.StldDoc,
-            trn.StldDate,
-            trn.Amount
-          ],
-          (err, result) => {
-            if (err) {
-              console.error("Error inserting/updating adj_dtl row:", trn, err);
-              return reject(err);
-            }
-            console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
-            resolve(result);
+            //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
+            await new Promise((resolve, reject) => {
+              conn.query(
+                stlQuery,
+                [
+                  trn.TranType,
+                  trn.SourceDoc,
+                  trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
+                  trn.AccCode,
+                  trn.StldType,
+                  trn.StldDoc,
+                  trn.StldDate,
+                  trn.Amount
+                ],
+                (err, result) => {
+                  if (err) {
+                    console.error("Error inserting/updating adj_dtl row:", trn, err);
+                    return reject(err);
+                  }
+                  console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
+                  resolve(result);
+                }
+              );
+            });
           }
-        );
+
+          // ✅ Commit transaction if everything is successful
+          conn.commit((err) => {
+            if (err) {
+              console.error("Commit Error:", err);
+              return res.status(500).json({ message: "Commit error", error: err });
+            }
+            console.log('PDC_RCD insert end');
+            conn.release(); // Release the connection back to the pool
+            res.json({ message: "Data saved successfully!" });
+          });
+
+        } catch (error) {
+          console.error("Receipt vouchers failed to save:", error);
+          conn.rollback(() => {
+            conn.release(); // Release the connection back to the pool
+            res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
+          });
+        }
       });
-    }
-
-    // ✅ Commit transaction if everything is successful
-    conn.commit((err) => {
-      if (err) {
-        console.error("Commit Error:", err);
-        return res.status(500).json({ message: "Commit error", error: err });
-      }
-      console.log('PDC_RCD insert end');
-      conn.release(); // Release the connection back to the pool
-      res.json({ message: "Data saved successfully!" });
     });
-
   } catch (error) {
-    console.error("Receipt vouchers failed to save:", error);
-    conn.rollback(() => {
-      conn.release(); // Release the connection back to the pool
-      res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
-    });
+    console.error("Server Error Foreign Purchase:", error);
+    res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
   }
-});
+})
+
+//
+app.post("/api/save-payment", async (req, res) => {
+  console.log("SAVE PAYMENTS");
+  try {
+    const { vchrData, chqData, tranaccData, InvStlData } = req.body; // Extract form data & grid rows from payload
+    //, StlData
+    console.log("SAVE PV 2", req.body);
+    console.log("R.V vchrData=>**", vchrData);
+    console.log("R.V ChqData=>**", chqData);
+    console.log("R.V tranAccData=>**", tranaccData);
+    console.log("R.V InvStlData=>**", InvStlData);
+    //,StlData
+    // Start transaction
+    //delete old record
+    var sql = "DELETE FROM vouchers WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    var sql = "DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table tran_acc old record delete: " + result.affectedRows);
+    });
+    //pdc_isu
+    var sql = "DELETE FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    //adj_dtl
+    var sql = "DELETE FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    // delete old records over
+
+    connection.getConnection((err, conn) => {
+      if (err) {
+        console.error("R.V Bank save -Error getting connection:", err);
+        return res.status(500).json({ message: "R.V Bank save - Error getting connection" });
+      }
+
+      conn.beginTransaction(async (err) => {
+        if (err) {
+          console.error("Transaction Error:", err);
+          conn.release(); // Release the connection back to the pool
+          return res.status(500).json({ message: "Transaction error", error: err });
+        }
+
+        try {
+          // ✅ Step 1: Insert/Update NGP_NET table
+          // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
+          const vchrQuery = `
+               INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
+                                     CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
+                                      AMOUNT) 
+               VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
+               ON DUPLICATE KEY UPDATE 
+               DATTE= VALUES(DATTE),
+               CUST_CODE = VALUES(CUST_CODE),
+               ACC_CODE= VALUES(ACC_CODE),
+               CUR_CODE = VALUES(CUR_CODE),
+               CONV_RATE = VALUES(CONV_RATE),
+               NARRATION1 = VALUES(NARRATION1),
+               PAID_TO = VALUES(PAID_TO),
+               AMOUNT_FRGN = VALUES(AMOUNT_FRGN),
+               AMOUNT = VALUES(AMOUNT);
+              `;
+
+          await new Promise((resolve, reject) => {
+            conn.query(
+              vchrQuery,
+              [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
+              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
+              vchrData.Particulars, vchrData.PaidTo,
+              vchrData.FrgnAmt, vchrData.Amount],
+              (err, result) => {
+                if (err) {
+                  return reject(err);
+                }
+                console.log("vouchers Insert/Update:", result);
+                resolve(result);
+              }
+            );
+          });
+          // ✅
+          if (vchrData.TranType !== "05") {
+            console.log('PDC_ISU insert start');
+
+            for (const chq of chqData.filter(chq =>
+              chq.ChqNo && chq.ChqNo.trim() !== "")) {
+              const chqQuery = `
+                  INSERT INTO pdc_isu(
+                    TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
+                    PDC_CODE, SUP_CODE, CHQ_BANK, AMOUNT, NARRATION
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON DUPLICATE KEY UPDATE
+                    VCHR_DATE = VALUES(VCHR_DATE),
+                    CHQ_DATE = VALUES(CHQ_DATE),
+                    PDC_CODE = VALUES(PDC_CODE),
+                    SUP_CODE = VALUES(SUP_CODE),
+                    CHQ_BANK = VALUES(CHQ_BANK),
+                    AMOUNT = VALUES(AMOUNT),
+                    NARRATION = VALUES(NARRATION);
+                `;
+
+              await new Promise((resolve, reject) => {
+                conn.query(
+                  chqQuery,
+                  [
+                    chq.TranType,
+                    chq.VchrNo,
+                    vchrData.VchrDate,   // still assuming it's a valid date string like '2025-05-15'
+                    chq.ChqNo,
+                    chq.ChqDt,
+                    chq.PdcCode,
+                    chq.CustCd,
+                    chq.ChqBank,
+                    chq.Amount,
+                    chq.Narration
+                  ],
+                  (err, result) => {
+                    if (err) {
+                      console.error("Error inserting/updating chq row:", chq, err);
+                      return reject(err);
+                    }
+                    console.log("Inserted/Updated row:", chq.VchrNo, result);
+                    resolve(result);
+                  }
+                );
+              });
+            }
+          }
+          console.log('tran_acc insert start', tranaccData);
+          for (const trn of tranaccData) {
+            const tranQuery = `
+  INSERT INTO tran_acc (
+    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
+    AMOUNT, DB_CR,NARRATION1,NARRATION2, JOB_NO
+  ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?,?)
+  ON DUPLICATE KEY UPDATE
+    DATTE = VALUES(DATTE),
+    ACC_CODE = VALUES(ACC_CODE),
+    AMOUNT = VALUES(AMOUNT),
+    DB_CR = VALUES(DB_CR),
+    AMOUNT = VALUES(AMOUNT),
+    NARRATION1 = VALUES(NARRATION1),
+    NARRATION2 = VALUES(NARRATION2),
+    JOB_NO = VALUES(JOB_NO);
+`;
+
+            await new Promise((resolve, reject) => {
+              conn.query(
+                tranQuery,
+                [
+                  trn.TranType,
+                  trn.VchrNo,
+                  vchrData.VchrDate,
+                  trn.SrNo,
+                  trn.AccCode,
+                  trn.Amount,
+                  trn.DbCr,
+                  trn.Narration1,
+                  trn.Narration2,
+                  trn.JobNo,
+                ],
+                (err, result) => {
+                  if (err) {
+                    console.error("Error inserting/updating trn row:", trn, err);
+                    return reject(err);
+                  }
+                  console.log("Inserted/Updated row:", trn.VchrNo, result);
+                  resolve(result);
+                }
+              );
+            });
+          }
+          console.log("InvStl INSERT START:");
+          for (const trn of InvStlData) {
+            const stlQuery = `
+                  INSERT INTO adj_dtl (
+                    SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
+                     STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT
+                  ) VALUES (?, ?, ?, ?, ?,?, ?, ?)
+                  ON DUPLICATE KEY UPDATE
+                   SOURCE_DATE=VALUES(SOURCE_DATE),
+                   ACC_CODE=VALUES(ACC_CODE),
+                   STLD_TYPE=VALUES(STLD_TYPE),
+                   STLD_DOC =VALUES(STLD_DOC),
+                   STLD_DATE = VALUES(STLD_DATE),
+                   STLD_AMT = VALUES(STLD_AMT)
+                  `;
+            //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
+            await new Promise((resolve, reject) => {
+              conn.query(
+                stlQuery,
+                [
+                  trn.TranType,
+                  trn.SourceDoc,
+                  trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
+                  trn.AccCode,
+                  trn.StldType,
+                  trn.StldDoc,
+                  trn.StldDate,
+                  trn.Amount
+                ],
+                (err, result) => {
+                  if (err) {
+                    console.error("Error inserting/updating adj_dtl row:", trn, err);
+                    return reject(err);
+                  }
+                  console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
+                  resolve(result);
+                }
+              );
+            });
+          }
+
+          // ✅ Commit transaction if everything is successful
+          conn.commit((err) => {
+            if (err) {
+              console.error("Commit Error:", err);
+              return res.status(500).json({ message: "Commit error", error: err });
+            }
+            console.log('PDC_RCD insert end');
+            conn.release(); // Release the connection back to the pool
+            res.json({ message: "Data saved successfully!" });
+          });
+
+        } catch (error) {
+          console.error("Receipt vouchers failed to save:", error);
+          conn.rollback(() => {
+            conn.release(); // Release the connection back to the pool
+            res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
+          });
+        }
+      });
     });
   } catch (error) {
-  console.error("Server Error Foreign Purchase:", error);
-  res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
-}
+    console.error("Server Error Foreign Purchase:", error);
+    res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
+  }
 })
+
 app.post("/api/save-frgnpurch", async (req, res) => {
   try {
     const { netData, expData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -3307,7 +3554,7 @@ app.get("/api/customers/:id", (req, res) => {
 
 app.post("/api/save-customer", (req, res) => {
   const data = req.body; // Receive data from frontend
-  console.log("Save-Customer", expData);
+ // console.log("Save-Customer", expData);
   if (!data || Object.keys(data).length === 0) {
     return res.status(400).json({ error: "No data provided" });
   }
