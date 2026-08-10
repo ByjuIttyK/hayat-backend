@@ -354,24 +354,44 @@ app.post("/api/save-lpo", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update lpo_net table
           const netQuery = `
-          INSERT INTO lpo_net (LPO_NO, LPO_DATE, SUP_CODE,NARRATION,AMOUNT,ATTN,SMAN_CODE) 
-          VALUES (?, ?, ?, ?,?,?,?) 
+          INSERT INTO lpo_net (
+            LPO_NO, LPO_DATE, SUP_CODE, NARRATION, AMOUNT, ATTN, SMAN_CODE,
+            DISCOUNT, VAT_PERC, VAT_AMOUNT,
+            SUPP_REF_NO, PAY_TERMS, PLACE_DLV, DELIVERY_REQ,
+            PREPARED_BY, ACCOUNTS_DEPT, APPROVED_BY
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE 
-          LPO_DATE= VALUES(LPO_DATE),
-          SUP_CODE = VALUES(SUP_CODE),
-          NARRATION = VALUES(NARRATION),
-          AMOUNT= VALUES(AMOUNT),
-          ATTN = VALUES(ATTN),
-          SMAN_CODE = VALUES(SMAN_CODE);
+          LPO_DATE      = VALUES(LPO_DATE),
+          SUP_CODE      = VALUES(SUP_CODE),
+          NARRATION     = VALUES(NARRATION),
+          AMOUNT        = VALUES(AMOUNT),
+          ATTN          = VALUES(ATTN),
+          SMAN_CODE     = VALUES(SMAN_CODE),
+          DISCOUNT      = VALUES(DISCOUNT),
+          VAT_PERC      = VALUES(VAT_PERC),
+          VAT_AMOUNT    = VALUES(VAT_AMOUNT),
+          SUPP_REF_NO   = VALUES(SUPP_REF_NO),
+          PAY_TERMS     = VALUES(PAY_TERMS),
+          PLACE_DLV     = VALUES(PLACE_DLV),
+          DELIVERY_REQ  = VALUES(DELIVERY_REQ),
+          PREPARED_BY   = VALUES(PREPARED_BY),
+          ACCOUNTS_DEPT = VALUES(ACCOUNTS_DEPT),
+          APPROVED_BY   = VALUES(APPROVED_BY);
         `;
 
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
-              [lpoNet.LpoNo, lpoNet.LpoDt, lpoNet.SupCd, lpoNet.Narration,
-              lpoNet.Amount, lpoNet.Attn, lpoNet.SmanCd],
+              [
+                lpoNet.LpoNo, lpoNet.LpoDt, lpoNet.SupCd, lpoNet.Narration,
+                lpoNet.Amount, lpoNet.Attn, lpoNet.SmanCd,
+                lpoNet.Discount, lpoNet.VatPerc, lpoNet.VatAmount,
+                lpoNet.SuppRefNo, lpoNet.PayTerms, lpoNet.PlaceDlv, lpoNet.DeliveryReq,
+                lpoNet.PreparedBy, lpoNet.AccountsDept, lpoNet.ApprovedBy,
+              ],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -381,7 +401,7 @@ app.post("/api/save-lpo", async (req, res) => {
               }
             );
           });
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Insert/Update lpo_items table
           const itemsQuery = `
               INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
               VALUES ? 
@@ -431,6 +451,7 @@ app.post("/api/save-lpo", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+
 
 
 // ─── Add this route to your existing Express app (server.js) ─────────────────
@@ -8330,7 +8351,7 @@ app.get("/api/lponet/:po", function (req, res) {
     "select a.LPO_NO,DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') LPO_DATE,a.SUP_CODE ,b.SUP_NAME ," +
     " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
     "a.REQ_NO,a.PLACE_DLV , a.ATTN ,a.DATE_REQ ,a.SMAN_CODE, a.SUPP_REF_NO , a.PAY_TERMS  , a.DELIVERY_REQ ," +
-    " a.LPO_APPROVED,  a.APPROVED_BY  ,a.DISCOUNT  " +
+    " a.LPO_APPROVED,  a.APPROVED_BY  ,a.ACCOUNTS_DEPT ,a.DISCOUNT  " +
     " FROM lpo_net a LEFT OUTER JOIN sup_mst b on (a.SUP_CODE=b.SUP_CODE) WHERE LPO_NO =?",
     [req.params.po],
 
