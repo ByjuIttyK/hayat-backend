@@ -318,7 +318,6 @@ app.get('/api/report_parameters/:rep', (req, res) => {
 });
 app.get('/api/lovmetadata/:rep', (req, res) => {
   console.log("Fetching Lov metatdata", req.params.rep);
-  // const { tableId } = req.params.rep;
   const query = 'SELECT * FROM column_metadata_lov WHERE lovHdr = ?';
 
   connection.query(query, [req.params.rep], (err, rows, fields) => {
@@ -327,7 +326,24 @@ app.get('/api/lovmetadata/:rep', (req, res) => {
       return res.status(500).json({ error: "Failed to fetch column_metedata_lov" });
     }
     console.log('LOV Column_metatdata ,rep =', rows, req.params.rep);
-    res.json(rows);
+
+    if (!rows.length) {
+      return res.json(rows); // unchanged behavior — let the frontend handle "not found" same as before
+    }
+
+    // Extra display columns, ordered — empty array for any lovHdr not yet
+    // migrated to lov_columns_mst, so ModalLov's legacy col3_fld/col3_hdr
+    // fallback still works exactly as before.
+    const colsQuery = 'SELECT FIELD_NAME, COL_HDR, COL_WIDTH, ALIGN FROM lov_columns_mst WHERE lovHdr = ? ORDER BY SR_NO';
+
+    connection.query(colsQuery, [req.params.rep], (err2, colRows) => {
+      if (err2) {
+        console.error("Error fetching lov_columns_mst:", err2);
+        return res.status(500).json({ error: "Failed to fetch lov_columns_mst" });
+      }
+      rows[0].columns = colRows; // [] when nothing configured yet
+      res.json(rows);
+    });
   });
 });
 
@@ -5516,16 +5532,16 @@ app.get("/api/jobpanels/:jbNo", function (req, res) {
 });
 
 
+app.get("/api/joblist/:custCd?", function (req, res) {
+  const { custCd } = req.params;
 
-
-app.get("/api/joblist", function (req, res) {
-  //[req.params.dys],
-  connection.query(
-    `SELECT 
+  let query = `SELECT 
     a.JOB_NO,
     DATE_FORMAT(a.START_DATE, '%d/%m/%Y') AS START_DATE,
     a.CUST_CODE,
     b.CUST_NAME,
+    a.CONTACT_PER,
+    a.PLACE_OF_DLV,
     a.CONTRACT_AMT,
     a.CONSULTANT,
     a.CANCEL_IND,
@@ -5534,26 +5550,33 @@ app.get("/api/joblist", function (req, res) {
     a.LPO_NO,
     DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE,
     f.InvAmt AS TOT_INV_AMT,
-    IFNULL(a.NET_AMT, 0) - IFNULL(f.InvAmt, 0) AS BAL_TO_invoice
+    IFNULL(a.CONTRACT_AMT, 0) - IFNULL(f.InvAmt, 0) AS BAL_TO_invoice
   FROM job_card a
   JOIN cus_mst b ON a.CUST_CODE = b.CUST_CODE
   LEFT JOIN (
     SELECT job_no, SUM(NET_AMT) AS InvAmt
     FROM fab_inv_hdr
     GROUP BY job_no
-  ) f ON f.job_no = a.JOB_NO
-  ORDER BY a.JOB_NO DESC`,
+  ) f ON f.job_no = a.JOB_NO`;
 
-    function (err, result) {
-      if (err) {
-        throw err;
-      } else {
-        console.log("JOBLST", result);
-        res.json(result);
-      }
+  const params = [];
+  if (custCd) {
+    query += ` WHERE a.CUST_CODE = ?`;
+    params.push(custCd);
+  }
+  query += ` ORDER BY a.JOB_NO DESC`;
+
+  connection.query(query, params, function (err, result) {
+    if (err) {
+      console.error("Error fetching joblist:", err);
+      return res.status(500).json({ error: err.message });
     }
-  );
+    console.log("JOBLST", custCd ? `(filtered: ${custCd})` : "(all)", result.length, "rows");
+    res.json(result);
+  });
 });
+
+
 //
 
 app.get("/api/joblistQuote/:jobNo", function (req, res) {
