@@ -1524,19 +1524,19 @@ app.post("/api/save-qtTermsCond", async (req, res) => {
 });
 
 
-
-
-
 ///Quote Save
 
 
 app.post("/api/save-fabinv", async (req, res) => {
   try {
     console.log("save-Proj.Invoice ==>", req.body);
-    const { fabInvNet, sretItems } = req.body;
-    if (!fabInvNet || !sretItems || !Array.isArray(sretItems) || sretItems.length === 0) {
+    const { fabInvNet, fabInvItems } = req.body;
+    //if (!fabInvNet || !sretItems || !Array.isArray(sretItems) || sretItems.length === 0) {
+    if (!fabInvNet || !fabInvItems || !Array.isArray(fabInvItems) || fabInvItems.length === 0) {
       return res.status(400).json({ message: "Invalid Project Invoice data format" });
     }
+    //  return res.status(400).json({ message: "Invalid Project Invoice data format" });
+    //}
     console.log("FABINV_HDR ==>", fabInvNet);
     console.log("FABINV Items ==>", fabInvItems);
     connection.getConnection((err, conn) => {
@@ -3718,7 +3718,7 @@ app.get("/api/customers/:id", (req, res) => {
 
 app.post("/api/save-customer", (req, res) => {
   const data = req.body; // Receive data from frontend
- // console.log("Save-Customer", expData);
+  // console.log("Save-Customer", expData);
   if (!data || Object.keys(data).length === 0) {
     return res.status(400).json({ error: "No data provided" });
   }
@@ -3847,7 +3847,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
       }
     );
   } else if (req.params.Tp == "SRV") {
-    connection.execute(
+    connection.query(
       "select MAX(SRV_NO)   MXVCHR  FROM srv_hdr ",
 
 
@@ -3855,9 +3855,11 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         if (err) {
           throw error;
         } else {
-          console.log("Max SRV", result);
+          console.log("Max SRV", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          res.json(result);
+          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
           // conn.close();
         }
       }
@@ -5293,6 +5295,26 @@ app.post("/api/save-smanmst", (req, res) => {
     res.json({ message: "Sales-Man inserted/updated successfully", result });
   });
 })
+
+app.get("/api/salesBankDtl", function (req, res) {
+
+  connection.query(
+    "select Distinct BANK_CODE, BANK_DETAILS  " +
+    "  from sales_bank_dtl  ORDER BY  1",
+    [req.params.id],
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        //   console.log("QtTermEntQt", result);
+        res.json(result);
+
+      }
+    }
+  );
+})
+
+
 app.get("/api/qttrmlst", function (req, res) {
 
   connection.query(
@@ -6166,7 +6188,7 @@ app.get("/api/fabinvjob/:job", function (req, res) {
     "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT , a.INV_UPLOAD_FILE, b.CONTACT_PR," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS " +
+    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS,a.BANK_CODE " +
     " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.JOB_NO =?  ",
     [req.params.job],
 
@@ -6190,7 +6212,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
     "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS " +
+    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE " +
     " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
     [req.params.inv],
 
