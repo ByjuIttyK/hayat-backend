@@ -1119,27 +1119,147 @@ app.post("/api/save-pret", async (req, res) => {
 app.post("/api/save-qtNotes", async (req, res) => {
   try {
     console.log("save-Quote-Notes ==>", req.body);
-    res.json({ message: "Notes saved successfully!" });
-  } catch (error) {
-    console.error("Transaction Failed:", error);
-    conn.rollback(() => {
-      conn.release(); // Release the connection back to the pool
-      res.status(500).json({ message: "Transaction failed, rolled back", error });
-    });
-  };
-});
+    const noteRows = req.body;
+    if (!Array.isArray(noteRows) || noteRows.length === 0) {
+      return res.status(400).json({ message: "Invalid Notes data format" });
+    }
 
+    const quotNo = noteRows[0].QUOT_NO;
+
+    connection.getConnection((err, conn) => {
+      if (err) {
+        console.error("Error getting connection:", err);
+        return res.status(500).json({ message: "Error getting connection" });
+      }
+
+      conn.beginTransaction(async (err) => {
+        try {
+          if (err) {
+            console.error("Qt.Notes.Transaction Error:", err);
+            conn.release();
+            return res.status(500).json({ message: "Transaction error", error: err });
+          }
+
+          // Replace all notes for this quote — the grid always sends the
+          // current full set of non-blank rows, not a delta.
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM quot_notes WHERE QUOT_NO = ?", [quotNo], (err, result) => {
+              if (err) return reject(err);
+              resolve(result);
+            });
+          });
+
+          const notesQuery = `
+              INSERT INTO quot_notes (QUOT_NO, SR_NO, NOT_ES)
+              VALUES ?
+            `;
+          const values = noteRows.map(row => [
+            row.QUOT_NO, row.SR_NO, row.NOT_ES
+          ]);
+
+          await new Promise((resolve, reject) => {
+            conn.query(notesQuery, [values], (err, result) => {
+              if (err) return reject(err);
+              console.log("quot_notes Insert:", result);
+              resolve(result);
+            });
+          });
+
+          conn.commit((err) => {
+            if (err) {
+              console.error("Commit Error:", err);
+              conn.rollback(() => conn.release());
+              return res.status(500).json({ message: "Commit error", error: err });
+            }
+            conn.release();
+            res.json({ message: "Notes saved successfully!" });
+          });
+
+        } catch (error) {
+          console.error("Qt.Notes.Transaction Failed:", error);
+          conn.rollback(() => {
+            conn.release();
+            res.status(500).json({ message: "Transaction failed, rolled back", error });
+          });
+        }
+      });
+    });
+  } catch (error) {
+    console.log("Qt.Notes save - internal error:", error);
+    res.status(500).json({ message: "Qt.Notes save Internal Server Error", error });
+  }
+});
+//tech details
 app.post("/api/save-qtTechDtl", async (req, res) => {
   try {
     console.log("save-Quote-TechDtl ==>", req.body);
-    res.json({ message: "Tech Dtl saved successfully!" });
-  } catch (error) {
-    console.error("Transaction Failed:", error);
-    conn.rollback(() => {
-      conn.release(); // Release the connection back to the pool
-      res.status(500).json({ message: "Tech Dtl Transaction failed, rolled back", error });
+    const techRows = req.body;
+    if (!Array.isArray(techRows) || techRows.length === 0) {
+      return res.status(400).json({ message: "Invalid Tech Detail data format" });
+    }
+
+    const quotNo = techRows[0].QUOT_NO;
+
+    connection.getConnection((err, conn) => {
+      if (err) {
+        console.error("Error getting connection:", err);
+        return res.status(500).json({ message: "Error getting connection" });
+      }
+
+      conn.beginTransaction(async (err) => {
+        try {
+          if (err) {
+            console.error("Qt.TechDtl.Transaction Error:", err);
+            conn.release();
+            return res.status(500).json({ message: "Transaction error", error: err });
+          }
+
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM quot_technical_details WHERE QUOT_NO = ?", [quotNo], (err, result) => {
+              if (err) return reject(err);
+              resolve(result);
+            });
+          });
+
+          const techQuery = `
+              INSERT INTO quot_technical_details (QUOT_NO, PARA_ID, SR_NO, TECH_DETAIL_LINE)
+              VALUES ?
+            `;
+          const values = techRows.map(row => [
+            row.QUOT_NO, row.PARA_ID || null, row.SR_NO, row.TECH_DETAIL_LINE
+          ]);
+
+          await new Promise((resolve, reject) => {
+            conn.query(techQuery, [values], (err, result) => {
+              if (err) return reject(err);
+              console.log("quot_technical_details Insert:", result);
+              resolve(result);
+            });
+          });
+
+          conn.commit((err) => {
+            if (err) {
+              console.error("Commit Error:", err);
+              conn.rollback(() => conn.release());
+              return res.status(500).json({ message: "Commit error", error: err });
+            }
+            conn.release();
+            res.json({ message: "Tech Dtl saved successfully!" });
+          });
+
+        } catch (error) {
+          console.error("Qt.TechDtl.Transaction Failed:", error);
+          conn.rollback(() => {
+            conn.release();
+            res.status(500).json({ message: "Transaction failed, rolled back", error });
+          });
+        }
+      });
     });
-  };
+  } catch (error) {
+    console.log("Qt.TechDtl save - internal error:", error);
+    res.status(500).json({ message: "Qt.TechDtl save Internal Server Error", error });
+  }
 });
 
 app.post("/api/save-qtDoc", async (req, res) => {
@@ -5193,7 +5313,7 @@ app.get("/api/qttrmlst", function (req, res) {
 app.get("/api/qtTechDtl/:id", function (req, res) {
 
   connection.query(
-    "select Distinct SR_NO, para_id, TECH_DETAIL_LINE" +
+    "select Distinct SR_NO, PARA_ID, TECH_DETAIL_LINE" +
     "  from quot_technical_details WHERE QUOT_NO = ? ORDER BY  SR_NO",
     [req.params.id],
     function (err, result) {
