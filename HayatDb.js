@@ -8345,24 +8345,79 @@ app.get("/api/lpoitems/:po", function (req, res) {
 
 //lpoNet
 app.get("/api/lponet/:po", function (req, res) {
-  // console.log(req.params)
-
   connection.query(
     "select a.LPO_NO,DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') LPO_DATE,a.SUP_CODE ,b.SUP_NAME ," +
     " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
     "a.REQ_NO,a.PLACE_DLV , a.ATTN ,a.DATE_REQ ,a.SMAN_CODE, a.SUPP_REF_NO , a.PAY_TERMS  , a.DELIVERY_REQ ," +
-    " a.LPO_APPROVED,  a.APPROVED_BY  ,a.ACCOUNTS_DEPT ,a.DISCOUNT  " +
-    " FROM lpo_net a LEFT OUTER JOIN sup_mst b on (a.SUP_CODE=b.SUP_CODE) WHERE LPO_NO =?",
+    " a.LPO_APPROVED,  a.PREPARED_BY, c.SMAN_NAME AS PREPARED_BY_NAME, " +
+    " a.APPROVED_BY, e.SMAN_NAME AS APPROVED_BY_NAME, " +
+    " a.ACCOUNTS_DEPT, d.SMAN_NAME AS ACCOUNTS_DEPT_NAME, a.DISCOUNT  " +
+    " FROM lpo_net a " +
+    " LEFT OUTER JOIN sup_mst b on (a.SUP_CODE=b.SUP_CODE)" +
+    " LEFT OUTER JOIN sman_mst c on (a.PREPARED_BY=c.SMAN_CODE)" +
+    " LEFT OUTER JOIN sman_mst d on (a.ACCOUNTS_DEPT=d.SMAN_CODE)" +
+    " LEFT OUTER JOIN sman_mst e on (a.APPROVED_BY=e.SMAN_CODE)" +
+    " WHERE LPO_NO =?",
     [req.params.po],
-
     function (error, results, fields) {
       if (error) throw error;
       res.json(results);
-      // console.log("LPONET ->",results);
     }
   );
 });
+//lastprice
+app.get("/api/lastprice/:supCode/:itemCode", function (req, res) {
+  const { excludeLpoNo, uptoDate } = req.query;
 
+  const conditions = [
+    "ph.SUP_CODE = ?",
+    "pi.ITEM_CODE = ?",
+    "(ph.CAN_CEL IS NULL OR ph.CAN_CEL <> 'Y')"
+  ];
+  const params = [req.params.supCode, req.params.itemCode];
+
+  if (excludeLpoNo) {
+    conditions.push("(ph.LPO_NO IS NULL OR ph.LPO_NO <> ?)");
+    params.push(excludeLpoNo);
+  }
+  if (uptoDate) {
+    conditions.push("ph.PJV_DATE <= ?");
+    params.push(uptoDate);
+  }
+
+  connection.query(
+    "SELECT pi.COST AS LAST_COST " +
+    "FROM purchase_items pi " +
+    "JOIN purchase_hdr ph ON pi.SRV_NO = ph.PJV_NO " +
+    "WHERE " + conditions.join(" AND ") + " " +
+    "ORDER BY ph.PJV_DATE DESC, pi.srno_row_id DESC " +
+    "LIMIT 1",
+    params,
+    function (error, results, fields) {
+      if (error) throw error;
+      res.json({ LAST_COST: results.length ? results[0].LAST_COST : null });
+    }
+  );
+});
+//lastpricehistory
+app.get("/api/lastpricehistory/:itemCode", function (req, res) {
+  connection.query(
+    "SELECT ph.PJV_NO, DATE_FORMAT(ph.PJV_DATE,'%d/%m/%Y') PJV_DATE, " +
+    "       ph.SUP_CODE, s.SUP_NAME, pi.COST " +
+    "FROM purchase_items pi " +
+    "JOIN purchase_hdr ph ON pi.SRV_NO = ph.PJV_NO " +
+    "LEFT OUTER JOIN sup_mst s ON ph.SUP_CODE = s.SUP_CODE " +
+    "WHERE pi.ITEM_CODE = ? " +
+    "  AND (ph.CAN_CEL IS NULL OR ph.CAN_CEL <> 'Y') " +
+    "ORDER BY ph.PJV_DATE DESC, pi.srno_row_id DESC " +
+    "LIMIT 50",
+    [req.params.itemCode],
+    function (error, results, fields) {
+      if (error) throw error;
+      res.json(results);
+    }
+  );
+});
 app.put("/api/lpoitemsput/:id", function (req, res, next) {
   let lpoitem = req.body;
   // console.log("xxx y", lpoitem);
