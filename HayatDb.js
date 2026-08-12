@@ -1800,108 +1800,6 @@ app.post("/api/save-siv", async (req, res) => {
 
 
 
-app.post("/api/save-srv", async (req, res) => {
-  try {
-    console.log("SRV Save ==>", req.body);
-    const { netData, itemsData } = req.body;
-    if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid SRV data format" });
-    }
-    console.log("srv_hdr ==>", netData);
-    console.log("SRV_ITEMS Items ==>", itemsData);
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          const netQuery = `INSERT INTO srv_hdr (
-          SRV_NO,SRV_DATE,PO_NO,SUP_CODE,NARRATION )
-                            VALUES ( ?, ?, ?, ?,?  )
-          ON DUPLICATE KEY UPDATE
-          SRV_DATE = VALUES(SRV_DATE),
-          PO_NO = VALUES(PO_NO),
-          SUP_CODE = VALUES(SUP_CODE),
-          NARRATION = VALUES(NARRATION)
-        `;
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [
-                netData.SrvNo, netData.SrvDt, netData.LpoNo, netData.SupCd,
-                netData.Narration, netData.netAmt
-              ],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("Srv_hdr Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-              INSERT INTO srv_items (SRV_NO,SRV_DATE,SR_NO,ITEM_CODE,QTY,STD_COST)
-              VALUES ? 
-              ON DUPLICATE KEY UPDATE 
-              SRV_NO= VALUES(SRV_NO),
-              SRV_DATE = COALESCE(VALUES(SRV_DATE), SRV_DATE), 
-              SR_NO = COALESCE(VALUES(SR_NO),SR_NO),
-              ITEM_CODE = COALESCE(VALUES(ITEM_CODE),ITEM_CODE),
-              QTY       = COALESCE(VALUES(QTY), QTY), 
-              STD_COST  = COALESCE(VALUES(STD_COST), STD_COST);
-            `;
-          const values = itemsData.map(row => [
-            row.SRV_NO, row.SRV_DATE, row.SR_NO, row.ITEM_CODE,
-            row.QTY, row.RATE
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("srv_items Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "S.R.V saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("S.R.V Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "SRV Transaction failed, rolled back", error });
-          });
-        };
-      });
-    });
-  } catch (error) {
-    console.log("SRV save - internal error :", error)
-    res.status(500).json({ message: "Internal Server Error (SRV)", error });
-  }
-});
-
 app.post("/api/save-sret", async (req, res) => {
   try {
     console.log("Sales Return ==>", req.body);
@@ -3255,9 +3153,9 @@ app.get("/api/CusAgeingInv", function (req, res) {
   );
 });
 
-app.get("/api/CustSt", function (req, res) {
-  const as_on_date = req.query.as_on_date || new Date().toISOString().split('T')[0];
-  const p_cus = req.query.p_cus ? req.query.p_cus.trim().toUpperCase() : null;
+app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
+  const as_on_date = req.params.as_on_date || new Date().toISOString().split('T')[0];
+  const p_cus = req.params.p_cus ? req.params.p_cus.trim().toUpperCase() : null;
 
   console.log("CustSt ==>", { as_on_date, p_cus });
 
@@ -3284,10 +3182,9 @@ app.get("/api/CustSt", function (req, res) {
     res.json(results);
   });
 });
-
-app.get("/api/SupSt", function (req, res) {
-  const as_on_date = req.query.as_on_date || new Date().toISOString().split('T')[0];
-  const p_cus = req.query.p_cus ? req.query.p_cus.trim().toUpperCase() : null;
+app.get("/api/supst/:p_cus/:as_on_date", function (req, res) {
+  const as_on_date = req.params.as_on_date || new Date().toISOString().split('T')[0];
+  const p_cus = req.params.p_cus ? req.params.p_cus.trim().toUpperCase() : null;
 
   console.log("SupSt ==>", { as_on_date, p_cus });
 
@@ -3314,6 +3211,7 @@ app.get("/api/SupSt", function (req, res) {
     res.json(results);
   });
 });
+
 
 app.get("/api/InvStlCust/:custcd", function (req, res) {
   console.log("InvStlCust", req.params.custcd);
@@ -5761,7 +5659,7 @@ app.get("/api/srvitems/:srv", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') AS SRV_DATE, a.LOC_CODE," +
-    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.COST, a.SRV_UNIT as UOM" +
+    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.COST as RATE, a.SRV_UNIT as UOM" +
     " from srv_items a left outer join  item_mst b on (a.ITEM_CODE =b.ITEM_CODE) where  a.SRV_NO= ? ORDER by a.Sr_no ",
     [req.params.srv],
 
@@ -7040,6 +6938,27 @@ app.get("/api/nextQuotNo", function (req, res) {
 });
 
 
+
+app.get("/api/nextPjvNo", function (req, res) {
+  connection.query(
+    "select (Max(a.PJV_NO)+1) AS NextPjv " +
+    " from V_PURCHASE_FULL a ",
+    function (err, results, fields) {
+      if (err) {
+        throw err;
+      } else {
+        console.log("Next  PJV No.", results[0].NextPjv)
+        const strPjv = String(results[0].NextPjv).trim();
+        console.log('Str PJV =>', strPjv.padStart(10, 0));
+
+        //padStart(10, '0'));
+        //.padStart(10, '0')
+        res.json(strPjv.padStart(10, 0));
+
+      }
+    }
+  );
+});
 app.get("/api/nextdo", function (req, res) {
   connection.query(
     "select (Max(a.INV_NO)+1) AS NextDo " +
