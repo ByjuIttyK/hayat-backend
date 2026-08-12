@@ -1798,7 +1798,109 @@ app.post("/api/save-siv", async (req, res) => {
   }
 });
 
+app.post("/api/save-srv", async (req, res) => {
+  try {
+    console.log("SRV Save ==>", req.body);
+    const { netData, itemsData } = req.body;
+    if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
+      return res.status(400).json({ message: "Invalid SRV data format" });
+    }
+    console.log("srv_hdr ==>", netData);
+    console.log("SRV_ITEMS Items ==>", itemsData);
+    connection.getConnection((err, conn) => {
+      if (err) {
+        console.error("Error getting connection:", err);
+        return res.status(500).json({ message: "Error getting connection" });
+      }
 
+      conn.beginTransaction(async (err) => {
+        if (err) {
+          console.error("Transaction Error:", err);
+          conn.release(); // Release the connection back to the pool
+          return res.status(500).json({ message: "Transaction error", error: err });
+        }
+
+        try {
+          // ✅ Step 1: Insert/Update srv_hdr table
+          const netQuery = `INSERT INTO srv_hdr (
+          SRV_NO,SRV_DATE,PO_NO,SUP_CODE,NARRATION,INV_NO,INV_DATE )
+                            VALUES ( ?, ?, ?, ?, ?, ?, ? )
+          ON DUPLICATE KEY UPDATE
+          SRV_DATE = VALUES(SRV_DATE),
+          PO_NO = VALUES(PO_NO),
+          SUP_CODE = VALUES(SUP_CODE),
+          NARRATION = VALUES(NARRATION),
+          INV_NO = VALUES(INV_NO),
+          INV_DATE = VALUES(INV_DATE)
+        `;
+          await new Promise((resolve, reject) => {
+            conn.query(
+              netQuery,
+              [
+                netData.SrvNo, netData.SrvDt, netData.LpoNo, netData.SupCd,
+                netData.Narration, netData.SupInvNo, netData.InvDt
+              ],
+              (err, result) => {
+                if (err) {
+                  return reject(err);
+                }
+                console.log("Srv_hdr Insert/Update:", result);
+                resolve(result);
+              }
+            );
+          });
+
+          // ✅ Step 2: Insert/Update srv_items table
+          const itemsQuery = `
+              INSERT INTO srv_items (SRV_NO,SRV_DATE,SR_NO,ITEM_CODE,QTY,COST)
+              VALUES ? 
+              ON DUPLICATE KEY UPDATE 
+              SRV_NO= VALUES(SRV_NO),
+              SRV_DATE = COALESCE(VALUES(SRV_DATE), SRV_DATE), 
+              SR_NO = COALESCE(VALUES(SR_NO),SR_NO),
+              ITEM_CODE = COALESCE(VALUES(ITEM_CODE),ITEM_CODE),
+              QTY       = COALESCE(VALUES(QTY), QTY), 
+              COST      = COALESCE(VALUES(COST), COST);
+            `;
+          const values = itemsData.map(row => [
+            row.SRV_NO, row.SRV_DATE, row.SR_NO, row.ITEM_CODE,
+            row.QTY, row.COST
+          ]);
+
+          await new Promise((resolve, reject) => {
+            conn.query(itemsQuery, [values], (err, result) => {
+              if (err) {
+                return reject(err);
+              }
+              console.log("srv_items Insert/Update:", result);
+              resolve(result);
+            });
+          });
+
+
+          conn.commit((err) => {
+            if (err) {
+              console.error("Commit Error:", err);
+              return res.status(500).json({ message: "Commit error", error: err });
+            }
+            conn.release(); // Release the connection back to the pool
+            res.json({ message: "S.R.V saved successfully!" });
+          });
+
+        } catch (error) {
+          console.error("S.R.V Transaction Failed:", error);
+          conn.rollback(() => {
+            conn.release(); // Release the connection back to the pool
+            res.status(500).json({ message: "SRV Transaction failed, rolled back", error });
+          });
+        };
+      });
+    });
+  } catch (error) {
+    console.log("SRV save - internal error :", error)
+    res.status(500).json({ message: "Internal Server Error (SRV)", error });
+  }
+});
 
 app.post("/api/save-sret", async (req, res) => {
   try {
