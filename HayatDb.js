@@ -5717,7 +5717,7 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
 app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
-    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m%y') SRV_DATE, a.SUP_CODE," +
+    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') SRV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, a.INV_NO, a.INV_DATE" +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
@@ -9947,3 +9947,8 @@ app.use('/api', lpoSaveRoutes);
 //
 const quotTermsCondRoutes = require('./QuotTermsCondRoutes')(connection);
 app.use('/api', quotTermsCondRoutes);
+
+//app.use('/api', require('./routes/itemmst-routes')(connection));
+app.use(require('./routes/itemmst-routes')(connection));
+//
+app.use('/api', require('./routes/itemHistoryRoutes')(connection));
