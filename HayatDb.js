@@ -2311,6 +2311,17 @@ app.post("/api/save-do", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+//
+app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
+  connection.query(
+    "select STLD_DOC, STLD_TYPE, STLD_DATE, STLD_AMT, STLD_DBCR, ACC_CODE" +
+    " from adj_dtl where source_type = ? and source_doc = ?",
+    [req.params.tranType, req.params.vchrNo],
+    function (err, result) {
+      if (err) { throw err; } else { res.json(result); }
+    }
+  );
+});
 ///
 app.post("/api/save-rcp", async (req, res) => {
   console.log("SAVE RECEIPTS");
