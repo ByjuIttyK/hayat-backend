@@ -5306,7 +5306,7 @@ app.get("/api/Smanlst", function (req, res) {
 app.get("/api/smanmst/:id", function (req, res) {
 
   connection.query(
-    "select SMAN_CODE, SMAN_NAME ,SMAN_MOBILE,SMAN_DESIGNATION,SMAN_EMAIL, USER_NAME, LOGIN_USER," +
+    "select SMAN_CODE, SMAN_NAME ,SMAN_MOBILE,SMAN_DESIGNATION,SMAN_EMAIL,SIGN_FILENAME, USER_NAME, LOGIN_USER," +
     "SMAN_ACTIVE FROM sman_mst WHERE SMAN_CODE=? ",
     [req.params.id],
 
@@ -5791,7 +5791,7 @@ app.get("/api/srvitems/:srv", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("Oracle SRVItems", result);
+        console.log(" SRVItems", result);
         res.json(result)
 
       }
@@ -8549,9 +8549,12 @@ app.get("/api/lpoitems/:po", function (req, res) {
   console.log(req.params.po);
 
   connection.query(
-    "select LPO_NO,JOB_NO,SR_NO,MAIN_SR_NO,ITEM_CODE , ITEM_NAME , QTY, UNIT ,RATE ," +
-    " round(qty*rate,2) AMOUNT" +
-    " FROM lpo_items WHERE LPO_NO =? order by sr_no",
+    "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,b.ARTICLE_CODE AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
+    " round(a.qty*a.rate,2) AMOUNT" +
+    " FROM lpo_items a  "+
+    " Left Outer join item_mst b on a.ITEM_CODE = b.ITEM_CODE "+
+    " WHERE a.LPO_NO =? "+
+    " order by a.sr_no",
     [req.params.po],
 
     function (error, results) {
