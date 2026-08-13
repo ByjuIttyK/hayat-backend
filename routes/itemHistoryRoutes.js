@@ -86,6 +86,40 @@ module.exports = function (connection) {
     });
   });
 
+  // ── SIV (Store Issue Voucher) History ────────────────────────────────
+  // siv_items — confirmed via DESCRIBE this session. AMOUNT is computed
+  // as QTY * STD_COST for the same reason as Purchase/Sales (no stored
+  // AMT column). No header table join needed — JOB_NO / PANEL_NO /
+  // XL_ITEM_DESC all live directly on siv_items.
+  router.get('/item-siv-history/:itemCode', function (req, res) {
+    const itemCode = req.params.itemCode;
+
+    const sql = `
+      SELECT
+        SIV_NO,
+        SIV_DATE,
+        SR_NO,
+        LOC_CODE,
+        QTY,
+        STD_COST,
+        (QTY * STD_COST) AS AMOUNT,
+        JOB_NO,
+        PANEL_NO,
+        XL_ITEM_DESC
+      FROM siv_items
+      WHERE ITEM_CODE = ?
+      ORDER BY SIV_DATE DESC
+      LIMIT 500`;
+
+    connection.query(sql, [itemCode], function (err, results) {
+      if (err) {
+        console.error('item-siv-history error:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      res.json(results);
+    });
+  });
+
   // ── All Transactions (stock_trans view) ─────────────────────────────
   router.get('/item-all-transactions/:itemCode', function (req, res) {
     const itemCode = req.params.itemCode;

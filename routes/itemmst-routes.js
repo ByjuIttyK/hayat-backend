@@ -15,7 +15,16 @@ module.exports = function (connection) {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    sql += " ORDER BY ITEM_CODE LIMIT 300";
+    // Cat.Code field on ItemMst.tsx (default "ABB", F9 LOV) — filters the
+    // grid to the selected category. Exact match, not LIKE, since CAT_CODE
+    // is a fixed code (e.g. "ABB"), not free text.
+    const catCode = (req.query.catCode || "").trim();
+    if (catCode) {
+      sql += " AND CAT_CODE = ?";
+      params.push(catCode);
+    }
+
+    sql += " ORDER BY ITEM_CODE";
 
     connection.query(sql, params, function (err, results) {
       if (err) {
