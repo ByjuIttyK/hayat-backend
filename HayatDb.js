@@ -1721,11 +1721,12 @@ app.post("/api/save-siv", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update NGP_NET table
           const netQuery = `INSERT INTO siv_hdr (
-          SIV_NO,SIV_DATE,JOB_NO,CUST_CODE,NARRATION)
-                            VALUES ( ?, ?, ?, ?,?  )
+          SIV_NO,SIV_DATE,JOB_NO,PANEL_NO,CUST_CODE,NARRATION)
+                            VALUES ( ?, ?,?, ?, ?,?  )
           ON DUPLICATE KEY UPDATE
           SIV_DATE = VALUES(SIV_DATE),
           JOB_NO = VALUES(JOB_NO),
+          PANEL_NO = VALUES(PANEL_NO),
           CUST_CODE = VALUES(CUST_CODE),
           NARRATION = VALUES(NARRATION)
         `;
@@ -1733,7 +1734,7 @@ app.post("/api/save-siv", async (req, res) => {
             conn.query(
               netQuery,
               [
-                netData.SivNo, netData.SivDt, netData.JobNo, netData.CustCd,
+                netData.SivNo, netData.SivDt, netData.JobNo,netData.PanelNo, netData.CustCd,
                 netData.Narration
               ],
               (err, result) => {
