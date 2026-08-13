@@ -3858,20 +3858,20 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
   // pool.getConnection(function (err, conn) {
   //
   if (req.params.Tp == "SIV") {
-    connection.execute(
+    connection.query(
       "select MAX(SIV_NO)   MXVCHR  FROM siv_hdr ",
       [],
-      {
-        outFormat: orcl1.OBJECT,
-      },
+      
       function (err, result) {
         if (err) {
           throw error;
         } else {
-          console.log("Max SIV", result);
-          res.json(result);
+          console.log("Max SRV", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          //  conn.close();
+          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
+          // conn.close();
         }
       }
     );
