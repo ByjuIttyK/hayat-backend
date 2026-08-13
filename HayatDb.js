@@ -2262,19 +2262,20 @@ app.post("/api/save-do", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE, INV_QTY, INV_UNIT)
+            INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE,INV_ITEM_DESC, INV_QTY, INV_UNIT)
             VALUES ?
             ON DUPLICATE KEY UPDATE 
             INV_NO = VALUES(INV_NO),
             SR_NO = VALUES(SR_NO),
             INV_DATE = VALUES(INV_DATE),
             ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
+            INV_ITEM_DESC= VALUES(INV_ITEM_DESC),
             INV_QTY = COALESCE(VALUES(INV_QTY), INV_QTY), 
             INV_UNIT = COALESCE(VALUES(INV_UNIT), INV_UNIT);
             `;
 
           const values = itemsData.map(row => [
-            DoHdr.DoNo, row.SR_NO, DoHdr.DoDt, row.ITEM_CODE, row.QTY, row.UNIT
+            DoHdr.DoNo, row.SR_NO, DoHdr.DoDt, row.ITEM_CODE, row.ITEM_NAME,row.QTY, row.UNIT
           ]);
 
           await new Promise((resolve, reject) => {
@@ -3891,7 +3892,27 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         }
       }
     );
-  } else if (req.params.Tp == "SADJ") {
+  } 
+  else if (req.params.Tp == "FABDO") {
+    connection.query(
+      "select MAX(INV_NO)   MXVCHR  FROM fab_do_hdr ",
+
+
+      function (err, result) {
+        if (err) {
+          throw error;
+        } else {
+          console.log("Max Fab Do", result[0]?.MXVCHR);
+          //res.end(JSON.stringify(result.rows));
+          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
+          // conn.close();
+        }
+      }
+    );
+  } 
+  else if (req.params.Tp == "SADJ") {
     connection.query(
       "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_hdr",
       [],
