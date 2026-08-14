@@ -983,16 +983,17 @@ app.post("/api/save-localpurch", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-            INSERT INTO purchase_items (SRV_NO, SR_NO, ITEM_CODE, QTY, COST)
+            INSERT INTO purchase_items (PJV_NO, SR_NO, SRV_NO,ITEM_CODE, QTY, COST)
             VALUES ? 
             ON DUPLICATE KEY UPDATE 
+            SRV_NO = COALESCE(VALUES(SRV_NO), SRV_NO), 
             ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
             QTY = COALESCE(VALUES(QTY), QTY), 
             COST = COALESCE(VALUES(COST), COST);
             `;
 
           const values = itemsData.map(row => [
-            row.SRV_NO, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST
+            row.PJV_NO, row.SR_NO, row.SRV_NO,row.ITEM_CODE, row.QTY, row.COST
           ]);
 
           await new Promise((resolve, reject) => {
@@ -6268,7 +6269,8 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
     "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE " +
+    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE, " +
+    " a.DO_DATE "+
     " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
     [req.params.inv],
 
@@ -6687,13 +6689,12 @@ app.get("/api/purchaseHdr/:vch", function (req, res) {
 });
 app.get("/api/purchaseitems/:vch", function (req, res) {
   connection.query(
-    "select a.SRV_NO,a.SR_NO, a.ACC_CODE," +
-    " b.ACC_HEAD,  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,' ' AS JOB_NO, " +
-    " a.QTY, a.COST AS RATE, ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
-    " from purchase_items a left outer join  acc_mst b on b.ACC_CODE = a.ACC_CODE " +
+    "select a.PJV_NO,a.SRV_NO,a.SR_NO, a.ACC_CODE," +
+    "  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,' ' AS JOB_NO, " +
+    " a.QTY, a.COST , ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
+    " from purchase_items a  " +
     " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
-    " WHERE  a.SRV_NO =?  " +
-    " AND a.ACC_CODE IS NOT NULL " +
+    " WHERE  a.PJV_NO =?  " +
     " ORDER BY a.SR_NO",
     [req.params.vch],
 
