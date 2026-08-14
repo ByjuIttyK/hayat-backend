@@ -6481,7 +6481,7 @@ app.get("/api/drawingReg", function (req, res) {
             JOB_NO,
             DATE_FORMAT(APPROVAL_DATE, '%d/%m/%Y') AS APPROVAL_DATE
         FROM drawing_register
-        ORDER BY DRAW_DATE DESC, SL_NO;
+        ORDER BY  SL_NO DESC;
     `;
 
   connection.query(query, function (error, result) {
@@ -10099,3 +10099,6 @@ app.use('/api', require('./routes/itemHistoryRoutes')(connection));
 //srvlov routes
 const srvLovRoutes = require("./routes/SrvLovRoutes")(connection);
 app.use("/api", srvLovRoutes);
+//
+const drawingRegisterRoutes = require("./routes/drawingRegisterRoutes")(connection);
+app.use("/api", drawingRegisterRoutes);
