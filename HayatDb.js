@@ -6687,6 +6687,103 @@ app.get("/api/purchaseHdr/:vch", function (req, res) {
     }
   );
 });
+app.get("/api/itemArticleNo/:itemCode", function (req, res) {
+  console.log("ITEM ARTICLE_NO == param ", req.params.itemCode);
+  connection.query(
+    "select ITEM_CODE, ARTICLE_CODE AS ARTICLE_NO from item_mst where ITEM_CODE = ? limit 1",
+    [req.params.itemCode],
+    function (err, result) {
+      if (err) {
+        console.error("Error executing query:", err);
+        res.status(500).json({ error: "Query execution error" });
+      } else {
+        // Return a single object (not an array) — the frontend reads
+        // res.data.ARTICLE_NO directly. Unknown code => empty string, so
+        // the caller just leaves the Part No cell blank.
+        const row = result && result[0] ? result[0] : {};
+        console.log("ITEM ARTICLE_NO =", row);
+        res.json({ ARTICLE_NO: row.ARTICLE_NO || "" });
+      }
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+//  ItemMst.tsx supporting routes — add these to HayatDb.js alongside the
+//  other app.get routes (e.g. next to /api/catlst and /api/itemmst-list).
+//
+//  NOTE: table names are lowercase throughout — MySQL on the Linux VPS runs
+//  with lower_case_table_names=0, so `ITEM_SUBCAT` / `ITEM_MST` would fail
+//  there even though they work on Windows.
+// ─────────────────────────────────────────────────────────────────────────
+
+
+// ── 1. Sub-Category LOV, scoped to one CAT_CODE ──────────────────────────
+// item_subcat.SUB_CAT_CODE is only unique *within* a category, so the LOV
+// must be filtered — an unscoped list would show duplicate codes with
+// different meanings. Returns [{ CAT_CODE, SUB_CAT_CODE, SUB_CAT_NAME }, ...]
+app.get("/api/subcatlst/:catCode", function (req, res) {
+  console.log("SUB CAT LIST == catCode ", req.params.catCode);
+  connection.query(
+    "select CAT_CODE, SUB_CAT_CODE, SUB_CAT_NAME from item_subcat " +
+    " where CAT_CODE = ? order by SUB_CAT_CODE",
+    [req.params.catCode],
+    function (err, result) {
+      if (err) {
+        console.error("Error executing query:", err);
+        res.status(500).json({ error: "Query execution error" });
+      } else {
+        console.log("SUB CAT LIST rows =", result ? result.length : 0);
+        res.json(result || []);
+      }
+    }
+  );
+});
+
+
+// ── 2. Next ITEM_CODE for a CAT_CODE + SUB_CAT_CODE pair ─────────────────
+// ITEM_CODE structure is CAT_CODE + SUB_CAT_CODE + 4-digit running number,
+// e.g. ABB + 34 + 0004 => "ABB340004".
+//
+// The running number is derived from the numeric tail of existing codes with
+// the same prefix (not from a count) so gaps left by deleted items don't
+// cause a collision. Numbering is done here rather than in the browser so two
+// users adding items in the same category can't derive the same code.
+//
+// CAST(...) is used instead of MAX() on the raw string because a plain string
+// MAX would order "0010" below "9" incorrectly once the tail width varies.
+app.get("/api/nextItemCode/:catCode/:subCatCode", function (req, res) {
+  const catCode = (req.params.catCode || "").trim();
+  const subCatCode = (req.params.subCatCode || "").trim();
+  const prefix = catCode + subCatCode;
+
+  console.log("NEXT ITEM CODE == prefix ", prefix);
+
+  if (!catCode || !subCatCode) {
+    return res.status(400).json({ error: "catCode and subCatCode are required" });
+  }
+
+  connection.query(
+    "select ifnull(max(cast(substring(ITEM_CODE, ?) as unsigned)), 0) + 1 as NEXT_NO " +
+    "  from item_mst " +
+    " where ITEM_CODE like ? " +
+    "   and substring(ITEM_CODE, ?) regexp '^[0-9]+$'",
+    [prefix.length + 1, prefix + "%", prefix.length + 1],
+    function (err, result) {
+      if (err) {
+        console.error("Error executing query:", err);
+        res.status(500).json({ error: "Query execution error" });
+      } else {
+        const nextNo = (result && result[0] && result[0].NEXT_NO) || 1;
+        // 4-digit zero-padded tail, matching the existing ABB340004 pattern.
+        const itemCode = prefix + String(nextNo).padStart(4, "0");
+        console.log("NEXT ITEM CODE =", itemCode);
+        res.json({ ITEM_CODE: itemCode, NEXT_NO: nextNo, PREFIX: prefix });
+      }
+    }
+  );
+});
+
 app.get("/api/purchaseitems/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO,a.SRV_NO,a.SR_NO, a.ACC_CODE," +
@@ -8565,9 +8662,29 @@ app.get("/api/lpoitems/:po", function (req, res) {
     }
   );
 });
+app.get("/api/lpohdr/:po", function (req, res) {
+  connection.query(
+    "select a.LPO_NO,DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') LPO_DATE,a.SUP_CODE ," +
+    " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
+    "a.REQ_NO,a.PLACE_DLV , a.ATTN ,a.DATE_REQ ,a.SMAN_CODE, a.SUPP_REF_NO , a.PAY_TERMS  , a.DELIVERY_REQ ," +
+    " a.LPO_APPROVED,  a.PREPARED_BY, " +
+    " a.APPROVED_BY,  " +
+    " a.ACCOUNTS_DEPT, a.DISCOUNT  " +
+    " FROM lpo_net a " +
+   
+    " WHERE LPO_NO =?",
+    [req.params.po],
+    function (error, results, fields) {
+      if (error) throw error;
+      console.log('LPOP Net:',results);
+      res.json(results);
+    }
+  );
+});
 
 //lpoNet
 app.get("/api/lponet/:po", function (req, res) {
+    console.log('LPO NET == param [', req.params.po, '] len=', (req.params.po || '').length);
   connection.query(
     "select a.LPO_NO,DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') LPO_DATE,a.SUP_CODE ,b.SUP_NAME ," +
     " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
@@ -8580,10 +8697,11 @@ app.get("/api/lponet/:po", function (req, res) {
     " LEFT OUTER JOIN sman_mst c on (a.PREPARED_BY=c.SMAN_CODE)" +
     " LEFT OUTER JOIN sman_mst d on (a.ACCOUNTS_DEPT=d.SMAN_CODE)" +
     " LEFT OUTER JOIN sman_mst e on (a.APPROVED_BY=e.SMAN_CODE)" +
-    " WHERE LPO_NO =?",
+    " WHERE TRIM(LPO_NO) =TRIM(?)",
     [req.params.po],
     function (error, results, fields) {
       if (error) throw error;
+     // console.log('LPOP Net:',results);
       res.json(results);
     }
   );
@@ -9978,3 +10096,6 @@ app.use('/api', quotTermsCondRoutes);
 app.use(require('./routes/itemmst-routes')(connection));
 //
 app.use('/api', require('./routes/itemHistoryRoutes')(connection));
+//srvlov routes
+const srvLovRoutes = require("./routes/SrvLovRoutes")(connection);
+app.use("/api", srvLovRoutes);
