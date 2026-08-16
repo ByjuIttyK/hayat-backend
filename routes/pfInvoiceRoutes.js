@@ -205,7 +205,7 @@ module.exports = function (connection) {
                 h.CURR_ENCY,
                 h.BANK_CODE,
                 h.AMOUNT
-           FROM pfinv_net h
+           FROM PFINV_NET h
            LEFT JOIN cus_mst c ON c.CUST_CODE = h.CUST_CODE
           WHERE IFNULL(h.CANCELLED, 'N') <> 'Y'
           ORDER BY h.INV_DATE DESC, h.INV_NO DESC`
@@ -316,6 +316,10 @@ module.exports = function (connection) {
                 c.CUS_TEL1, c.CUS_FAX1,
                 c.VAT_REG_NO AS CUST_VAT_NO,
                 cu.CUR_CODE  AS CURR_CODE,
+                -- CUR_NAME is the printable symbol ('AED', 'US$', 'EURO');
+                -- CUR_CODE is the internal key ('01', '03'). The PDF wants the
+                -- former — printing the code gave "TOTAL :01 ONE THOUSAND …".
+                cu.CUR_NAME  AS CURR_NAME,
                 b.BANK_DETAILS
            FROM pfinv_net n
            LEFT JOIN cus_mst        c  ON c.CUST_CODE  = n.CUST_CODE
@@ -494,8 +498,13 @@ module.exports = function (connection) {
   function buildCompany(c) {
     return {
       NAME: c.NAME || '',
-      ADDRESS: [c.ADDRESS1, c.PLACE].filter(Boolean).join(', '),
+      // ADDRESS1 only. PLACE is printed on its own line beneath the company
+      // name, so folding it in here as well put "SHARJAH ,U.A.E" on the page
+      // twice — once under the name and again at the end of this line.
+      ADDRESS: c.ADDRESS1 || '',
       ADDRESS2: c.ADDRESS2 || '',
+      // Printed as the smaller second line under the trading name.
+      PLACE: c.PLACE || '',
       TEL: c.PHONE || '',
       FAX: c.FAX ? `Fax:${c.FAX}` : '',
       EMAIL: c.EMAIL ? `E-mail:${c.EMAIL}` : '',
