@@ -5547,6 +5547,7 @@ app.get("/api/jobpanels", function (req, res) {
 
 app.get("/api/jobpanels/:jbNo", function (req, res) {
   //[req.params.dys],
+  console.log('Job No -panel ',req.params.jbNo)
   connection.query(
     "	SELECT SR_NO,	PANEL_REF,	QTY,	DRAW_NO,	DELIVERY_REQ,	REMARKS,	COST_MAT,	COST_CONS," +
     "	LABOUR_CHARGES,	TRANSPORT_EXP,	OTHER_EXP,	CNSU_STOCK,	START_DATE,	END_DATE,	AMOUNT," +
@@ -5557,7 +5558,7 @@ app.get("/api/jobpanels/:jbNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log(" job panels", result);
+        console.log(" job panels -1  ==", result);
         //  res.end(JSON.stringify(result.rows));
         res.json(result);
       }
@@ -10108,3 +10109,6 @@ app.use("/api", pfInvoiceRoutes);
 //bankMstRoutes
 const bankMstRoutes = require("./routes/bankMstRoutes")(connection);
 app.use("/api", bankMstRoutes);
+//salesBankDtlRoutes
+const salesBankDtlRoutes = require("./routes/salesBankDtlRoutes")(connection);
+app.use("/api", salesBankDtlRoutes);

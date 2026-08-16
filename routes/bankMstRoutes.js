@@ -34,6 +34,30 @@ module.exports = function (connection) {
     }
   });
 
+  // ── Cheque-printing banks, for the ChqPrintSetup dropdown ──
+  //
+  // PDC_IND = 'B' marks the accounts cheques are actually printed from, so the
+  // calibration screen only offers those rather than all 19 GL accounts (cash
+  // accounts and thirteen credit cards are not cheque books).
+  //
+  // Deliberately a separate endpoint from the existing /api/bankonlylst, which
+  // other screens use unfiltered — narrowing that one would quietly shorten
+  // their dropdowns too.
+  router.get('/chqbanklst', async (_req, res) => {
+    try {
+      const [rows] = await db.query(
+        `SELECT BANK_CODE, BANK_NAME
+           FROM bank_mst
+          WHERE PDC_IND = 'B'
+          ORDER BY BANK_CODE`
+      );
+      res.json(rows);
+    } catch (err) {
+      console.error('chqbanklst error:', err);
+      res.status(500).json({ message: 'Server error', error: err.message });
+    }
+  });
+
   // ── One record for EDIT / VIEW ──
   router.get('/getBankMst/:bankCode', async (req, res) => {
     try {
