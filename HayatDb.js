@@ -10105,3 +10105,6 @@ app.use("/api", drawingRegisterRoutes);
 //
 const pfInvoiceRoutes = require("./routes/pfInvoiceRoutes")(connection);
 app.use("/api", pfInvoiceRoutes);
+//bankMstRoutes
+const bankMstRoutes = require("./routes/bankMstRoutes")(connection);
+app.use("/api", bankMstRoutes);
