@@ -205,7 +205,7 @@ module.exports = function (connection) {
                 h.CURR_ENCY,
                 h.BANK_CODE,
                 h.AMOUNT
-           FROM PFINV_NET h
+           FROM pfinv_net h
            LEFT JOIN cus_mst c ON c.CUST_CODE = h.CUST_CODE
           WHERE IFNULL(h.CANCELLED, 'N') <> 'Y'
           ORDER BY h.INV_DATE DESC, h.INV_NO DESC`
