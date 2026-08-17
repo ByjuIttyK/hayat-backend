@@ -6392,8 +6392,9 @@ app.get("/api/fabinvitems/:vchr", function (req, res) {
   console.log('Fab_INv_dtl.', req.params.vchr);
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
-    " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, " +
-    "a.INV_QTY, a.INV_RATE ,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
+    " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, a.DIS_COUNT AS DISC_PERC,  " +
+    " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , "+
+    " a.INV_QTY, a.INV_RATE ,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
     " from fab_inv_dtl a where a.Inv_no = ?" +
     "  ORDER BY a.SR_NO",
     [req.params.vchr],
