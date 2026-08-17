@@ -347,11 +347,50 @@ app.get('/api/lovmetadata/:rep', (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// /api/save-lpo — replaces the existing route in HayatDb.js.
+//
+// WHAT CHANGED, and why the delete icon didn't work before:
+//
+// 1. DELETE STEP ADDED. The old route only ever ran an INSERT ... ON DUPLICATE
+//    KEY UPDATE. An upsert can insert or update — it can never remove. So a row
+//    deleted in the grid simply stopped being sent, and its lpo_items row sat
+//    there untouched. Step 3 below now deletes any line for this LPO whose
+//    SR_NO isn't in the incoming payload, which makes the grid the source of
+//    truth for which lines exist.
+//
+//    Note it deletes by "not in the payload" rather than dropping all lines and
+//    re-inserting. Surviving lines keep their identity, so an SRV or purchase
+//    invoice matched on LPO_NO + SR_NO is never orphaned. Pair this with the
+//    frontend rule of never renumbering SR_NO after a deletion.
+//
+// 2. COALESCE REMOVED from the update clause. `ITEM_CODE = COALESCE(VALUES(
+//    ITEM_CODE), ITEM_CODE)` means a NULL coming in keeps whatever was there
+//    before — so clearing a field on screen and saving appeared to do nothing.
+//    That directly blocks the free-text-line change: an existing line's
+//    ITEM_CODE could never be cleared. Now the payload is written as-is, and
+//    the frontend sends 0 (not null) for QTY/RATE so blanks store as zero.
+//
+// 3. CAT_CODE added to the column list. The screen has been sending it all
+//    along and the old INSERT dropped it on the floor.
+//    ⚠️ Only keep this if lpo_items actually has a CAT_CODE column —
+//    `SHOW COLUMNS FROM lpo_items LIKE 'CAT_CODE';`. If it doesn't, remove
+//    CAT_CODE from both the column list and the values map below.
+//
+// PREREQUISITE: a unique key on (LPO_NO, SR_NO) — the ON DUPLICATE KEY UPDATE
+// already relies on it, so it should be there:
+//    SHOW INDEX FROM lpo_items;
+// ---------------------------------------------------------------------------
+
 app.post("/api/save-lpo", async (req, res) => {
   try {
     console.log("save-lpo ==>", req.body);
     const { lpoNet, lpoItems } = req.body;
     if (!lpoNet || !lpoItems || !Array.isArray(lpoItems) || lpoItems.length === 0) {
+      // Deliberately still rejecting an empty line list. With the delete step
+      // below, an empty payload would wipe every line of the LPO — so a bug or
+      // a half-loaded screen must not be able to reach that path. The frontend
+      // blocks the empty case too, with its own message.
       return res.status(400).json({ message: "Invalid lpo data format" });
     }
     console.log("LPO Net ==>", lpoNet);
@@ -417,20 +456,26 @@ app.post("/api/save-lpo", async (req, res) => {
               }
             );
           });
-          // ✅ Step 2: Insert/Update lpo_items table
+
+          // ✅ Step 2: Insert/Update lpo_items table.
+          // Straight VALUES(...) assignment — no COALESCE — so a field the user
+          // cleared on screen (item code on a free-text line, a description, a
+          // unit) is actually cleared in the table.
           const itemsQuery = `
-              INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY,UNIT, RATE)
+              INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY, UNIT, RATE, CAT_CODE)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
-              ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
-              ITEM_NAME = COALESCE(VALUES(ITEM_NAME), ITEM_NAME), 
-              QTY       = COALESCE(VALUES(QTY), QTY), 
-              UNIT      = COALESCE(VALUES(UNIT),UNIT), 
-              RATE      = COALESCE(VALUES(RATE), RATE);
+              MAIN_SR_NO = VALUES(MAIN_SR_NO),
+              ITEM_CODE  = VALUES(ITEM_CODE), 
+              ITEM_NAME  = VALUES(ITEM_NAME), 
+              QTY        = VALUES(QTY), 
+              UNIT       = VALUES(UNIT), 
+              RATE       = VALUES(RATE),
+              CAT_CODE   = VALUES(CAT_CODE);
             `;
           const values = lpoItems.map(row => [
             row.LPO_NO, row.SR_NO, row.MAIN_SR_NO, row.ITEM_CODE, row.ITEM_NAME,
-            row.QTY, row.UNIT, row.RATE
+            row.QTY, row.UNIT, row.RATE, row.CAT_CODE
           ]);
 
           await new Promise((resolve, reject) => {
@@ -443,6 +488,32 @@ app.post("/api/save-lpo", async (req, res) => {
             });
           });
 
+          // ✅ Step 3: Remove lines deleted on screen.
+          // Anything still in lpo_items for this LPO that wasn't in the payload
+          // was deleted (or emptied) in the grid, so it goes. Same transaction
+          // as the upsert, so a failure here rolls the whole save back rather
+          // than leaving the lines half-updated.
+          const keptSrNos = lpoItems
+            .map(row => row.SR_NO)
+            .filter(sr => sr !== null && sr !== undefined && String(sr).trim() !== "");
+
+          const deleteResult = await new Promise((resolve, reject) => {
+            conn.query(
+              `DELETE FROM lpo_items WHERE LPO_NO = ? AND SR_NO NOT IN (?)`,
+              [lpoNet.LpoNo, keptSrNos],
+              (err, result) => {
+                if (err) {
+                  return reject(err);
+                }
+                resolve(result);
+              }
+            );
+          });
+          console.log(
+            `lpo_items rows deleted for LPO ${lpoNet.LpoNo}:`,
+            deleteResult && deleteResult.affectedRows,
+            "(kept SR_NOs:", keptSrNos.join(","), ")"
+          );
 
           conn.commit((err) => {
             if (err) {
@@ -467,7 +538,6 @@ app.post("/api/save-lpo", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
-
 
 
 // ─── Add this route to your existing Express app (server.js) ─────────────────
@@ -3914,6 +3984,25 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
       }
     );
   } 
+  else if (req.params.Tp == "FABINV") {
+    connection.query(
+      "select MAX(INV_NO)   MXVCHR  FROM fab_inv_hdr ",
+
+
+      function (err, result) {
+        if (err) {
+          throw error;
+        } else {
+          console.log("Max Fab Inv.No.", result[0]?.MXVCHR);
+          //res.end(JSON.stringify(result.rows));
+          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
+          // conn.close();
+        }
+      }
+    );
+  } 
   else if (req.params.Tp == "SADJ") {
     connection.query(
       "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_hdr",
@@ -5565,7 +5654,16 @@ app.get("/api/jobpanels/:jbNo", function (req, res) {
     }
   );
 });
-
+app.get("/api/cust-contact/:custCode", function (req, res) {
+  connection.query(
+    "SELECT CUST_CODE, CUST_NAME, CONTACT_PR FROM cus_mst WHERE CUST_CODE = ?",
+    [req.params.custCode],
+    function (err, rows) {
+      if (err) { console.error("cust-contact:", err); return res.status(500).json({ message: err.message }); }
+      res.json(rows[0] || {});
+    }
+  );
+});
 
 app.get("/api/joblist/:custCd?", function (req, res) {
   const { custCd } = req.params;
@@ -10112,3 +10210,6 @@ app.use("/api", bankMstRoutes);
 //salesBankDtlRoutes
 const salesBankDtlRoutes = require("./routes/salesBankDtlRoutes")(connection);
 app.use("/api", salesBankDtlRoutes);
+//sinqLovRoutes
+const sinqLovRoutes = require("./routes/sinqLovRoutes")(connection);
+app.use("/api", sinqLovRoutes);
