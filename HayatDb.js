@@ -10068,7 +10068,97 @@ app.put("/api/chq_layout/:bankCode", function (req, res) {
   );
 });
 
+app.get("/api/jobpanel/:jobNo/:ssrNo", function (req, res) {
+  const { jobNo, ssrNo } = req.params;
+  // TRIM on both sides: job/panel codes in the migrated Oracle data are often
+  // space-padded CHAR columns, so a plain = comparison misses.
+  const sql = `
+    SELECT *
+      FROM job_panels
+     WHERE TRIM(JOB_NO) = TRIM(?)
+       AND TRIM(SR_NO) = TRIM(?)
+     LIMIT 1
+  `;
+  connection.query(sql, [jobNo, ssrNo], function (err, rows) {
+    if (err) {
+      console.error("jobpanel lookup failed:", err.message);
+      return res.status(500).json({ message: err.message });
+    }
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ message: `Panel ${ssrNo} not found on job ${jobNo}` });
+    }
+    res.json(rows[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Panels LOV, scoped to a job.
+//
+// The screen now passes dataFilter={formik.values.JobNo} to the PANELS
+// ModalLov. Whether that reaches the database depends on how your PANELS row in
+// column_metadata_lov is written — if its query has no placeholder for the
+// filter, the value is accepted and ignored, and the list still shows every
+// panel of every job. Check with:
+//
+//   SELECT * FROM column_metadata_lov WHERE LOV_HDR = 'PANELS';
+//
+// The query there needs a bind spot for the filter, e.g.
+//
+//   SELECT SSR_NO AS code, PANEL_REF AS label
+//     FROM job_panels
+//    WHERE TRIM(JOB_NO) = TRIM(?)
+//    ORDER BY SSR_NO
+//
+// If your metadata-driven LOV can't take a parameter, this standalone route is
+// the fallback — point ModalLov at it for PANELS specifically:
+// ---------------------------------------------------------------------------
+
+app.get("/api/panels/:jobNo", function (req, res) {
+  const sql = `
+    SELECT *
+      FROM job_panels
+     WHERE TRIM(JOB_NO) = TRIM(?)
+     ORDER BY SR_NO
+  `;
+  connection.query(sql, [req.params.jobNo], function (err, rows) {
+    if (err) {
+      console.error("panels lov failed:", err.message);
+      return res.status(500).json({ message: err.message });
+    }
+    res.json(rows || []);
+  });
+});
 //───────────────────────────────────────────────────────────────────────────── */
+// ===========================================================================
+// 3. ALREADY INVOICED QTY  — the route the new column needs
+// ===========================================================================
+// Paste into HayatDb.js. JOB_NO lives on the header, so this joins.
+// Returns { ALREADY_INV_QTY: n } — the screen tolerates a 404 and shows 0.
+
+app.get("/api/fabinv-already-qty/:jobNo/:panelNo", function (req, res) {
+  const { jobNo, panelNo } = req.params;
+  const excludeInv = req.query.excludeInv || null;
+
+  // excludeInv keeps the invoice being edited out of its own "already
+  // invoiced" figure — otherwise reopening a saved invoice shows its own
+  // quantities as previously billed.
+  const sql = `
+    SELECT COALESCE(SUM(d.INV_QTY), 0) AS ALREADY_INV_QTY
+      FROM fab_inv_dtl d
+      JOIN fab_inv_hdr h ON h.INV_NO = d.INV_NO
+     WHERE TRIM(h.JOB_NO)   = TRIM(?)
+       AND TRIM(d.PANEL_NO) = TRIM(?)
+       AND (h.INV_CANCELLED IS NULL OR h.INV_CANCELLED <> 'Y')
+       AND (? IS NULL OR d.INV_NO <> ?)
+  `;
+  connection.query(sql, [jobNo, panelNo, excludeInv, excludeInv], function (err, rows) {
+    if (err) {
+      console.error("fabinv-already-qty failed:", err.message);
+      return res.status(500).json({ message: err.message });
+    }
+    res.json({ ALREADY_INV_QTY: Number(rows?.[0]?.ALREADY_INV_QTY || 0) });
+  });
+});
 
 //Jv Routes
 const jvRoutes = require('./JvExcelEntryRoutes');
@@ -10213,3 +10303,4 @@ app.use("/api", salesBankDtlRoutes);
 //sinqLovRoutes
 const sinqLovRoutes = require("./routes/sinqLovRoutes")(connection);
 app.use("/api", sinqLovRoutes);
+//
