@@ -1716,18 +1716,20 @@ app.post("/api/save-fabinv", async (req, res) => {
 
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
-              INSERT INTO fab_inv_dtl (INV_NO, SR_NO, PANEL_NO, INV_ITEM_DESC, INV_QTY,INV_UNIT, INV_RATE)
+              INSERT INTO fab_inv_dtl (INV_NO, SR_NO, PANEL_NO, INV_ITEM_DESC, INV_QTY,INV_UNIT, INV_RATE,DIS_COUNT,VAT_PERC)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
               PANEL_NO = COALESCE(VALUES(PANEL_NO), PANEL_NO), 
               INV_ITEM_DESC = COALESCE(VALUES(INV_ITEM_DESC), INV_ITEM_DESC), 
               INV_QTY       = COALESCE(VALUES(INV_QTY), INV_QTY), 
               INV_UNIT      = COALESCE(VALUES(INV_UNIT),INV_UNIT), 
-              INV_RATE      = COALESCE(VALUES(INV_RATE), INV_RATE);
+              INV_RATE      = COALESCE(VALUES(INV_RATE), INV_RATE),
+               DIS_COUNT      = COALESCE(VALUES(DIS_COUNT), DIS_COUNT),
+               VAT_PERC      = COALESCE(VALUES(VAT_PERC), VAT_PERC);
             `;
           const values = fabInvItems.map(row => [
             row.INV_NO, row.SR_NO, row.ITEM_CODE, row.INV_ITEM_DESC,
-            row.INV_QTY, row.INV_UNIT, row.INV_RATE
+            row.INV_QTY, row.INV_UNIT, row.INV_RATE,row.DIS_COUNT,row.VAT_PERC
           ]);
 
           await new Promise((resolve, reject) => {
