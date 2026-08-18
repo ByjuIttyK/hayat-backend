@@ -1026,6 +1026,36 @@ app.post("/api/save-ngp", async (req, res) => {
   }
 });
 //
+app.get("/api/srv-dup-inv", (req, res) => {
+  const invNo = (req.query.invNo || "").toString().trim();
+  const supCode = (req.query.supCode || "").toString().trim();
+  const srvNo = (req.query.srvNo || "").toString().trim();
+
+  if (!invNo || !supCode) {
+    return res.json({ duplicate: false, rows: [] });
+  }
+
+  const sql = `
+    SELECT SRV_NO, SRV_DATE, INV_NO
+    FROM srv_hdr
+    WHERE TRIM(INV_NO)   = ?
+      AND TRIM(SUP_CODE) = ?
+      AND TRIM(SRV_NO)  <> ?
+    ORDER BY SRV_DATE DESC
+    LIMIT 5
+  `;
+
+  connection.query(sql, [invNo, supCode, srvNo], (err, rows) => {
+    if (err) {
+      console.error("srv-dup-inv error:", err);
+      // Fail open: a broken check must never block data entry.
+      return res.status(500).json({ duplicate: false, rows: [], error: err.message });
+    }
+    res.json({ duplicate: rows.length > 0, rows });
+  });
+});
+
+
 app.post("/api/save-localpurch", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
