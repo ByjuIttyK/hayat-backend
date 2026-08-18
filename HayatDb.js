@@ -895,15 +895,17 @@ app.post("/api/save-fpo", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+
 app.post("/api/save-ngp", async (req, res) => {
   try {
-    const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
+    const { netData, itemsData } = req.body;
 
     if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
       return res.status(400).json({ message: "Invalid data format" });
     }
-    console.log("NGP_NET=>**", netData);
-    // Start transaction
+    console.log("NGP HDR   =>", netData);
+    console.log("NGP ITEMS =>", itemsData);
+
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
@@ -913,76 +915,106 @@ app.post("/api/save-ngp", async (req, res) => {
       conn.beginTransaction(async (err) => {
         if (err) {
           console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
+          conn.release();
           return res.status(500).json({ message: "Transaction error", error: err });
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update ngp_net (header)
           const netQuery = `
-            INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE,NARRATION,AMOUNT,DISCOUNT) 
-            VALUES (?, ?, ?, ?,?,?) 
-            ON DUPLICATE KEY UPDATE 
-            PRCH_DATE= VALUES(PRCH_DATE),
-            SUP_CODE = VALUES(SUP_CODE),
+            INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE, NARRATION, DISCOUNT, AMOUNT)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+            PRCH_DATE = VALUES(PRCH_DATE),
+            SUP_CODE  = VALUES(SUP_CODE),
             NARRATION = VALUES(NARRATION),
-            AMOUNT = VALUES(AMOUNT),
-            DISCOUNT = VALUES(DISCOUNT);
+            DISCOUNT  = VALUES(DISCOUNT),
+            AMOUNT    = VALUES(AMOUNT);
           `;
 
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
-              [netData.LpoNo, netData.LpoDt, netData.SupCd, netData.Narration, netData.AMOUNT, netData.discAmt],
+              [netData.LpoNo, netData.LpoDt, netData.SupCd,
+               netData.Narration, netData.discAmt, netData.AMOUNT],
               (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
+                if (err) return reject(err);
                 console.log("NGP_NET Insert/Update:", result);
                 resolve(result);
               }
             );
           });
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Insert/Update ngp_items (lines)
           const itemsQuery = `
             INSERT INTO ngp_items (PRCH_NO, SR_NO, ACC_CODE, NARRATION, JOB_NO, AMOUNT)
-            VALUES ? 
-            ON DUPLICATE KEY UPDATE 
-            ACC_CODE = COALESCE(VALUES(ACC_CODE), ACC_CODE), 
-            NARRATION = COALESCE(VALUES(NARRATION), NARRATION), 
-            JOB_NO = COALESCE(VALUES(JOB_NO), JOB_NO), 
-            AMOUNT = COALESCE(VALUES(AMOUNT), AMOUNT);
+            VALUES ?
+            ON DUPLICATE KEY UPDATE
+            ACC_CODE  = COALESCE(VALUES(ACC_CODE), ACC_CODE),
+            NARRATION = COALESCE(VALUES(NARRATION), NARRATION),
+            JOB_NO    = COALESCE(VALUES(JOB_NO), JOB_NO),
+            AMOUNT    = COALESCE(VALUES(AMOUNT), AMOUNT);
           `;
 
+          // PRCH_NO comes from the header, not the row: blank filler rows carry
+          // PRCH_NO "" and would otherwise orphan the lines from their voucher.
           const values = itemsData.map(row => [
-            row.PRCH_NO, row.SR_NO, row.ACC_CODE, row.NARRATION, row.JOB_NO, row.AMOUNT
+            netData.LpoNo, row.SR_NO, row.ACC_CODE,
+            row.NARRATION, row.JOB_NO, row.AMOUNT
           ]);
 
           await new Promise((resolve, reject) => {
             conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
+              if (err) return reject(err);
               console.log("NGP_ITEMS Insert/Update:", result);
               resolve(result);
             });
           });
 
-          // ✅ Commit transaction if everything is successful
+          // ✅ Step 3: Delete the lines the user removed in the grid.
+          // The upsert above can only add or update — a line deleted on the
+          // client simply stops being sent, so without this it survives in
+          // ngp_items and reappears the next time the voucher is opened.
+          // SR_NO is never resequenced on the client, so the surviving numbers
+          // here match what is already stored.
+          const srNos = itemsData
+            .map(r => r.SR_NO)
+            .filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+
+          const deleteQuery = srNos.length
+            ? `DELETE FROM ngp_items WHERE PRCH_NO = ? AND SR_NO NOT IN (?)`
+            : `DELETE FROM ngp_items WHERE PRCH_NO = ?`;
+
+          const deleteParams = srNos.length
+            ? [netData.LpoNo, srNos]
+            : [netData.LpoNo];
+
+          await new Promise((resolve, reject) => {
+            conn.query(deleteQuery, deleteParams, (err, result) => {
+              if (err) return reject(err);
+              console.log("NGP_ITEMS deleted rows:", result.affectedRows);
+              resolve(result);
+            });
+          });
+
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              // Roll back and release — otherwise this connection leaks from
+              // the pool on every commit failure.
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.json({ message: "Data saved successfully!" });
           });
 
         } catch (error) {
-          console.error("Transaction Failed:", error);
+          console.error("NGP Transaction Failed:", error);
           conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.status(500).json({ message: "Transaction failed, rolled back", error });
           });
         }
@@ -993,6 +1025,7 @@ app.post("/api/save-ngp", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+//
 app.post("/api/save-localpurch", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -1017,7 +1050,7 @@ app.post("/api/save-localpurch", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update purchase_hdr table
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE,NARRATION,
@@ -1051,7 +1084,7 @@ app.post("/api/save-localpurch", async (req, res) => {
             );
           });
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Insert/Update purchase_items table
           const itemsQuery = `
             INSERT INTO purchase_items (PJV_NO, SR_NO, SRV_NO,ITEM_CODE, QTY, COST)
             VALUES ? 
@@ -1063,7 +1096,7 @@ app.post("/api/save-localpurch", async (req, res) => {
             `;
 
           const values = itemsData.map(row => [
-            row.PJV_NO, row.SR_NO, row.SRV_NO,row.ITEM_CODE, row.QTY, row.COST
+            row.PJV_NO, row.SR_NO, row.SRV_NO, row.ITEM_CODE, row.QTY, row.COST
           ]);
 
           await new Promise((resolve, reject) => {
@@ -1076,11 +1109,44 @@ app.post("/api/save-localpurch", async (req, res) => {
             });
           });
 
+          // ✅ Step 3: Delete item rows the user removed in the grid.
+          // The upsert above can only add or update — a line deleted on the
+          // client simply stops being sent, so without this it would live on
+          // in purchase_items and reappear the next time the PJV is opened.
+          // SR_NO is deliberately never resequenced on the client, so the
+          // surviving numbers here match what is already stored.
+          const srNos = itemsData
+            .map(r => r.SR_NO)
+            .filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+
+          const deleteQuery = srNos.length
+            ? `DELETE FROM purchase_items WHERE PJV_NO = ? AND SR_NO NOT IN (?)`
+            : `DELETE FROM purchase_items WHERE PJV_NO = ?`;
+
+          const deleteParams = srNos.length
+            ? [netData.PjvNo, srNos]
+            : [netData.PjvNo];
+
+          await new Promise((resolve, reject) => {
+            conn.query(deleteQuery, deleteParams, (err, result) => {
+              if (err) {
+                return reject(err);
+              }
+              console.log("PURCHASE_ITEMS deleted rows:", result.affectedRows);
+              resolve(result);
+            });
+          });
+
           // ✅ Commit transaction if everything is successful
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              // Roll back and release — otherwise this connection leaks from
+              // the pool on every commit failure.
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
             conn.release(); // Release the connection back to the pool
             res.json({ message: "Data saved successfully!" });
@@ -1100,7 +1166,7 @@ app.post("/api/save-localpurch", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
-
+//
 app.post("/api/save-pret", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -1618,12 +1684,35 @@ app.post("/api/save-fabinv", async (req, res) => {
   try {
     console.log("save-Proj.Invoice ==>", req.body);
     const { fabInvNet, fabInvItems } = req.body;
-    //if (!fabInvNet || !sretItems || !Array.isArray(sretItems) || sretItems.length === 0) {
     if (!fabInvNet || !fabInvItems || !Array.isArray(fabInvItems) || fabInvItems.length === 0) {
       return res.status(400).json({ message: "Invalid Project Invoice data format" });
     }
-    //  return res.status(400).json({ message: "Invalid Project Invoice data format" });
-    //}
+
+    // The invoice the lines hang off. Taken from the header, not from the
+    // rows: a row's own INV_NO can be blank on lines added in ADD mode before
+    // the number was allocated, and anchoring the DELETE on a blank invoice
+    // number is not a mistake worth risking.
+    const invNo = String(fabInvNet.InvNo ?? "").trim();
+    if (!invNo) {
+      return res.status(400).json({ message: "Invoice No is required" });
+    }
+
+    // SR_NO list to KEEP. Everything else on this invoice is deleted.
+    //
+    // Every row must carry one for the comparison to mean anything: if even a
+    // single line arrived without an SR_NO, its counterpart in the table is
+    // indistinguishable from a row the user deleted, and the DELETE would
+    // remove a line that is still on screen. In that case the delete is
+    // skipped and the save degrades to the old upsert-only behaviour — stale
+    // rows survive, which is recoverable; wrongly deleted ones are not.
+    const keepSrNos = fabInvItems.map(r =>
+      r.SR_NO === null || r.SR_NO === undefined ? "" : String(r.SR_NO).trim());
+    const canPrune = keepSrNos.every(s => s !== "");
+    if (!canPrune) {
+      console.warn("save-fabinv: a line arrived without SR_NO — skipping the prune of removed rows",
+        { invNo });
+    }
+
     console.log("FABINV_HDR ==>", fabInvNet);
     console.log("FABINV Items ==>", fabInvItems);
     connection.getConnection((err, conn) => {
@@ -1635,12 +1724,12 @@ app.post("/api/save-fabinv", async (req, res) => {
       conn.beginTransaction(async (err) => {
         if (err) {
           console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
+          conn.release();
           return res.status(500).json({ message: "Transaction error", error: err });
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update fab_inv_hdr
           const netQuery = `INSERT INTO fab_inv_hdr (
           INV_NO, INV_DATE, CUST_CODE, JOB_NO,
           LPO_NO, LPO_DATE, DO_NO, DO_DATE,
@@ -1705,60 +1794,92 @@ app.post("/api/save-fabinv", async (req, res) => {
                 fabInvNet.AckUser
               ],
               (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
+                if (err) return reject(err);
                 console.log("fab_inv_hdr Insert/Update:", result);
                 resolve(result);
               }
             );
           });
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Delete the lines the user removed from the grid
+          //
+          // Runs BEFORE the upsert, not after. Reversed, a line whose SR_NO was
+          // reused within the same save (deleted row 003, new row keyed into
+          // the same slot) would be inserted and then immediately deleted
+          // again, because it is absent from the "keep" list under its old
+          // identity. Pruning first leaves the upsert to write the final state.
+          //
+          // NOT IN with an array is expanded by the driver into
+          // ('001','002','003'). The nested array is deliberate: the driver
+          // flattens one level per ? placeholder, so [invNo, keepSrNos] gives
+          // a scalar for the first and a list for the second.
+          if (canPrune) {
+            const delQuery =
+              "DELETE FROM fab_inv_dtl WHERE INV_NO = ? AND SR_NO NOT IN (?)";
+            await new Promise((resolve, reject) => {
+              conn.query(delQuery, [invNo, keepSrNos], (err, result) => {
+                if (err) return reject(err);
+                console.log("fab_inv_dtl removed lines:", result.affectedRows);
+                resolve(result);
+              });
+            });
+          }
+
+          // ✅ Step 3: Insert/Update fab_inv_dtl
           const itemsQuery = `
-              INSERT INTO fab_inv_dtl (INV_NO, SR_NO, PANEL_NO, INV_ITEM_DESC, INV_QTY,INV_UNIT, INV_RATE,DIS_COUNT,VAT_PERC)
+              INSERT INTO fab_inv_dtl (INV_NO, SR_NO, PANEL_NO, INV_ITEM_DESC, INV_QTY, INV_UNIT, INV_RATE, DIS_COUNT, VAT_PERC)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
-              PANEL_NO = COALESCE(VALUES(PANEL_NO), PANEL_NO), 
-              INV_ITEM_DESC = COALESCE(VALUES(INV_ITEM_DESC), INV_ITEM_DESC), 
-              INV_QTY       = COALESCE(VALUES(INV_QTY), INV_QTY), 
-              INV_UNIT      = COALESCE(VALUES(INV_UNIT),INV_UNIT), 
-              INV_RATE      = COALESCE(VALUES(INV_RATE), INV_RATE),
-               DIS_COUNT      = COALESCE(VALUES(DIS_COUNT), DIS_COUNT),
-               VAT_PERC      = COALESCE(VALUES(VAT_PERC), VAT_PERC);
+              PANEL_NO      = VALUES(PANEL_NO), 
+              INV_ITEM_DESC = VALUES(INV_ITEM_DESC), 
+              INV_QTY       = VALUES(INV_QTY), 
+              INV_UNIT      = VALUES(INV_UNIT), 
+              INV_RATE      = VALUES(INV_RATE),
+              DIS_COUNT     = VALUES(DIS_COUNT),
+              VAT_PERC      = VALUES(VAT_PERC);
             `;
+          // PANEL_NO reads row.PANEL_NO. It used to read row.ITEM_CODE, which
+          // the screen has never sent — so every INSERT wrote PANEL_NO NULL,
+          // and COALESCE(VALUES(PANEL_NO), PANEL_NO) on the UPDATE side turned
+          // that into "keep whatever is there", hiding it on saved rows.
+          //
+          // COALESCE is gone from the update list for the same reason: it made
+          // clearing a field impossible. Blanking a description sent NULL, and
+          // COALESCE quietly restored the old text.
           const values = fabInvItems.map(row => [
-            row.INV_NO, row.SR_NO, row.ITEM_CODE, row.INV_ITEM_DESC,
-            row.INV_QTY, row.INV_UNIT, row.INV_RATE,row.DIS_COUNT,row.VAT_PERC
+            row.INV_NO || invNo, row.SR_NO, row.PANEL_NO, row.INV_ITEM_DESC,
+            row.INV_QTY, row.INV_UNIT, row.INV_RATE, row.DIS_COUNT, row.VAT_PERC
           ]);
 
           await new Promise((resolve, reject) => {
             conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
+              if (err) return reject(err);
               console.log("fab_inv_dtl Insert/Update:", result);
               resolve(result);
             });
           });
 
-
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              // The connection was leaked here on a failed commit — every
+              // commit error permanently cost the pool one slot.
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.json({ message: "Project Invoice saved successfully!" });
           });
 
         } catch (error) {
           console.error("Proj. Inv. Transaction Failed:", error);
           conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.status(500).json({ message: "Proj Inv. Transaction failed, rolled back", error });
           });
-        };
+        }
       });
     });
   } catch (error) {
@@ -1768,14 +1889,37 @@ app.post("/api/save-fabinv", async (req, res) => {
 });
 
 
-
 app.post("/api/save-siv", async (req, res) => {
   try {
     console.log("SIV Save ==>", req.body);
     const { netData, itemsData } = req.body;
     if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid SRV data format" });
+      return res.status(400).json({ message: "Invalid SIV data format" });
     }
+
+    // Anchor for both the header and the DELETE. Taken from netData, which is
+    // where the item rows get their SIV_NO from anyway (see the values map
+    // below), so there is only one source of truth for it.
+    const sivNo = String(netData.SivNo ?? "").trim();
+    if (!sivNo) {
+      return res.status(400).json({ message: "SIV No is required" });
+    }
+
+    // The SR_NO list to KEEP — everything else on this SIV is deleted.
+    //
+    // Every row must carry one. A row without an SR_NO is indistinguishable
+    // from a row the user deleted, so the DELETE could remove a line that is
+    // still on screen. In that case the prune is skipped and the save falls
+    // back to upsert-only: a stale row survives, which a second save fixes,
+    // whereas a wrongly deleted issue line is gone.
+    const keepSrNos = itemsData.map(r =>
+      r.SR_NO === null || r.SR_NO === undefined ? "" : String(r.SR_NO).trim());
+    const canPrune = keepSrNos.every(s => s !== "");
+    if (!canPrune) {
+      console.warn("save-siv: a line arrived without SR_NO — skipping the prune of removed rows",
+        { sivNo });
+    }
+
     console.log("siv_hdr ==>", netData);
     console.log("siv_items Items ==>", itemsData);
     connection.getConnection((err, conn) => {
@@ -1787,12 +1931,12 @@ app.post("/api/save-siv", async (req, res) => {
       conn.beginTransaction(async (err) => {
         if (err) {
           console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
+          conn.release();
           return res.status(500).json({ message: "Transaction error", error: err });
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update siv_hdr
           const netQuery = `INSERT INTO siv_hdr (
           SIV_NO,SIV_DATE,JOB_NO,PANEL_NO,CUST_CODE,NARRATION)
                             VALUES ( ?, ?,?, ?, ?,?  )
@@ -1807,70 +1951,99 @@ app.post("/api/save-siv", async (req, res) => {
             conn.query(
               netQuery,
               [
-                netData.SivNo, netData.SivDt, netData.JobNo,netData.PanelNo, netData.CustCd,
+                sivNo, netData.SivDt, netData.JobNo, netData.PanelNo, netData.CustCd,
                 netData.Narration
               ],
               (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
+                if (err) return reject(err);
                 console.log("Siv_hdr Insert/Update:", result);
                 resolve(result);
               }
             );
           });
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Delete the lines removed from the grid
+          //
+          // Before the upsert, not after: an SR_NO reused within the same save
+          // (line 003 deleted, a new item keyed into that slot) would otherwise
+          // be written and then deleted again, because it is absent from the
+          // keep-list under its old identity.
+          //
+          // The nested array is deliberate — the driver flattens one level per
+          // placeholder, so [sivNo, keepSrNos] gives a scalar for the first ?
+          // and an expanded ('001','002',…) list for the second.
+          if (canPrune) {
+            const delQuery =
+              "DELETE FROM siv_items WHERE SIV_NO = ? AND SR_NO NOT IN (?)";
+            await new Promise((resolve, reject) => {
+              conn.query(delQuery, [sivNo, keepSrNos], (err, result) => {
+                if (err) return reject(err);
+                console.log("siv_items removed lines:", result.affectedRows);
+                resolve(result);
+              });
+            });
+          }
+
+          // ✅ Step 3: Insert/Update siv_items
           const itemsQuery = `
               INSERT INTO siv_items (SIV_NO,SIV_DATE,SR_NO,ITEM_CODE,QTY,STD_COST)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
-              SIV_NO= VALUES(SIV_NO),
-              SIV_DATE = COALESCE(VALUES(SIV_DATE), SIV_DATE), 
-              SR_NO = COALESCE(VALUES(SR_NO),SR_NO),
-              ITEM_CODE = COALESCE(VALUES(ITEM_CODE),ITEM_CODE),
-              QTY       = COALESCE(VALUES(QTY), QTY), 
-              STD_COST  = COALESCE(VALUES(STD_COST), STD_COST);
+              SIV_DATE  = VALUES(SIV_DATE), 
+              ITEM_CODE = VALUES(ITEM_CODE),
+              QTY       = VALUES(QTY), 
+              STD_COST  = VALUES(STD_COST);
             `;
+          // SIV_NO and SR_NO are gone from the UPDATE list: they are the key
+          // that matched the row in the first place, so assigning them back to
+          // themselves does nothing.
+          //
+          // COALESCE is gone from the rest. It made clearing a value
+          // impossible — issuing a corrected QTY of 0, or blanking a cost,
+          // sent NULL and COALESCE quietly restored the old figure, so the
+          // screen and the table disagreed with no error anywhere.
           const values = itemsData.map(row => [
-            netData.SivNo, netData.SivDt, row.SR_NO, row.ITEM_CODE,
+            sivNo, netData.SivDt, row.SR_NO, row.ITEM_CODE,
             row.QTY, row.STD_COST
           ]);
 
           await new Promise((resolve, reject) => {
             conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
+              if (err) return reject(err);
               console.log("siv_items Insert/Update:", result);
               resolve(result);
             });
           });
 
-
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              // The old version returned here without releasing, so every
+              // failed commit cost the pool a connection permanently.
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.json({ message: "S.I.V saved successfully!" });
           });
 
         } catch (error) {
           console.error("S.I.V Transaction Failed:", error);
           conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
+            conn.release();
             res.status(500).json({ message: "SIV Transaction failed, rolled back", error });
           });
-        };
+        }
       });
     });
   } catch (error) {
     console.log("SIV save - internal error :", error)
-    res.status(500).json({ message: "Internal Server Error (SRV)", error });
+    res.status(500).json({ message: "Internal Server Error (SIV)", error });
   }
 });
+
 
 app.post("/api/save-srv", async (req, res) => {
   try {
@@ -1947,6 +2120,27 @@ app.post("/api/save-srv", async (req, res) => {
                 return reject(err);
               }
               console.log("srv_items Insert/Update:", result);
+              resolve(result);
+            });
+          });
+
+          // ✅ Step 3: Delete rows removed on the client
+          const srNos = itemsData
+            .map(r => r.SR_NO)
+            .filter(v => v !== null && v !== undefined && v !== "");
+
+          const deleteQuery = srNos.length
+            ? `DELETE FROM srv_items WHERE SRV_NO = ? AND SR_NO NOT IN (?)`
+            : `DELETE FROM srv_items WHERE SRV_NO = ?`;
+
+          const deleteParams = srNos.length
+            ? [netData.SrvNo, srNos]
+            : [netData.SrvNo];
+
+          await new Promise((resolve, reject) => {
+            conn.query(deleteQuery, deleteParams, (err, result) => {
+              if (err) return reject(err);
+              console.log("srv_items deleted:", result.affectedRows);
               resolve(result);
             });
           });
@@ -2275,7 +2469,7 @@ app.post("/api/save-drnote", async (req, res) => {
   };
 
 })
-
+//
 app.post("/api/save-do", async (req, res) => {
   console.log('save-do, start ===>')
   try {
@@ -2300,7 +2494,7 @@ app.post("/api/save-do", async (req, res) => {
         }
 
         try {
-          // ✅ Step 1: Insert/Update NGP_NET table
+          // ✅ Step 1: Insert/Update fab_do_hdr table
           console.log("DoNo, DoDt==>", DoHdr, DoHdr.DoNo, DoHdr.DoDt);
           const netQuery = `
             INSERT INTO fab_do_hdr ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
@@ -2334,7 +2528,7 @@ app.post("/api/save-do", async (req, res) => {
             );
           });
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
+          // ✅ Step 2: Insert/Update fab_do_dtl table
           const itemsQuery = `
             INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE,INV_ITEM_DESC, INV_QTY, INV_UNIT)
             VALUES ?
@@ -2349,7 +2543,7 @@ app.post("/api/save-do", async (req, res) => {
             `;
 
           const values = itemsData.map(row => [
-            DoHdr.DoNo, row.SR_NO, DoHdr.DoDt, row.ITEM_CODE, row.ITEM_NAME,row.QTY, row.UNIT
+            DoHdr.DoNo, row.SR_NO, DoHdr.DoDt, row.ITEM_CODE, row.ITEM_NAME, row.QTY, row.UNIT
           ]);
 
           await new Promise((resolve, reject) => {
@@ -2362,11 +2556,44 @@ app.post("/api/save-do", async (req, res) => {
             });
           });
 
+          // ✅ Step 3: Delete detail rows the user removed in the grid.
+          // The upsert above can only add or update — a line deleted on the
+          // client simply stops being sent, so without this it would survive
+          // in fab_do_dtl forever. TRIM() on both sides guards against
+          // space-padded CHAR values inherited from the Oracle migration.
+          const srNos = itemsData
+            .map(r => r.SR_NO)
+            .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
+            .map(v => String(v).trim());
+
+          const deleteQuery = srNos.length
+            ? `DELETE FROM fab_do_dtl WHERE INV_NO = ? AND TRIM(SR_NO) NOT IN (?)`
+            : `DELETE FROM fab_do_dtl WHERE INV_NO = ?`;
+
+          const deleteParams = srNos.length
+            ? [DoHdr.DoNo, srNos]
+            : [DoHdr.DoNo];
+
+          await new Promise((resolve, reject) => {
+            conn.query(deleteQuery, deleteParams, (err, result) => {
+              if (err) {
+                return reject(err);
+              }
+              console.log("DO_ITEMS deleted rows:", result.affectedRows);
+              resolve(result);
+            });
+          });
+
           // ✅ Commit transaction if everything is successful
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
+              // Roll back and release, otherwise this connection leaks from
+              // the pool on every commit failure.
+              return conn.rollback(() => {
+                conn.release();
+                res.status(500).json({ message: "Commit error", error: err });
+              });
             }
             conn.release(); // Release the connection back to the pool
             res.json({ message: "Data saved successfully!" });
@@ -5893,7 +6120,7 @@ app.get("/api/srvitems/:srv", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log(" SRVItems", result);
+     //   console.log(" SRVItems", result);
         res.json(result)
 
       }
@@ -6394,7 +6621,7 @@ app.get("/api/fabinvitems/:vchr", function (req, res) {
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
     " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, a.DIS_COUNT AS DISC_PERC,  " +
     " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , "+
-    " a.INV_QTY, a.INV_RATE ,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
+    " a.INV_QTY, a.INV_RATE ,a.INV_UNIT,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
     " from fab_inv_dtl a where a.Inv_no = ?" +
     "  ORDER BY a.SR_NO",
     [req.params.vchr],

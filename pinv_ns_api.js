@@ -174,6 +174,26 @@ module.exports = function (connection) {
         );
       }
 
+      
+const srNos = itemsData
+  .map(r => r.SR_NO)
+  .filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+
+if (srNos.length) {
+  const [delRes] = await db.query(
+    `DELETE FROM purchase_items_ns WHERE PJV_NO = ? AND SR_NO NOT IN (?)`,
+    [netData.PJV_NO, srNos]
+  );
+  console.log("purchase_items_ns deleted rows:", delRes.affectedRows);
+} else {
+  // Guard: NOT IN () is a MySQL syntax error, so the no-surviving-rows case
+  // needs its own statement rather than an empty array.
+  const [delRes] = await db.query(
+    `DELETE FROM purchase_items_ns WHERE PJV_NO = ?`,
+    [netData.PJV_NO]
+  );
+  console.log("purchase_items_ns cleared all rows:", delRes.affectedRows);
+}
       // ── Post to GL (tran_acc): debit DR_CODE, credit SUP_CODE, both at
       //    the Net Amount. INV_NET_AMT is a STORED GENERATED column, so it
       //    only exists once the header row above has actually been written —
