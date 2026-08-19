@@ -4162,7 +4162,7 @@ app.get("/api/customer/:id", function (req, res) {
   console.log("Customer Edit 1", req.params.id);
 
   const sql = `
-    SELECT CUST_CODE, CUST_NAME, CUST_ADR1, CUST_ADR2,PP_EXPIRY, VISA_EXPIRY,CUS_LICENSE_EXPIRY 
+    SELECT CUST_CODE, CUST_NAME, CUST_ADR1, CUST_ADR2,PP_EXPIRY, VISA_EXPIRY,CUS_LICENSE_EXPIRY ,PAYMENT_TERMS 
     FROM cus_mst
     WHERE CUST_CODE = ?
   `;
@@ -5915,7 +5915,7 @@ app.get("/api/jobpanels/:jbNo", function (req, res) {
 });
 app.get("/api/cust-contact/:custCode", function (req, res) {
   connection.query(
-    "SELECT CUST_CODE, CUST_NAME, CONTACT_PR FROM cus_mst WHERE CUST_CODE = ?",
+    "SELECT CUST_CODE, CUST_NAME, CONTACT_PR ,PAYMENT_TERMS FROM cus_mst WHERE CUST_CODE = ?",
     [req.params.custCode],
     function (err, rows) {
       if (err) { console.error("cust-contact:", err); return res.status(500).json({ message: err.message }); }
