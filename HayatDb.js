@@ -936,7 +936,7 @@ app.post("/api/save-ngp", async (req, res) => {
             conn.query(
               netQuery,
               [netData.LpoNo, netData.LpoDt, netData.SupCd,
-               netData.Narration, netData.discAmt, netData.AMOUNT],
+              netData.Narration, netData.discAmt, netData.AMOUNT],
               (err, result) => {
                 if (err) return reject(err);
                 console.log("NGP_NET Insert/Update:", result);
@@ -1967,22 +1967,50 @@ app.post("/api/save-siv", async (req, res) => {
 
         try {
           // ✅ Step 1: Insert/Update siv_hdr
-          const netQuery = `INSERT INTO siv_hdr (
-          SIV_NO,SIV_DATE,JOB_NO,PANEL_NO,CUST_CODE,NARRATION)
-                            VALUES ( ?, ?,?, ?, ?,?  )
-          ON DUPLICATE KEY UPDATE
-          SIV_DATE = VALUES(SIV_DATE),
-          JOB_NO = VALUES(JOB_NO),
-          PANEL_NO = VALUES(PANEL_NO),
-          CUST_CODE = VALUES(CUST_CODE),
-          NARRATION = VALUES(NARRATION)
-        `;
+           // ✅ Step 1: Insert/Update siv_hdr
+          //
+          // Column list matches siv_hdr as it actually is: SIV_NO, SIV_DATE,
+          // INV_NO, DO_NO, CUST_CODE, NARRATION, JOB_NO, LOC_CODE, PANEL_NO,
+          // SIV_TYPE, COST_CODE, STOCK_CODE. There is NO amount column — the
+          // header figure is derived from SUM(QTY * STD_COST) over siv_items,
+          // so netData.Amount is deliberately not written anywhere.
+          const netQuery = `
+  INSERT INTO siv_hdr
+    (SIV_NO, SIV_DATE, JOB_NO, PANEL_NO, CUST_CODE, NARRATION, SIV_TYPE)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON DUPLICATE KEY UPDATE
+    SIV_DATE  = VALUES(SIV_DATE),
+    JOB_NO    = VALUES(JOB_NO),
+    PANEL_NO  = VALUES(PANEL_NO),
+    CUST_CODE = VALUES(CUST_CODE),
+    NARRATION = VALUES(NARRATION),
+    SIV_TYPE  = VALUES(SIV_TYPE)`;
+
+          // siv_hdr.SIV_TYPE is varchar(1): 'M' = Materials (panel-charged),
+          // 'C' = Consumables (job-level, PANEL_NO null). Clamped to one char
+          // so a longer value can't be truncated by MySQL or rejected under
+          // strict mode.
+          const sivType = String(netData.SivType || "M").toUpperCase().charAt(0);
+
+          // A consumables issue has no panel. The screen already sends null;
+          // normalising here also stops an empty string landing in PANEL_NO
+          // as '' from any other caller.
+          const panelNo = sivType === "C"
+            ? null
+            : (String(netData.PanelNo ?? "").trim() || null);
+
+          // SivEnt does not send CustCd, so this is undefined — and mysql2
+          // rejects undefined bind parameters outright ("Bind parameters must
+          // not contain undefined"). Coerced to null so the column simply
+          // stays empty, which is what it was before this screen existed.
+          const custCode = netData.CustCd ?? null;
+
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
               [
-                sivNo, netData.SivDt, netData.JobNo, netData.PanelNo, netData.CustCd,
-                netData.Narration
+                sivNo, netData.SivDt, netData.JobNo, panelNo,
+                custCode, netData.Narration, sivType
               ],
               (err, result) => {
                 if (err) return reject(err);
@@ -1991,7 +2019,6 @@ app.post("/api/save-siv", async (req, res) => {
               }
             );
           });
-
           // ✅ Step 2: Delete the lines removed from the grid
           //
           // Before the upsert, not after: an SR_NO reused within the same save
@@ -4191,14 +4218,14 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     connection.query(
       "select MAX(SIV_NO)   MXVCHR  FROM siv_hdr ",
       [],
-      
+
       function (err, result) {
         if (err) {
           throw error;
         } else {
           console.log("Max SRV", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
           res.json({ maxValue });
           // res.json(result);
           // conn.close();
@@ -4216,14 +4243,14 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         } else {
           console.log("Max SRV", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
           res.json({ maxValue });
           // res.json(result);
           // conn.close();
         }
       }
     );
-  } 
+  }
   else if (req.params.Tp == "FABDO") {
     connection.query(
       "select MAX(INV_NO)   MXVCHR  FROM fab_do_hdr ",
@@ -4235,14 +4262,14 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         } else {
           console.log("Max Fab Do", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
           res.json({ maxValue });
           // res.json(result);
           // conn.close();
         }
       }
     );
-  } 
+  }
   else if (req.params.Tp == "FABINV") {
     connection.query(
       "select MAX(INV_NO)   MXVCHR  FROM fab_inv_hdr ",
@@ -4254,14 +4281,14 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         } else {
           console.log("Max Fab Inv.No.", result[0]?.MXVCHR);
           //res.end(JSON.stringify(result.rows));
-          const maxValue =String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
           res.json({ maxValue });
           // res.json(result);
           // conn.close();
         }
       }
     );
-  } 
+  }
   else if (req.params.Tp == "SADJ") {
     connection.query(
       "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_hdr",
@@ -5895,7 +5922,7 @@ app.get("/api/jobpanels", function (req, res) {
 
 app.get("/api/jobpanels/:jbNo", function (req, res) {
   //[req.params.dys],
-  console.log('Job No -panel ',req.params.jbNo)
+  console.log('Job No -panel ', req.params.jbNo)
   connection.query(
     "	SELECT SR_NO,	PANEL_REF,	QTY,	DRAW_NO,	DELIVERY_REQ,	REMARKS,	COST_MAT,	COST_CONS," +
     "	LABOUR_CHARGES,	TRANSPORT_EXP,	OTHER_EXP,	CNSU_STOCK,	START_DATE,	END_DATE,	AMOUNT," +
@@ -6150,7 +6177,7 @@ app.get("/api/srvitems/:srv", function (req, res) {
       if (err) {
         throw err;
       } else {
-     //   console.log(" SRVItems", result);
+        //   console.log(" SRVItems", result);
         res.json(result)
 
       }
@@ -6628,7 +6655,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE, " +
-    " a.DO_DATE "+
+    " a.DO_DATE " +
     " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
     [req.params.inv],
 
@@ -6650,7 +6677,7 @@ app.get("/api/fabinvitems/:vchr", function (req, res) {
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
     " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, a.DIS_COUNT AS DISC_PERC,  " +
-    " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , "+
+    " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , " +
     " a.INV_QTY, a.INV_RATE ,a.INV_UNIT,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
     " from fab_inv_dtl a where a.Inv_no = ?" +
     "  ORDER BY a.SR_NO",
@@ -9008,9 +9035,9 @@ app.get("/api/lpoitems/:po", function (req, res) {
   connection.query(
     "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,b.ARTICLE_CODE AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
     " round(a.qty*a.rate,2) AMOUNT" +
-    " FROM lpo_items a  "+
-    " Left Outer join item_mst b on a.ITEM_CODE = b.ITEM_CODE "+
-    " WHERE a.LPO_NO =? "+
+    " FROM lpo_items a  " +
+    " Left Outer join item_mst b on a.ITEM_CODE = b.ITEM_CODE " +
+    " WHERE a.LPO_NO =? " +
     " order by a.sr_no",
     [req.params.po],
 
@@ -9030,12 +9057,12 @@ app.get("/api/lpohdr/:po", function (req, res) {
     " a.APPROVED_BY,  " +
     " a.ACCOUNTS_DEPT, a.DISCOUNT  " +
     " FROM lpo_net a " +
-   
+
     " WHERE LPO_NO =?",
     [req.params.po],
     function (error, results, fields) {
       if (error) throw error;
-      console.log('LPOP Net:',results);
+      console.log('LPOP Net:', results);
       res.json(results);
     }
   );
@@ -9043,7 +9070,7 @@ app.get("/api/lpohdr/:po", function (req, res) {
 
 //lpoNet
 app.get("/api/lponet/:po", function (req, res) {
-    console.log('LPO NET == param [', req.params.po, '] len=', (req.params.po || '').length);
+  console.log('LPO NET == param [', req.params.po, '] len=', (req.params.po || '').length);
   connection.query(
     "select a.LPO_NO,DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') LPO_DATE,a.SUP_CODE ,b.SUP_NAME ," +
     " a.AMOUNT, a.VAT_PERC, a.VAT_AMOUNT,a.NARRATION, " +
@@ -9060,7 +9087,7 @@ app.get("/api/lponet/:po", function (req, res) {
     [req.params.po],
     function (error, results, fields) {
       if (error) throw error;
-     // console.log('LPOP Net:',results);
+      // console.log('LPOP Net:',results);
       res.json(results);
     }
   );
