@@ -10563,4 +10563,6 @@ app.use("/api", salesBankDtlRoutes);
 //sinqLovRoutes
 const sinqLovRoutes = require("./routes/sinqLovRoutes")(connection);
 app.use("/api", sinqLovRoutes);
-//
+//fabInvJvRoutes
+const fabInvJvRoutes = require("./routes/fabInvJvRoutes")(connection);
+app.use("/api", fabInvJvRoutes);
