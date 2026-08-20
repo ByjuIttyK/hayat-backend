@@ -415,9 +415,9 @@ app.post("/api/save-lpo", async (req, res) => {
             LPO_NO, LPO_DATE, SUP_CODE, NARRATION, AMOUNT, ATTN, SMAN_CODE,
             DISCOUNT, VAT_PERC, VAT_AMOUNT,
             SUPP_REF_NO, PAY_TERMS, PLACE_DLV, DELIVERY_REQ,
-            PREPARED_BY, ACCOUNTS_DEPT, APPROVED_BY
+            PREPARED_BY, ACCOUNTS_DEPT, APPROVED_BY,LPO_TYPE
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)
           ON DUPLICATE KEY UPDATE 
           LPO_DATE      = VALUES(LPO_DATE),
           SUP_CODE      = VALUES(SUP_CODE),
@@ -434,7 +434,8 @@ app.post("/api/save-lpo", async (req, res) => {
           DELIVERY_REQ  = VALUES(DELIVERY_REQ),
           PREPARED_BY   = VALUES(PREPARED_BY),
           ACCOUNTS_DEPT = VALUES(ACCOUNTS_DEPT),
-          APPROVED_BY   = VALUES(APPROVED_BY);
+          APPROVED_BY   = VALUES(APPROVED_BY),
+          LPO_TYPE   = VALUES(LPO_TYPE);
         `;
 
           await new Promise((resolve, reject) => {
@@ -445,7 +446,7 @@ app.post("/api/save-lpo", async (req, res) => {
                 lpoNet.Amount, lpoNet.Attn, lpoNet.SmanCd,
                 lpoNet.Discount, lpoNet.VatPerc, lpoNet.VatAmount,
                 lpoNet.SuppRefNo, lpoNet.PayTerms, lpoNet.PlaceDlv, lpoNet.DeliveryReq,
-                lpoNet.PreparedBy, lpoNet.AccountsDept, lpoNet.ApprovedBy,
+                lpoNet.PreparedBy, lpoNet.AccountsDept, lpoNet.ApprovedBy,lpoNet.LpoType,
               ],
               (err, result) => {
                 if (err) {
@@ -4232,9 +4233,46 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         }
       }
     );
+     } else if (req.params.Tp == "SIVCON") {
+    connection.query(
+      "select MAX(SIV_NO)   MXVCHR  FROM siv_hdr_cons",
+
+
+      function (err, result) {
+        if (err) {
+          throw error;
+        } else {
+          console.log("Max SRV", result[0]?.MXVCHR);
+          //res.end(JSON.stringify(result.rows));
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
+          // conn.close();
+        }
+      }
+    );
+
   } else if (req.params.Tp == "SRV") {
     connection.query(
       "select MAX(SRV_NO)   MXVCHR  FROM srv_hdr ",
+
+
+      function (err, result) {
+        if (err) {
+          throw error;
+        } else {
+          console.log("Max SRV", result[0]?.MXVCHR);
+          //res.end(JSON.stringify(result.rows));
+          const maxValue = String(Number(result[0]?.MXVCHR) + 1).padStart(10, '0');
+          res.json({ maxValue });
+          // res.json(result);
+          // conn.close();
+        }
+      }
+    );
+  } else if (req.params.Tp == "SRVNS") {
+    connection.query(
+      "select MAX(SRV_NO)   MXVCHR  FROM srv_hdr_ns ",
 
 
       function (err, result) {
@@ -5854,7 +5892,7 @@ app.get("/api/lpolst/:dys", function (req, res) {
   console.log("LpoList");
 
   connection.query(
-    "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, " +
+    "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, a.LPO_TYPE," +
     "b.SUP_NAME,a.PLACE_DLV,a.PAY_TERMS, a.DELIVERY_REQ,a.AMOUNT, a.ATTN, a.CANCELLED, a.REQ_NO, a.SMAN_CODE, a.NARRATION " +
     "FROM lpo_net a " +
     "LEFT OUTER JOIN sup_mst b ON (a.SUP_CODE = b.SUP_CODE) " +
@@ -5871,6 +5909,29 @@ app.get("/api/lpolst/:dys", function (req, res) {
     }
   );
 });
+
+app.get("/api/lpolstns/:dys", function (req, res) {
+  console.log("LpoList Non-Stock");
+
+  connection.query(
+    "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, a.LPO_TYPE," +
+    "b.SUP_NAME,a.PLACE_DLV,a.PAY_TERMS, a.DELIVERY_REQ,a.AMOUNT, a.ATTN, a.CANCELLED, a.REQ_NO, a.SMAN_CODE, a.NARRATION " +
+    "FROM lpo_net a " +
+    "LEFT OUTER JOIN sup_mst b ON (a.SUP_CODE = b.SUP_CODE) " +
+    "WHERE a.LPO_TYPE ='N' and a.LPO_DATE >= CURDATE() - INTERVAL ? DAY " +
+    "ORDER BY a.LPO_NO DESC",
+    [req.params.dys], // Passing the :dys parameter as a placeholder
+    function (err, results) {
+      if (err) {
+        throw err;
+      }
+      //console.log(res.json(results));
+      res.json(results);
+
+    }
+  );
+});
+
 app.get("/api/lporeg", function (req, res) {
 
   const { start_date, end_date } = req.query; // Retrieve query parameters
@@ -8835,6 +8896,24 @@ app.get("/api/itmlst", function (req, res) {
   );
 });
 
+app.get("/api/itm-lst-cons", function (req, res) {
+  //console.log(catg)
+  //const tableName= 'ITEM_MST';
+  connection.query(
+    "select LOC_CODE, ITEM_CODE , ITEM_NAME1,ARTICLE_CODE,OP_STOCK, CL_STOCK, ITEM_UNIT, CAT_CODE, SUB_CAT, BRAND, cl_stock," +
+    "COST_PRICE, ITEM_DATE, SUP_CODE,SALES_ACCOUNT  FROM item_mst_cons  order by cat_code, sub_cat,item_code",
+    [],
+
+    //Decode(:catg,'null','%', :catg)
+    function (error, results) {
+      if (error) throw error;
+      res.json(results);
+      //res.json({tableName, data:results});
+
+    }
+  );
+});
+
 
 app.get("/api/items/:id", function (req, res) {
 
@@ -9077,7 +9156,7 @@ app.get("/api/lponet/:po", function (req, res) {
     "a.REQ_NO,a.PLACE_DLV , a.ATTN ,a.DATE_REQ ,a.SMAN_CODE, a.SUPP_REF_NO , a.PAY_TERMS  , a.DELIVERY_REQ ," +
     " a.LPO_APPROVED,  a.PREPARED_BY, c.SMAN_NAME AS PREPARED_BY_NAME, " +
     " a.APPROVED_BY, e.SMAN_NAME AS APPROVED_BY_NAME, " +
-    " a.ACCOUNTS_DEPT, d.SMAN_NAME AS ACCOUNTS_DEPT_NAME, a.DISCOUNT  " +
+    " a.ACCOUNTS_DEPT, d.SMAN_NAME AS ACCOUNTS_DEPT_NAME, a.DISCOUNT ,a.LPO_TYPE " +
     " FROM lpo_net a " +
     " LEFT OUTER JOIN sup_mst b on (a.SUP_CODE=b.SUP_CODE)" +
     " LEFT OUTER JOIN sman_mst c on (a.PREPARED_BY=c.SMAN_CODE)" +
@@ -10593,3 +10672,8 @@ app.use("/api", sinqLovRoutes);
 //fabInvJvRoutes
 const fabInvJvRoutes = require("./routes/fabInvJvRoutes")(connection);
 app.use("/api", fabInvJvRoutes);
+const sivconRoutes = require("./routes/sivcon_routes")(connection);
+app.use("/api", sivconRoutes);
+//
+const srvNsRoutes = require("./routes/srvNsroutes")(connection);
+app.use("/api", srvNsRoutes);

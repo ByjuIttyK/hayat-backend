@@ -26,8 +26,8 @@ module.exports = function (connection) {
   const express = require('express');
   const router = express.Router();
 
-  // ── Purchase History ──────────────────────────────────────────────
-  router.get('/item-purchase-history/:itemCode', function (req, res) {
+  // ── Siv List ──────────────────────────────────────────────
+  router.get('/sivconlst/:dys', function (req, res) {
     const itemCode = req.params.itemCode;
 
     const sql = `
