@@ -1085,8 +1085,8 @@ app.post("/api/save-localpurch", async (req, res) => {
           console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const netQuery = `
             INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE,NARRATION,
-                                      INV_NO, INV_DATE,PO_NO,INV_AMOUNT,DISCOUNT,VAT_AMOUNT) 
-            VALUES (?, ?, ?, ?,?,?,?,?,?,?) 
+                                      INV_NO, INV_DATE,PO_NO,INV_AMOUNT,DISCOUNT,VAT_PERC,VAT_AMOUNT) 
+            VALUES (?, ?, ?, ?,?,?,?,?,?,?,?) 
             ON DUPLICATE KEY UPDATE 
             PJV_DATE= VALUES(PJV_DATE),
             SUP_CODE = VALUES(SUP_CODE),
@@ -1096,6 +1096,7 @@ app.post("/api/save-localpurch", async (req, res) => {
             PO_NO = VALUES(PO_NO),
             INV_AMOUNT = VALUES(INV_AMOUNT),
             DISCOUNT = VALUES(DISCOUNT),
+            VAT_PERC = VALUES(VAT_PERC),
             VAT_AMOUNT = VALUES(VAT_AMOUNT);
           `;
 
@@ -1104,7 +1105,7 @@ app.post("/api/save-localpurch", async (req, res) => {
               netQuery,
               [netData.PjvNo, netData.PjvDt, netData.SupCd,
               netData.Narration, netData.InvNo, netData.InvDt, netData.LpoNo,
-              netData.AMOUNT, netData.discAmt, netData.vatAmt],
+              netData.AMOUNT, netData.discAmt, netData.VatPct,netData.vatAmt],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -7670,6 +7671,29 @@ app.get("/api/dolist/:dys", function (req, res) {
     }
   );
 });
+
+app.get("/api/dolistcust/:cus", function (req, res) {
+  connection.query(
+    "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
+    " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ," +
+    " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d%m%Y') AS LPO_DATE, a.CONTACT_PERSON " +
+    " from fab_do_hdr a LEFT OUTER JOIN cus_mst b  ON (a.CUST_CODE = b.CUST_CODE) " +
+    " where  a.CUST_CODE >= ?  " +
+    "  ORDER BY a.INV_NO DESC",
+    [req.params.cus],
+
+    function (err, results, fields) {
+      if (err) {
+        throw err;
+      } else {
+        //    console.log("Oracle DO LST", result.rows);
+        res.json(results);
+
+      }
+    }
+  );
+});
+
 app.get("/api/fabdohdr/:doNo", function (req, res) {
   console.log("DO_HDR", req.params.doNo);
   connection.query(
