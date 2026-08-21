@@ -7048,7 +7048,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
-    " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , " +
+    " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , a.NARRATION, " +
     " '' as SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
     " from purchase_hdr a, sup_mst b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.PJV_NO DESC",
