@@ -63,6 +63,7 @@ module.exports = function (connection) {
                 h.INV_NO,
                 DATE_FORMAT(h.INV_DATE, '%d/%m/%Y')  AS INV_DATE,
                 h.LPO_NO,
+                h.SRV_NO,
                 h.DR_CODE,
                 a.ACC_HEAD                            AS DR_NAME,
                 h.NARRATION,
@@ -141,18 +142,18 @@ module.exports = function (connection) {
       await dbQuery(
         conn,
         `INSERT INTO purchase_hdr_ns
-           (PJV_NO, PJV_DATE, SUP_CODE, INV_NO, INV_DATE, LPO_NO, DR_CODE,
+           (PJV_NO, PJV_DATE, SUP_CODE, INV_NO, INV_DATE, LPO_NO, SRV_NO,DR_CODE,
             NARRATION, INV_GRS_AMT, DISC_PER, DISCOUNT, RND_OFF, VAT_PERC, VAT_AMOUNT)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE
            PJV_DATE=VALUES(PJV_DATE), SUP_CODE=VALUES(SUP_CODE), INV_NO=VALUES(INV_NO),
-           INV_DATE=VALUES(INV_DATE), LPO_NO=VALUES(LPO_NO), DR_CODE=VALUES(DR_CODE),
+           INV_DATE=VALUES(INV_DATE), LPO_NO=VALUES(LPO_NO), SRV_NO =VALUES(SRV_NO), DR_CODE=VALUES(DR_CODE),
            NARRATION=VALUES(NARRATION), INV_GRS_AMT=VALUES(INV_GRS_AMT),
            DISC_PER=VALUES(DISC_PER), DISCOUNT=VALUES(DISCOUNT), RND_OFF=VALUES(RND_OFF),
            VAT_PERC=VALUES(VAT_PERC), VAT_AMOUNT=VALUES(VAT_AMOUNT)`,
         [
           netData.PJV_NO, netData.PJV_DATE, netData.SUP_CODE, netData.INV_NO, netData.INV_DATE,
-          netData.LPO_NO, netData.DR_CODE, netData.NARRATION, netData.INV_GRS_AMT,
+          netData.LPO_NO, netData.SRV_NO,netData.DR_CODE, netData.NARRATION, netData.INV_GRS_AMT,
           netData.DISC_PER, netData.DISCOUNT, netData.RND_OFF, netData.VAT_PERC, netData.VAT_AMOUNT,
         ]
       );
