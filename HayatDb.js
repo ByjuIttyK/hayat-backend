@@ -1056,7 +1056,7 @@ app.get("/api/srv-dup-inv", (req, res) => {
   });
 });
 
-
+const { postToTranAcc } = require("./services/glPostingService");
 app.post("/api/save-localpurch", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -1168,6 +1168,23 @@ app.post("/api/save-localpurch", async (req, res) => {
               resolve(result);
             });
           });
+
+//        ✅ Step 4: Post GL Entries to tran_acc
+          // Map netData fields to match acc_posting_setup field names
+          const glPayload = {
+            ModuleName: "PURCHASE_HDR",
+            InvNo: netData.PjvNo,
+            Date: netData.PjvDt,
+            Narration: netData.Narration || "",
+            SupCode: netData.SupCd,
+            GrossAmt: netData.GrossAmt,        // Matches FIELD_NAME for PURCHASE rule
+            VatAmt: netData.VatAmt,          // Matches FIELD_NAME for VAT rule
+            DiscAmt: netData.discAmt,        // Matches FIELD_NAME for DISCOUNT rule
+            NetAmt: netData.NetAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
+            JobNo: netData.JobNo || null,
+            PanelNo: netData.PanelNo || null
+          };
+          await postToTranAcc(glPayload, conn);
 
           // ✅ Commit transaction if everything is successful
           conn.commit((err) => {
@@ -6665,8 +6682,9 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
 
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ," +
-    "a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
+    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_AMOUNT, "+
+   "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
+    " a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO " +
     " from fab_inv_hdr a    " +
     " left outer join cus_mst b on b.cust_code = a.cust_code " +
@@ -10701,3 +10719,6 @@ app.use("/api", sivconRoutes);
 //
 const srvNsRoutes = require("./routes/srvNsroutes")(connection);
 app.use("/api", srvNsRoutes);
+//
+const accMstRoutes = require("./routes/acc_mst_routes")(connection);
+app.use( "/api",accMstRoutes);
