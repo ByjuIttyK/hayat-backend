@@ -3639,15 +3639,15 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
 
   console.log("CustSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT CUST_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
-    " NAR, DR_AMT, CR_AMT, BALANCE" +
-    " FROM v_cust_outstanding_bill" +
-    " WHERE DATTE < ?";
+  let sql = "SELECT a.CUST_CODE, a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
+    " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
+    " FROM v_cust_outstanding_bill a Left Outer join Fab_inv_hdr b on (a.vchr_no = b.Inv_no)    "+
+    " WHERE a.DATTE < ? ";
   let params = [as_on_date];
 
   // ✅ Only add ACC_CODE filter if p_cus is provided
   if (p_cus) {
-    sql += " AND CUST_CODE = ?";
+    sql += " AND a.CUST_CODE = ?";
     params.push(p_cus);
   }
 
