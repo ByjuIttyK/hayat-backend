@@ -446,7 +446,7 @@ app.post("/api/save-lpo", async (req, res) => {
                 lpoNet.Amount, lpoNet.Attn, lpoNet.SmanCd,
                 lpoNet.Discount, lpoNet.VatPerc, lpoNet.VatAmount,
                 lpoNet.SuppRefNo, lpoNet.PayTerms, lpoNet.PlaceDlv, lpoNet.DeliveryReq,
-                lpoNet.PreparedBy, lpoNet.AccountsDept, lpoNet.ApprovedBy,lpoNet.LpoType,
+                lpoNet.PreparedBy, lpoNet.AccountsDept, lpoNet.ApprovedBy, lpoNet.LpoType,
               ],
               (err, result) => {
                 if (err) {
@@ -1105,7 +1105,7 @@ app.post("/api/save-localpurch", async (req, res) => {
               netQuery,
               [netData.PjvNo, netData.PjvDt, netData.SupCd,
               netData.Narration, netData.InvNo, netData.InvDt, netData.LpoNo,
-              netData.AMOUNT, netData.discAmt, netData.VatPct,netData.vatAmt],
+              netData.AMOUNT, netData.discAmt, netData.VatPct, netData.vatAmt],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -1169,7 +1169,7 @@ app.post("/api/save-localpurch", async (req, res) => {
             });
           });
 
-//        ✅ Step 4: Post GL Entries to tran_acc
+          //        ✅ Step 4: Post GL Entries to tran_acc
           // Map netData fields to match acc_posting_setup field names
           const glPayload = {
             ModuleName: "PURCHASE_HDR",
@@ -1986,7 +1986,7 @@ app.post("/api/save-siv", async (req, res) => {
 
         try {
           // ✅ Step 1: Insert/Update siv_hdr
-           // ✅ Step 1: Insert/Update siv_hdr
+          // ✅ Step 1: Insert/Update siv_hdr
           //
           // Column list matches siv_hdr as it actually is: SIV_NO, SIV_DATE,
           // INV_NO, DO_NO, CUST_CODE, NARRATION, JOB_NO, LOC_CODE, PANEL_NO,
@@ -2174,21 +2174,25 @@ app.post("/api/save-srv", async (req, res) => {
           });
 
           // ✅ Step 2: Insert/Update srv_items table
+          // ✅ Step 2: Insert/Update srv_items table
           const itemsQuery = `
-              INSERT INTO srv_items (SRV_NO,SRV_DATE,SR_NO,ITEM_CODE,QTY,COST)
-              VALUES ? 
-              ON DUPLICATE KEY UPDATE 
-              SRV_NO= VALUES(SRV_NO),
-              SRV_DATE = COALESCE(VALUES(SRV_DATE), SRV_DATE), 
-              SR_NO = COALESCE(VALUES(SR_NO),SR_NO),
-              ITEM_CODE = COALESCE(VALUES(ITEM_CODE),ITEM_CODE),
-              QTY       = COALESCE(VALUES(QTY), QTY), 
-              COST      = COALESCE(VALUES(COST), COST);
-            `;
+    INSERT INTO srv_items (SRV_NO,SRV_DATE,SR_NO,ITEM_CODE,QTY,COST)
+    VALUES ?
+    ON DUPLICATE KEY UPDATE
+    SRV_DATE  = COALESCE(VALUES(SRV_DATE), SRV_DATE),
+    ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE),
+    QTY       = COALESCE(VALUES(QTY), QTY),
+    COST      = COALESCE(VALUES(COST), COST);
+  `;
           const values = itemsData.map(row => [
-            row.SRV_NO, row.SRV_DATE, row.SR_NO, row.ITEM_CODE,
-            row.QTY, row.COST
+            netData.SrvNo,                     // ← was row.SRV_NO
+            row.SRV_DATE || netData.SrvDt,     // ← header date as fallback
+            row.SR_NO,
+            row.ITEM_CODE,
+            row.QTY,
+            row.COST
           ]);
+
 
           await new Promise((resolve, reject) => {
             conn.query(itemsQuery, [values], (err, result) => {
@@ -3641,7 +3645,7 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
 
   let sql = "SELECT a.CUST_CODE, a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
     " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
-    " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    "+
+    " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    " +
     " WHERE a.DATTE < ? ";
   let params = [as_on_date];
 
@@ -4251,7 +4255,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
         }
       }
     );
-     } else if (req.params.Tp == "SIVCON") {
+  } else if (req.params.Tp == "SIVCON") {
     connection.query(
       "select MAX(SIV_NO)   MXVCHR  FROM siv_hdr_cons",
 
@@ -6682,8 +6686,8 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
 
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_AMOUNT, "+
-   "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
+    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_AMOUNT, " +
+    "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
     " a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO " +
     " from fab_inv_hdr a    " +
@@ -10721,4 +10725,4 @@ const srvNsRoutes = require("./routes/srvNsroutes")(connection);
 app.use("/api", srvNsRoutes);
 //
 const accMstRoutes = require("./routes/acc_mst_routes")(connection);
-app.use( "/api",accMstRoutes);
+app.use("/api", accMstRoutes);
