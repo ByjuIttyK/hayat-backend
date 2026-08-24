@@ -3641,7 +3641,7 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
 
   let sql = "SELECT a.CUST_CODE, a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
     " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
-    " FROM v_cust_outstanding_bill a Left Outer join Fab_inv_hdr b on (a.vchr_no = b.Inv_no)    "+
+    " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    "+
     " WHERE a.DATTE < ? ";
   let params = [as_on_date];
 
