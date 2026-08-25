@@ -168,6 +168,50 @@ module.exports = function (connection) {
           `, [newQuotNo, sourceQuotNo]);
         }
 
+        // 4. Copy quot_notes  (QUOT_NO, SR_NO, NOT_ES)
+        const notesCheck = await q(conn,
+          'SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+          ['quot_notes']
+        );
+        if (notesCheck[0].cnt > 0) {
+          await q(conn, `
+            INSERT INTO quot_notes (QUOT_NO, SR_NO, NOT_ES)
+            SELECT ?, SR_NO, NOT_ES
+            FROM quot_notes
+            WHERE QUOT_NO = ?
+          `, [newQuotNo, sourceQuotNo]);
+        }
+
+        // 5. Copy quot_technical_details  (QUOT_NO, PARA_ID, SR_NO, TECH_DETAIL_LINE)
+        const techCheck = await q(conn,
+          'SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+          ['quot_technical_details']
+        );
+        if (techCheck[0].cnt > 0) {
+          await q(conn, `
+            INSERT INTO quot_technical_details (QUOT_NO, PARA_ID, SR_NO, TECH_DETAIL_LINE)
+            SELECT ?, PARA_ID, SR_NO, TECH_DETAIL_LINE
+            FROM quot_technical_details
+            WHERE QUOT_NO = ?
+          `, [newQuotNo, sourceQuotNo]);
+        }
+
+        // 6. Copy quot_inq_docs  (QUOT_NO, SR_NO, INQ_DOC)
+        // Note: does NOT copy physical files — only the document reference records.
+        // User can re-attach or replace documents on the revised quotation.
+        const docsCheck = await q(conn,
+          'SELECT COUNT(*) AS cnt FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+          ['quot_inq_docs']
+        );
+        if (docsCheck[0].cnt > 0) {
+          await q(conn, `
+            INSERT INTO quot_inq_docs (QUOT_NO, SR_NO, INQ_DOC)
+            SELECT ?, SR_NO, INQ_DOC
+            FROM quot_inq_docs
+            WHERE QUOT_NO = ?
+          `, [newQuotNo, sourceQuotNo]);
+        }
+
         // ── Commit ──────────────────────────────────────────────────────────
         await new Promise((resolve, reject) =>
           conn.commit(err => (err ? reject(err) : resolve()))
@@ -175,7 +219,7 @@ module.exports = function (connection) {
 
         conn.release();
         res.json({
-          message : `Quotation ${sourceQuotNo} copied to ${newQuotNo} successfully.`,
+          message : `Quotation ${sourceQuotNo} copied to ${newQuotNo} successfully (header, items, terms & conditions, notes, technical details, documents).`,
           newQuotNo,
           revNo,
         });
