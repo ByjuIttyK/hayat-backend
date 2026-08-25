@@ -6604,28 +6604,6 @@ app.get("/api/quotitem/:id", function (req, res) {
   );
 });
 
-app.get("/api/quotent1/:id", function (req, res) {
-  var pool = orcl1.getPool();
-  // console.log('QUOTE Entry.'+`${:id}`);
-  pool.getConnection(function (err, conn) {
-    conn.execute(
-      "select a.* " + " from quot_item a   " + " ORDER BY a.SR_NO ",
-      [req.params.id],
-      {
-        outFormat: orcl1.OBJECT,
-      },
-      function (err, result) {
-        if (err) {
-          throw err;
-        } else {
-          console.log("Oracle QuotEntry", result);
-          res.end(JSON.stringify(result.rows));
-          conn.close();
-        }
-      }
-    );
-  });
-});
 
 app.get("/api/sinqlst/:dys", function (req, res) {
   var pool = orcl1.getPool();
@@ -10732,3 +10710,6 @@ app.use('/api', salesRegisterVat);
 //
  const despatchNote = require('./routes/despatchNoteRoutes');
    app.use('/api', despatchNote(connection));
+//
+const quotRevision = require('./routes/quotRevisionRoutes');
+app.use('/api', quotRevision(connection));
