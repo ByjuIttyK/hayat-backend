@@ -46,7 +46,7 @@ const SQL = `
   LEFT JOIN sal_loc_mst s ON s.sloc_code = b.cn_code
   WHERE  IFNULL(b.cn_code, 'X') LIKE ?
     AND  a.inv_date BETWEEN ? AND ?
-    AND  IFNULL(a.CAN_CEL, 'N') <> 'Y'
+    AND  IFNULL(a.can_cel, 'N') <> 'Y'
 
   UNION ALL
 
@@ -256,143 +256,203 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
 }
 
 // ─── PDF Builder ──────────────────────────────────────────────────────────────
+// Uses save()/restore() + clip rect per cell so text NEVER bleeds into adjacent columns.
 
 function buildPdf(report, { dt1, dt2, sloc }) {
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape',
-    margins: { top: 28, bottom: 28, left: 28, right: 28 }, autoFirstPage: true });
+  const doc = new PDFDocument({
+    size: 'A4', layout: 'landscape',
+    margins: { top: 24, bottom: 24, left: 22, right: 22 },
+    autoFirstPage: true,
+  });
 
-  const PW = doc.page.width, MARGIN = 28, CONTENT_W = PW - MARGIN * 2;
-  const NAVY = '#0D1B2A', GOLD = '#C9A84C', LGOLD = '#F5E6C8',
-        STEEL = '#1B3A5C', STBG = '#E8F0F7', ALT = '#F4F8FC',
-        WHITE = '#FFFFFF', GREY = '#6B7280';
+  const PW      = doc.page.width;   // 841.89 pt landscape
+  const MARGIN  = 18;   // tighter margin = more usable width
+  const CW      = PW - MARGIN * 2;  // usable content width ≈ 797 pt
 
-  const COL_PCTS = [0.108, 0.078, 0.078, 0.268, 0.102, 0.102, 0.106, 0.076, 0.082];
-  const COL_W    = COL_PCTS.map(p => p * CONTENT_W);
+  // ── colours ──────────────────────────────────────────────────────────────
+  const NAVY  = '#0D1B2A', GOLD  = '#C9A84C', LGOLD = '#F5E6C8',
+        STEEL = '#1B3A5C', STBG  = '#E8F0F7', ALT   = '#F4F8FC',
+        WHITE = '#FFFFFF', GREY  = '#6B7280';
+
+  // ── column layout (must sum to exactly 1.0) ───────────────────────────────
+  //  InvNo  Date   CCode  CustName  Taxable  VAT    Total   Loc   Ctry
+  //           InvNo  Date  CCode CustName  Tax    VAT   Total  Loc  Ctry
+  const PCT = [0.13, 0.09, 0.09, 0.25, 0.11, 0.11, 0.11, 0.055, 0.055];
+  const CWS = PCT.map(p => Math.floor(p * CW));
+  // fix rounding: add remainder to customer name column
+  const rem = CW - CWS.reduce((a,b)=>a+b,0);
+  CWS[3] += rem;
+
   const COL_HDRS = ['Invoice No.','Date','Cust Code','Customer Name',
-                    'Taxable (AED)','VAT 5% (AED)','Total (AED)','Location','Country'];
-  const ROW_H = 16, HEAD_H = 20;
+                    'Taxable (AED)','VAT 5% (AED)','Total (AED)','Loc','Ctry'];
+  const ROW_H  = 15;
+  const HEAD_H = 19;
   let y = MARGIN;
 
-  const fillRect = (rx, ry, rw, rh, color) => doc.rect(rx, ry, rw, rh).fill(color);
+  // ── core drawing helpers ──────────────────────────────────────────────────
 
-  const cellText = (text, cx, cy, cw, ch, { align='left', color='#000000', fontSize=7.5, bold=false, paddingH=4 } = {}) => {
-    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(fontSize).fillColor(color);
-    const tx = align === 'right'  ? cx + cw - paddingH :
-               align === 'center' ? cx + cw / 2 : cx + paddingH;
-    doc.text(String(text ?? ''), tx, cy + (ch - fontSize) / 2 + 1,
-      { width: cw - paddingH * 2, align, ellipsis: true, lineBreak: false });
+  /** Fill a rectangle with a solid colour */
+  const fillR = (x, ry, w, h, col) => doc.save().rect(x, ry, w, h).fill(col).restore();
+
+  /** Draw text clipped strictly inside [cx, cy, cw, ch].
+   *  align: 'left' | 'center' | 'right'
+   *  PDFKit's doc.text() is called with lineBreak:false so it never wraps.
+   *  We clip to the cell so overflow is invisible. */
+  const cell = (text, cx, cy, cw, ch,
+                { align='left', color='#111', fontSize=7, bold=false, padH=3 } = {}) => {
+    if (text === null || text === undefined || text === '') return;
+    const str = String(text);
+    doc.save();
+    // Clip strictly to this cell — nothing bleeds into adjacent columns
+    doc.rect(cx + 0.5, cy + 0.5, cw - 1, ch - 1).clip();
+    doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
+       .fontSize(fontSize)
+       .fillColor(color);
+    const vertY = cy + (ch - fontSize) / 2;
+    // Always anchor at cx+padH with full inner width; pass align to PDFKit.
+    // This is the ONLY correct way to right-align in PDFKit — never shift tx.
+    doc.text(str, cx + padH, vertY, {
+      lineBreak: false,
+      width: cw - padH * 2,
+      align,                   // 'left' | 'center' | 'right' — PDFKit handles it
+    });
+    doc.restore();
   };
 
+  /** Draw a full-width row of 9 cells */
+  const drawDataRow = (vals, ry, bg, opts) => {
+    let cx = MARGIN;
+    fillR(MARGIN, ry, CW, ROW_H, bg);
+    vals.forEach((v, i) => {
+      // light grid line
+      doc.save().rect(cx, ry, CWS[i], ROW_H).stroke('#D8DCE4').restore();
+      cell(v, cx, ry, CWS[i], ROW_H, opts[i]);
+      cx += CWS[i];
+    });
+  };
+
+  /** Column-header row (repeated on each page) */
   const drawColHeaders = () => {
     let cx = MARGIN;
-    fillRect(MARGIN, y, CONTENT_W, HEAD_H, LGOLD);
+    fillR(MARGIN, y, CW, HEAD_H, LGOLD);
     COL_HDRS.forEach((h, i) => {
-      doc.rect(cx, y, COL_W[i], HEAD_H).stroke(GOLD);
-      cellText(h, cx, y, COL_W[i], HEAD_H, { align:'center', color:NAVY, fontSize:7, bold:true });
-      cx += COL_W[i];
+      doc.save().rect(cx, y, CWS[i], HEAD_H).stroke(GOLD).restore();
+      cell(h, cx, y, CWS[i], HEAD_H, { align:'center', color:NAVY, fontSize:6.5, bold:true });
+      cx += CWS[i];
     });
     y += HEAD_H;
   };
 
   const checkPage = (needed = ROW_H) => {
-    if (y + needed > doc.page.height - MARGIN) { doc.addPage(); y = MARGIN; drawColHeaders(); }
+    if (y + needed > doc.page.height - MARGIN) {
+      doc.addPage();
+      y = MARGIN;
+      drawColHeaders();
+    }
   };
 
-  // Header
-  fillRect(MARGIN, y, CONTENT_W, 26, NAVY);
-  cellText('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CONTENT_W, 26,
-    { align:'center', color:GOLD, fontSize:13, bold:true }); y += 26;
-  fillRect(MARGIN, y, CONTENT_W, 16, NAVY);
-  cellText('SHARJAH, U.A.E.', MARGIN, y, CONTENT_W, 16,
-    { align:'center', color:GOLD, fontSize:9 }); y += 16;
-  fillRect(MARGIN, y, CONTENT_W, 16, STEEL);
-  cellText(`SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1}  to  ${dt2}  |  Location: ${sloc || 'ALL LOCATIONS'}  |  Printed: ${new Date().toLocaleDateString('en-AE')}`,
-    MARGIN, y, CONTENT_W, 16, { align:'center', color:LGOLD, fontSize:8 });
-  y += 16 + 6;
+  // ── page header ───────────────────────────────────────────────────────────
+  fillR(MARGIN, y, CW, 24, NAVY);
+  cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 24,
+    { align:'center', color:GOLD, fontSize:12, bold:true }); y += 24;
+
+  fillR(MARGIN, y, CW, 14, NAVY);
+  cell('SHARJAH, U.A.E.', MARGIN, y, CW, 14,
+    { align:'center', color:GOLD, fontSize:8.5 }); y += 14;
+
+  fillR(MARGIN, y, CW, 14, STEEL);
+  cell(`SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1} to ${dt2}  |  Location: ${sloc || 'ALL LOCATIONS'}  |  Printed: ${new Date().toLocaleDateString('en-AE')}`,
+    MARGIN, y, CW, 14, { align:'center', color:LGOLD, fontSize:7 }); y += 14 + 5;
+
   drawColHeaders();
 
+  // ── data ──────────────────────────────────────────────────────────────────
   for (const nation of report.nations) {
     checkPage(HEAD_H);
-    fillRect(MARGIN, y, CONTENT_W, HEAD_H, STEEL);
+    fillR(MARGIN, y, CW, HEAD_H, STEEL);
     const natLabel = nation.nat_ind === 'UAE' ? 'UNITED ARAB EMIRATES' : `EXPORT — ${nation.nat_ind}`;
-    cellText(`  ${natLabel}`, MARGIN, y, CONTENT_W, HEAD_H, { color:WHITE, fontSize:9, bold:true });
-    y += HEAD_H;
+    cell(`  ${natLabel}`, MARGIN, y, CW, HEAD_H,
+      { color: WHITE, fontSize: 9, bold: true }); y += HEAD_H;
 
     for (const st of nation.states) {
       checkPage(HEAD_H);
-      fillRect(MARGIN, y, CONTENT_W, HEAD_H - 2, STBG);
-      // ── state_name from sal_loc_mst shown in sub-header ──
-      const stateLabel = st.state_name !== st.state ? `${st.state_name}  (${st.state})` : st.state_name;
-      cellText(`    ${stateLabel}`, MARGIN, y, CONTENT_W, HEAD_H - 2,
-        { color:STEEL, fontSize:9, bold:true });
-      y += HEAD_H - 2;
+      fillR(MARGIN, y, CW, HEAD_H - 3, STBG);
+      const stLabel = st.state_name !== st.state
+        ? `${st.state_name}  (${st.state})` : st.state_name;
+      cell(`    ${stLabel}`, MARGIN, y, CW, HEAD_H - 3,
+        { color: STEEL, fontSize: 8, bold: true });
+      y += HEAD_H - 3;
 
+      // invoice rows
       st.rows.forEach((r, idx) => {
         checkPage(ROW_H);
         const bg = idx % 2 === 0 ? WHITE : ALT;
-        let cx = MARGIN;
-        const vals = [r.inv_no, r.inv_date, r.cust_code, r.cust_name,
-                      fmtNum(r.taxable), fmtNum(r.vat), fmtNum(r.total),
-                      (r.sloc||'').substring(0,8), r.nation_code];
-        const optsList = [
-          { align:'center', fontSize:7 }, { align:'center', fontSize:7 },
-          { align:'center', fontSize:7 }, { align:'left',   fontSize:7 },
-          { align:'right',  fontSize:7, color:STEEL },
-          { align:'right',  fontSize:7, color:'#A07830' },
-          { align:'right',  fontSize:7, color:STEEL, bold:true },
-          { align:'center', fontSize:7, color:GREY },
-          { align:'center', fontSize:7, color:GREY },
-        ];
-        vals.forEach((v, i) => {
-          fillRect(cx, y, COL_W[i], ROW_H, bg);
-          doc.rect(cx, y, COL_W[i], ROW_H).stroke('#D0D7E0');
-          if (v !== '') cellText(v, cx, y, COL_W[i], ROW_H, optsList[i]);
-          cx += COL_W[i];
-        });
+        drawDataRow(
+          [r.inv_no, r.inv_date, r.cust_code, r.cust_name,
+           fmtNum(r.taxable), fmtNum(r.vat), fmtNum(r.total),
+           r.sloc || '', r.nation_code],
+          y, bg,
+          [
+            { align:'center', color:'#1B3A5C', fontSize:7, bold:true },
+            { align:'center', color:'#374151', fontSize:7 },
+            { align:'center', color:'#374151', fontSize:7 },
+            { align:'left',   color:'#111',    fontSize:7 },
+            { align:'right',  color:STEEL,     fontSize:7 },
+            { align:'right',  color:'#9A6F00', fontSize:7 },
+            { align:'right',  color:STEEL,     fontSize:7, bold:true },
+            { align:'center', color:GREY,      fontSize:7 },
+            { align:'center', color:GREY,      fontSize:7 },
+          ]
+        );
         y += ROW_H;
       });
 
-      // State subtotal
+      // state subtotal
       checkPage(HEAD_H);
-      fillRect(MARGIN, y, CONTENT_W, HEAD_H - 2, LGOLD);
-      const SPAN_W = COL_W[0]+COL_W[1]+COL_W[2]+COL_W[3];
-      cellText(`Subtotal — ${st.state_name}  (${st.rows.length} invoices)`,
-        MARGIN, y, SPAN_W, HEAD_H - 2, { align:'right', color:NAVY, fontSize:8, bold:true });
-      let cx = MARGIN + SPAN_W;
-      [st.subtotal_taxable, st.subtotal_vat, st.subtotal_total].forEach((val, i) => {
-        cellText(fmtNum(val), cx, y, COL_W[4+i], HEAD_H-2, { align:'right', color:NAVY, fontSize:8, bold:true });
-        cx += COL_W[4+i];
+      const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
+      fillR(MARGIN, y, CW, HEAD_H - 3, LGOLD);
+      cell(`Subtotal — ${st.state_name}  (${st.rows.length} invoices)`,
+        MARGIN, y, SPAN, HEAD_H - 3, { align:'right', color:NAVY, fontSize:7.5, bold:true });
+      let cx = MARGIN + SPAN;
+      [st.subtotal_taxable, st.subtotal_vat, st.subtotal_total].forEach((v, i) => {
+        cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H-3,
+          { align:'right', color:NAVY, fontSize:7.5, bold:true, padH:2 });
+        cx += CWS[4+i];
       });
-      doc.moveTo(MARGIN, y+HEAD_H-2).lineTo(MARGIN+CONTENT_W, y+HEAD_H-2).stroke(GOLD);
-      y += HEAD_H - 2;
+      doc.save().moveTo(MARGIN, y+HEAD_H-3)
+         .lineTo(MARGIN+CW, y+HEAD_H-3).lineWidth(1).stroke(GOLD).restore();
+      y += HEAD_H - 3;
     }
 
-    // Nation total
+    // nation total
     checkPage(HEAD_H);
-    fillRect(MARGIN, y, CONTENT_W, HEAD_H, STEEL);
-    const SPAN_W = COL_W[0]+COL_W[1]+COL_W[2]+COL_W[3];
-    cellText(`  TOTAL — ${nation.nat_ind}`, MARGIN, y, SPAN_W, HEAD_H,
+    const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
+    fillR(MARGIN, y, CW, HEAD_H, STEEL);
+    cell(`  TOTAL — ${nation.nat_ind}`, MARGIN, y, SPAN, HEAD_H,
       { align:'right', color:WHITE, fontSize:9, bold:true });
-    let cx = MARGIN + SPAN_W;
-    [nation.nat_taxable, nation.nat_vat, nation.nat_total].forEach((val, i) => {
-      cellText(fmtNum(val), cx, y, COL_W[4+i], HEAD_H, { align:'right', color:GOLD, fontSize:9, bold:true });
-      cx += COL_W[4+i];
+    let cx = MARGIN + SPAN;
+    [nation.nat_taxable, nation.nat_vat, nation.nat_total].forEach((v, i) => {
+      cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H,
+        { align:'right', color:GOLD, fontSize:9, bold:true, padH:2 });
+      cx += CWS[4+i];
     });
-    y += HEAD_H + 6;
+    y += HEAD_H + 5;
   }
 
-  // Grand total
+  // grand total
   checkPage(HEAD_H + 8);
-  doc.moveTo(MARGIN, y).lineTo(MARGIN+CONTENT_W, y).lineWidth(2).stroke(GOLD); y += 2;
-  fillRect(MARGIN, y, CONTENT_W, HEAD_H+8, NAVY);
-  const SPAN_W = COL_W[0]+COL_W[1]+COL_W[2]+COL_W[3];
-  cellText(`  GRAND TOTAL  (${report.count} Invoices)`, MARGIN, y, SPAN_W, HEAD_H+8,
+  doc.save().moveTo(MARGIN, y).lineTo(MARGIN+CW, y).lineWidth(2).stroke(GOLD).restore(); y += 2;
+  const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
+  fillR(MARGIN, y, CW, HEAD_H+8, NAVY);
+  cell(`  GRAND TOTAL  (${report.count} Invoices)`, MARGIN, y, SPAN, HEAD_H+8,
     { align:'right', color:GOLD, fontSize:11, bold:true });
-  let cx = MARGIN + SPAN_W;
-  [report.grand_taxable, report.grand_vat, report.grand_total].forEach((val, i) => {
-    cellText(fmtNum(val), cx, y, COL_W[4+i], HEAD_H+8, { align:'right', color:'#E8C96D', fontSize:11, bold:true });
-    cx += COL_W[4+i];
+  let cx = MARGIN + SPAN;
+  [report.grand_taxable, report.grand_vat, report.grand_total].forEach((v, i) => {
+    cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H+8,
+      { align:'right', color:'#E8C96D', fontSize:11, bold:true, padH:2 });
+    cx += CWS[4+i];
   });
+
   doc.end();
   return doc;
 }
