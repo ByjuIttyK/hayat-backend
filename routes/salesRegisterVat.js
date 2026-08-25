@@ -22,12 +22,10 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 
 const VAT_RATE = 0.05;
-
 // ─── SQL ─────────────────────────────────────────────────────────────────────
 // sal_loc_mst joined via LEFT JOIN so rows without a matching sloc_code still
 // appear; sloc_name falls back to cn_code when no match.
 // All table names lowercase for VPS compatibility.
-
 const SQL = `
   SELECT
     a.inv_no,
