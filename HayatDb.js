@@ -722,8 +722,18 @@ app.post("/api/jobcard-save", async (req, res) => {
             );
           });
 
-
-
+          // job panel deletion
+          const jobPaneldel = ` DELETE FROM job_panels where job_no=?`;
+          await new Promise((resolve, reject) => {
+            conn.query(
+              jobPaneldel,
+              [jobCard.jobNo], (err, result) => {
+                if (err) return reject(err);
+                console.log("JOB_CARD Insert/Update:", result);
+                resolve(result);
+              }
+            );
+          });
           // ✅ Step 2: Insert/Update NGP_ITEMS table
           const itemsQuery = `
               INSERT INTO job_panels (JOB_NO, SR_NO, PANEL_REF, QTY,DRAW_NO,DELIVERY_REQ,REMARKS)
@@ -1907,6 +1917,31 @@ app.post("/api/save-fabinv", async (req, res) => {
               resolve(result);
             });
           });
+
+
+
+          //Tran_Acc posting to Ledger - Sales Invoice
+          //        ✅ Step 4: Post GL Entries to tran_acc
+          // Map netData fields to match acc_posting_setup field names
+          const glPayload = {
+            ModuleName: "FABINV",
+            InvNo: fabInvNet.InvNo,
+            Date: fabInvNet.InvDate,
+            Narr1: fabInvNet.PaymentTerms || "",
+            Narr2: fabInvNet.LpoNo || "",
+            CustCd: fabInvNet.CustCode,
+            GrossAmt: fabInvNet.GrossAmt,        // Matches FIELD_NAME for FABINV rule
+            VatAmt: fabInvNet.VatAmt,          // Matches FIELD_NAME for VAT rule
+            DiscAmt: fabInvNet.Discount,        // Matches FIELD_NAME for DISCOUNT rule
+            NetAmt: fabInvNet.NetAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
+            JobNo: fabInvNet.JobNo || null,
+            PanelNo: null,
+            PartyName: fabInvNet.CustName || null
+          };
+          await postToTranAcc(glPayload, conn);
+          console.log('Sales Inv- glPayLoad=', glPayload);
+
+          //G/L Ledger postin ends
 
           conn.commit((err) => {
             if (err) {
@@ -4107,8 +4142,38 @@ app.delete("/api/supDelete/:id", function (req, res, next) {
     conn.close();
   });
 });
+
+//main menu
+// GET /api/menu
+app.get("/api/menu", (req, res) => {
+  console.log("Fetching menu items...");
+
+  const menuQuery = `
+    SELECT id, menu_group, parent_id, level, sort_order, item_key, label, 
+           icon, href, reg_type, is_divider, divider_label, is_active, module_code
+    FROM menu_items
+    WHERE is_active = 1
+    ORDER BY menu_group ASC, sort_order ASC
+  `;
+
+  connection.query(menuQuery, (err, result) => {
+    if (err) {
+      console.error("Database query error (menu):", err);
+      return res.status(500).json({ error: "Failed to fetch menu items" });
+    }
+
+    if (result && result.length > 0) {
+      res.json(result);
+    } else {
+      res.status(404).json({ message: "No active menu items found" });
+    }
+  });
+});
+
 //rest api for CUSTOMERS
 // Fetch a customer by ID
+
+
 app.get("/api/customers/:id", (req, res) => {
   const { id } = req.params;
   console.log('/api/customers/' + id);
@@ -6717,7 +6782,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
     "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
     " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE, " +
-    " a.DO_DATE " +
+    " a.DO_DATE ,a.PAYMENT_TERMS" +
     " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
     [req.params.inv],
 
@@ -6733,13 +6798,12 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
     });
 }
 );
-
+//  " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , " +
 app.get("/api/fabinvitems/:vchr", function (req, res) {
   console.log('Fab_INv_dtl.', req.params.vchr);
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE," +
-    " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, a.DIS_COUNT AS DISC_PERC,  " +
-    " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , " +
+    " a.PANEL_NO,a.INV_ITEM_DESC , a.VAT_PERC, a.DIS_COUNT AS DISC_AMT,  " +
     " a.INV_QTY, a.INV_RATE ,a.INV_UNIT,a.SR_NO, (a.INV_QTY *a.INV_RATE) AMOUNT" +
     " from fab_inv_dtl a where a.Inv_no = ?" +
     "  ORDER BY a.SR_NO",
@@ -10708,8 +10772,8 @@ app.use("/api", accMstRoutes);
 const salesRegisterVat = require('./routes/SalesRegisterVat')(connection);
 app.use('/api', salesRegisterVat);
 //
- const despatchNote = require('./routes/despatchNoteRoutes');
-   app.use('/api', despatchNote(connection));
+const despatchNote = require('./routes/despatchNoteRoutes');
+app.use('/api', despatchNote(connection));
 //
 const quotRevision = require('./routes/quotRevisionRoutes');
 app.use('/api', quotRevision(connection));

@@ -2,13 +2,15 @@
 
 async function postToTranAcc(payload, conn) {
   console.log('postToTranAcc payload:', JSON.stringify(payload, null, 2));
-  const { 
-    ModuleName, 
-    InvNo, 
-    Narration, 
+  const {
+    ModuleName,
+    InvNo,
+    Narr1 = null,
+    Narr2 = null,
     Date: invDate,
     JobNo = null,
-    PanelNo = null
+    PanelNo = null,
+    PartyName = null
   } = payload;
 
   if (!ModuleName) {
@@ -27,7 +29,7 @@ async function postToTranAcc(payload, conn) {
 
   // 1. Fetch posting rules for the active module
   const rules = await queryAsync(
-    `SELECT * FROM acc_posting_setup WHERE MODULE_NAME = ?`, 
+    `SELECT * FROM acc_posting_setup WHERE MODULE_NAME = ?`,
     [ModuleName]
   );
 
@@ -49,9 +51,9 @@ async function postToTranAcc(payload, conn) {
 
   // 3. Process rules and insert ledger entries
   for (const rule of rules) {
-    console.log("Field name=>",rule.FIELD_NAME)
+    console.log("Field name=>", rule.FIELD_NAME)
     const amount = Number(payload[rule.FIELD_NAME]) || 0;
-     console.log("Field value",Number(payload[rule.FIELD_NAME]));
+    console.log("Field value", Number(payload[rule.FIELD_NAME]));
     if (amount === 0) continue; // Skip zero-amount lines
 
     // Resolve dynamic vs static GL account code
@@ -60,6 +62,7 @@ async function postToTranAcc(payload, conn) {
     if (!accCode) {
       throw new Error(`Missing Account Code for Entry Type: ${rule.ENTRY_TYPE}`);
     }
+    const nar1 = rule.ACC_CODE_FIELD ? Narr1 : PartyName;
 
     if (rule.DB_CR === 'D') totalDebit += amount;
     if (rule.DB_CR === 'C') totalCredit += amount;
@@ -74,8 +77,8 @@ async function postToTranAcc(payload, conn) {
         invDate,
         srNo++,
         accCode,
-        InvNo,
-        Narration,
+        nar1,
+        Narr2,
         amount,
         rule.DB_CR,
         JobNo,
@@ -86,7 +89,7 @@ async function postToTranAcc(payload, conn) {
 
   // 4. Double-Entry Balance Check
   if (Math.abs(totalDebit - totalCredit) > 0.001) {
-    console.log ('not tally');
+    console.log('not tally');
     throw new Error(`Accounting Imbalance Error: Total Debits (${totalDebit.toFixed(2)}) != Total Credits (${totalCredit.toFixed(2)})`);
   }
 }

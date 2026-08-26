@@ -42,7 +42,7 @@ module.exports = function (connection) {
       const rows = await q(
         `SELECT id, username, user_abbr, role, is_active,
                 DATE_FORMAT(created_at,'%d/%m/%Y %H:%i') AS created_at
-         FROM users ORDER BY id`
+         FROM users ORDER BY username`
       );
       res.json(rows);
     } catch (err) {
@@ -87,6 +87,22 @@ module.exports = function (connection) {
       res.json({ message: row.is_active ? 'User activated.' : 'User deactivated.', is_active: row.is_active });
     } catch (err) {
       console.error('[users toggle]', err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── PUT /api/users/:id/role — update role ────────────────────────────────────
+  router.put('/users/:id/role', adminOnly, async (req, res) => {
+    const { id } = req.params;
+    const { role } = req.body;
+    if (!role || !['admin','user','viewer'].includes(role)) {
+      return res.status(400).json({ message: 'Invalid role. Must be admin, user or viewer.' });
+    }
+    try {
+      await q('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+      res.json({ message: `Role updated to "${role}".` });
+    } catch (err) {
+      console.error('[users role]', err.message);
       res.status(500).json({ message: err.message });
     }
   });
