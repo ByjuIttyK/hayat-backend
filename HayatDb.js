@@ -5364,6 +5364,28 @@ app.get("/api/acclist", function (req, res) {
     }
   )
 });
+app.get("/api/purNsDrCode/:id", (req, res) => {
+  const jobNo = req.params.id;
+  
+  // Example SQL Query execution:
+  connection.query(
+    "SELECT ACC_CODE AS DR_CODE FROM job_expenses_link WHERE JOB_NO = ? LIMIT 1",
+    [jobNo],
+    
+
+    function (error, result) {
+      if (error) {
+        throw error;
+      } else {
+        console.log(" job_expense_link", result);
+        res.json(result);
+
+      }
+    }
+    
+    );
+});
+
 
 
 app.get("/api/accmst/:id", function (req, res) {
@@ -7199,6 +7221,30 @@ app.get("/api/purchaseHdr/:vch", function (req, res) {
     }
   );
 });
+
+//Non-Stock
+app.get("/api/purchnsHdr/:vch", function (req, res) {
+  connection.query(
+    "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE,a.DR_CODE, " +
+    " b.SUP_NAME, COALESCE(a.INV_NET_AMT, 0) AS INV_AMOUNT , COALESCE(a.DISCOUNT,0) AS DISCOUNT ,a.LPO_NO,a.INV_NO, " +
+    " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,COALESCE(a.VAT_AMOUNT,0) AS VAT_AMOUNT " +
+    " from purchase_hdr_ns a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
+
+    [req.params.vch],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        //   console.log("Oracle Purchase LC LST", result.rows);
+        res.json(result);
+        console.log("PURCHASE_HDR", result)
+      }
+    }
+  );
+});
+
+//
 app.get("/api/itemArticleNo/:itemCode", function (req, res) {
   console.log("ITEM ARTICLE_NO == param ", req.params.itemCode);
   connection.query(
@@ -7302,6 +7348,35 @@ app.get("/api/purchaseitems/:vch", function (req, res) {
     "  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME ,' ' AS JOB_NO, " +
     " a.QTY, a.COST , ROUND( COALESCE(a.QTY,0) * COALESCE(a.COST,0) ,2) AS AMOUNT " +
     " from purchase_items a  " +
+    " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
+    " WHERE  a.PJV_NO =?  " +
+    " ORDER BY a.SR_NO",
+    [req.params.vch],
+
+    function (err, result) {
+      if (err) {
+        throw err;
+      } else {
+        //   console.log("Oracle Purchase LC LST", result.rows);
+        result = result.map((row) => ({
+          ...row,
+          //     QTY: row.QTY ? parseFloat(row.QTY) : 0, // Ensure it's a number
+          //    COST: row.COST ? parseFloat(row.COST) : 0, // Ensure it's a number
+          AMOUNT: row.AMOUNT ? parseFloat(row.AMOUNT) : 0,
+        }));
+        res.json(result);
+        console.log("PURCHASE_ITEMS", result, req.params.vch)
+      }
+    }
+  );
+});
+
+app.get("/api/purchaseitemsns/:vch", function (req, res) {
+  connection.query(
+    "select a.PJV_NO,a.SR_NO, a.PANEL_NO,a.ITEM_UNIT, " +
+    "  a.ITEM_CODE,a.SUP_ITEM_DESC,a.PART_NO, c.ITEM_NAME1 as ITEM_NAME , a.JOB_NO, " +
+    " a.QTY, a.UNIT_COST , a.VAT_PERC, a.DISCOUNT ,a.DR_CODE  " +
+    " from purchase_items_ns a  " +
     " LEFT OUTER JOIN item_mst c ON c.ITEM_CODE = a.ITEM_CODE" +
     " WHERE  a.PJV_NO =?  " +
     " ORDER BY a.SR_NO",
