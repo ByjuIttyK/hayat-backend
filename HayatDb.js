@@ -10855,3 +10855,9 @@ app.use('/api', quotRevision(connection));
 //
 const userMgmt = require('./routes/userMgmtRoutes');
 app.use('/api', authMiddleware, userMgmt(connection));
+//
+const purchNsJvRoutes = require("./routes/purchNsJvRoutes")(connection);
+app.use("/api", purchNsJvRoutes);
+//
+const jobPanelLovRoutes = require("./routes/jobPanelLovRoutes")(connection);
+ app.use("/api", jobPanelLovRoutes);
