@@ -3097,7 +3097,7 @@ app.post("/api/save-payment", async (req, res) => {
                     chq.ChqNo,
                     chq.ChqDt,
                     chq.PdcCode,
-                    chq.CustCd,
+                    chq.SupCode,
                     chq.ChqBank,
                     chq.Amount,
                     chq.Narration
