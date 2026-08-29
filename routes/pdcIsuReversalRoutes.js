@@ -2,18 +2,16 @@
 // pdcIsuReversalRoutes.js
 //
 // Backend for PdcIssueReversal.tsx — reversal of un-realised PDC issued
-// (payable) cheques. Mirrors whatever pdc-rcd-reversal route already backs
-// PdcRcdReversal.tsx, but sourced from pdc_isu and posting TRAN_TYPE = '25'.
+// (payable) cheques. Sourced from pdc_isu, posting TRAN_TYPE = '25'.
 //
-// *** VERIFY BEFORE USE ***
-// I don't have visibility into your actual `vouchers` / `tran_acc` /
-// `acc_mst` / `sup_mst` / `bank_mst` schemas beyond what's been confirmed
-// in prior sessions (DATTE date field, single AMOUNT + DB_CR pattern on
-// tran_acc). The column/table names below are my best inference from your
-// existing conventions (ACC_MST/SUP_MST joins used in gl_suggest_api.js,
-// bank_mst joined for BANK_NAME on the received-PDC screen). Everything
-// assumption-dependent is centralised in the CONFIG block so you can
-// correct it in one place if a name doesn't match.
+// Accounting direction: the original PDC issue was Dr Supplier / Cr PDC
+// Payable suspense. Reversing an un-realised issued cheque therefore
+// debits the PDC suspense head (pdcCode) and credits the cheque bank
+// (chqBank) — clearing the suspense and restoring the bank balance.
+//
+// Batch handling: one BatchNo per save run, written to REF_NO on both the
+// voucher header and every tran_acc leg, so a whole reversal run can be
+// pulled back or reported on as a unit.
 // ---------------------------------------------------------------------------
 
 const CONFIG = {
@@ -22,6 +20,7 @@ const CONFIG = {
     tranType: "TRAN_TYPE",
     vchrNo: "VCHR_NO",
     date: "DATTE",
+    refNo: "REF_NO",
     narration: "NARRATION1",
   },
   tranAcc: {
@@ -29,10 +28,13 @@ const CONFIG = {
     tranType: "TRAN_TYPE",
     vchrNo: "VCHR_NO",
     date: "DATTE",
+    srNo: "SR_NO",
+    refNo: "REF_NO",
     accCode: "ACC_CODE",
     amount: "AMOUNT",
     dbCr: "DB_CR", // 'D' / 'C'
     narration: "NARRATION1",
+    narration2: "NARRATION2",
   },
   accMst: { table: "acc_mst", code: "ACC_CODE", desc: "ACC_HEAD" },
   supMst: { table: "sup_mst", code: "SUP_CODE", name: "SUP_NAME" },
@@ -40,6 +42,26 @@ const CONFIG = {
 };
 
 const TRAN_TYPE_REVERSAL = "25";
+const BATCH_PREFIX = "PIR"; // PDC Issue Reversal
+const VCHR_NO_WIDTH = 10; // zero-padded: 0000000001
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// MySQL/ISO datetime -> DD/MM/YY, for narration text. NARRATION1 is
+// varchar(60), so the short form matters here.
+const toDdMmYy = (d) => {
+  if (!d) return "";
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return String(d);
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const yy = String(dt.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+};
+
+const padVchr = (n) => String(n).padStart(VCHR_NO_WIDTH, "0");
 
 module.exports = function (connection) {
   const express = require("express");
@@ -57,26 +79,29 @@ module.exports = function (connection) {
       return res.status(400).json({ message: "asOnDate is required" });
     }
     try {
-      const { accMst, supMst, bankMst } = CONFIG;
+      const { accMst, supMst } = CONFIG;
+      // CHQ_BANK holds an acc_mst code (e.g. 111-011-0-001), so the bank
+      // description comes from acc_mst — not bank_mst.
       const sql = `
         SELECT
           p.TRAN_TYPE,
           p.VCHR_NO,
           p.CHQ_NO,
           p.CHQ_DATE,
+          DATE_FORMAT(p.CHQ_DATE, '%d/%m/%y') AS CHQ_DATE_FMT,
           p.PDC_CODE,
           COALESCE(a.${accMst.desc}, '') AS PDC_HEAD,
           p.CHQ_BANK,
-          COALESCE(b.${bankMst.name}, '') AS BANK_NAME,
+          COALESCE(bk.${accMst.desc}, '') AS BANK_NAME,
           p.AMOUNT,
           p.SUP_CODE,
           COALESCE(s.${supMst.name}, '') AS PARTY,
           p.JV_NO_RLZ,
           p.JV_DATE_RLZ
         FROM pdc_isu p
-        LEFT JOIN ${accMst.table} a ON a.${accMst.code} = p.PDC_CODE
-        LEFT JOIN ${bankMst.table} b ON b.${bankMst.code} = p.CHQ_BANK
-        LEFT JOIN ${supMst.table} s ON s.${supMst.code} = p.SUP_CODE
+        LEFT JOIN ${accMst.table} a  ON a.${accMst.code}  = p.PDC_CODE
+        LEFT JOIN ${accMst.table} bk ON bk.${accMst.code} = p.CHQ_BANK
+        LEFT JOIN ${supMst.table} s  ON s.${supMst.code}  = p.SUP_CODE
         WHERE (p.REALISED IS NULL OR p.REALISED = 'N')
           AND p.CHQ_DATE <= ?
         ORDER BY p.CHQ_DATE, p.CHQ_NO
@@ -103,7 +128,7 @@ module.exports = function (connection) {
          WHERE ${vouchers.tranType} = ?`,
         [TRAN_TYPE_REVERSAL]
       );
-      const nextVchrNo = (rows[0]?.maxVchr || 0) + 1;
+      const nextVchrNo = padVchr((rows[0]?.maxVchr || 0) + 1);
       res.json({ nextVchrNo });
     } catch (err) {
       console.error("[pdc-isu-reversal/next-jv]", err);
@@ -112,22 +137,48 @@ module.exports = function (connection) {
   });
 
   // -------------------------------------------------------------------------
+  // GET /api/pdc-isu-reversal/batch/:batchNo
+  // Everything posted under one batch — for review or a reprint.
+  // -------------------------------------------------------------------------
+  router.get("/batch/:batchNo", async (req, res) => {
+    try {
+      const { tranAcc, accMst } = CONFIG;
+      const [rows] = await db.query(
+        `SELECT t.${tranAcc.vchrNo}   AS VCHR_NO,
+                t.${tranAcc.srNo}     AS SR_NO,
+                t.${tranAcc.accCode}  AS ACC_CODE,
+                COALESCE(a.${accMst.desc}, '') AS ACC_HEAD,
+                t.${tranAcc.amount}   AS AMOUNT,
+                t.${tranAcc.dbCr}     AS DB_CR,
+                t.${tranAcc.narration}  AS NARRATION1,
+                t.${tranAcc.narration2} AS NARRATION2,
+                t.${tranAcc.date}     AS DATTE
+         FROM ${tranAcc.table} t
+         LEFT JOIN ${accMst.table} a ON a.${accMst.code} = t.${tranAcc.accCode}
+         WHERE t.${tranAcc.tranType} = ? AND t.${tranAcc.refNo} = ?
+         ORDER BY CAST(t.${tranAcc.vchrNo} AS UNSIGNED), t.${tranAcc.srNo}`,
+        [TRAN_TYPE_REVERSAL, req.params.batchNo]
+      );
+      res.json(rows);
+    } catch (err) {
+      console.error("[pdc-isu-reversal/batch]", err);
+      res.status(500).json({ message: "Failed to fetch batch" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // POST /api/pdc-isu-reversal/save
-  // Body: { asOnDate, username, rows: [{ tranType, vchrNo, chqNo, pdcCode,
-  //         pdcHead, supCode, amount }, ...] }
+  // Body: { asOnDate, username, rows: [{ tranType, vchrNo, chqNo, chqDt,
+  //         pdcCode, pdcHead, chqBank, supCode, amount }, ...] }
   //
-  // For each selected row:
-  //   1. Get next JV number (TRAN_TYPE = '25') inside the transaction, so
-  //      concurrent saves can't collide.
-  //   2. Insert voucher header.
-  //   3. Insert two tran_acc legs — Dr PDC_CODE (suspense), Cr SUP_CODE
-  //      (supplier) — the mirror of the received-PDC reversal's legs.
-  //   4. Update the pdc_isu row: JV_NO_RLZ / JV_DATE_RLZ / REALISED = 'Y'
-  //      (REALISED is reused here to mean "closed", same as the received
-  //      side — verify this matches your intended semantics for a reversal
-  //      vs. an actual realisation).
+  // Per selected row:
+  //   1. Lock and derive the next JV number (TRAN_TYPE = '25').
+  //   2. Insert the voucher header, carrying the batch no in REF_NO.
+  //   3. Insert two tran_acc legs — Dr pdcCode (SR_NO 1) / Cr chqBank
+  //      (SR_NO 2). Supplier name goes in NARRATION2 on both legs.
+  //   4. Close the pdc_isu row (JV_NO_RLZ / JV_DATE_RLZ / REALISED).
   //
-  // Returns { vouchers: JvPrintRow[] } for the frontend's print hook.
+  // Returns { batchNo, vouchers: JvPrintRow[] } for the print hook.
   // -------------------------------------------------------------------------
   router.post("/save", async (req, res) => {
     const { asOnDate, username, rows } = req.body || {};
@@ -135,11 +186,25 @@ module.exports = function (connection) {
       return res.status(400).json({ message: "asOnDate and rows[] are required" });
     }
 
-    const { vouchers, tranAcc } = CONFIG;
+    const { vouchers, tranAcc, supMst, accMst } = CONFIG;
     const conn = await connection.promise().getConnection();
 
     try {
       await conn.beginTransaction();
+
+      // ── One BatchNo for this entire reversal run ────────────────────────
+      // Derived from the max existing batch on the voucher header (one row
+      // per voucher, so a smaller scan than tran_acc). FOR UPDATE keeps
+      // concurrent saves from landing on the same number.
+      const [batchRows] = await conn.query(
+        `SELECT MAX(CAST(SUBSTRING(${vouchers.refNo}, ${BATCH_PREFIX.length + 1}) AS UNSIGNED)) AS maxBatch
+         FROM ${vouchers.table}
+         WHERE ${vouchers.tranType} = ? AND ${vouchers.refNo} LIKE '${BATCH_PREFIX}%'
+         FOR UPDATE`,
+        [TRAN_TYPE_REVERSAL]
+      );
+      const nextBatchSeq = (batchRows[0]?.maxBatch || 0) + 1;
+      const batchNo = `${BATCH_PREFIX}${String(nextBatchSeq).padStart(6, "0")}`;
 
       const savedVouchers = [];
 
@@ -147,36 +212,59 @@ module.exports = function (connection) {
         const amount = Number(row.amount) || 0;
         if (amount <= 0) continue;
 
-        // 1. Provisional -> locked JV number for this row, inside the txn.
+        // 1. Locked JV number for this row, inside the txn.
         const [maxRows] = await conn.query(
           `SELECT MAX(CAST(${vouchers.vchrNo} AS UNSIGNED)) AS maxVchr
            FROM ${vouchers.table} WHERE ${vouchers.tranType} = ? FOR UPDATE`,
           [TRAN_TYPE_REVERSAL]
         );
-        const vchrNo = String((maxRows[0]?.maxVchr || 0) + 1);
-        const narration = `Reversal of PDC issued - Chq No ${row.chqNo}`;
+        const vchrNo = padVchr((maxRows[0]?.maxVchr || 0) + 1);
+        const narration =
+          `Reversal of PDC issued - Chq No ${row.chqNo} Dt ${toDdMmYy(row.chqDt)}`;
 
-        // 2. Voucher header.
+        // Descriptions for NARRATION2 and the print payload. Looked up here
+        // rather than trusted from the client, so the posted voucher and the
+        // printout can't disagree with the masters.
+        const [supRows] = await conn.query(
+          `SELECT ${supMst.name} AS partyName FROM ${supMst.table} WHERE ${supMst.code} = ?`,
+          [row.supCode]
+        );
+        const partyName = supRows[0]?.partyName || row.supCode;
+
+        const [bankRows] = await conn.query(
+          `SELECT ${accMst.desc} AS bankName FROM ${accMst.table} WHERE ${accMst.code} = ?`,
+          [row.chqBank]
+        );
+        const bankName = bankRows[0]?.bankName || row.chqBank;
+
+        const [pdcRows] = await conn.query(
+          `SELECT ${accMst.desc} AS pdcHead FROM ${accMst.table} WHERE ${accMst.code} = ?`,
+          [row.pdcCode]
+        );
+        const pdcHead = pdcRows[0]?.pdcHead || row.pdcHead || row.pdcCode;
+
+        // 2. Voucher header — carries the batch no.
         await conn.query(
           `INSERT INTO ${vouchers.table}
-             (${vouchers.tranType}, ${vouchers.vchrNo}, ${vouchers.date}, ${vouchers.narration})
-           VALUES (?, ?, ?, ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, narration]
+             (${vouchers.tranType}, ${vouchers.vchrNo}, ${vouchers.date}, ${vouchers.refNo}, ${vouchers.narration})
+           VALUES (?, ?, ?, ?, ?)`,
+          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, batchNo, narration]
         );
 
-        // 3. Dr PDC Head (suspense) / Cr Supplier — mirror of the
-        //    received-side reversal's Dr Party / Cr PDC Head.
+        // 3a. Dr — PDC Payable suspense (clears the accrual).
         await conn.query(
           `INSERT INTO ${tranAcc.table}
-             (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration})
-           VALUES (?, ?, ?, ?, ?, 'D', ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, row.pdcCode, amount, narration]
+             (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.srNo}, ${tranAcc.refNo}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration}, ${tranAcc.narration2})
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'D', ?, ?)`,
+          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, 1, batchNo, row.pdcCode, amount, narration, partyName]
         );
+
+        // 3b. Cr — Cheque bank (restores the balance the issue had reduced).
         await conn.query(
           `INSERT INTO ${tranAcc.table}
-             (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration})
-           VALUES (?, ?, ?, ?, ?, 'C', ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, row.supCode, amount, narration]
+             (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.srNo}, ${tranAcc.refNo}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration}, ${tranAcc.narration2})
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'C', ?, ?)`,
+          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, 2, batchNo, row.chqBank, amount, narration, partyName]
         );
 
         // 4. Close out the original pdc_isu row.
@@ -187,28 +275,32 @@ module.exports = function (connection) {
           [vchrNo, asOnDate, row.tranType, row.vchrNo, row.chqNo]
         );
 
-        // Supplier name isn't posted from the frontend — look it up here
-        // for the print payload (JvPrintRow.partyName).
-        const { supMst } = CONFIG;
-        const [supRows] = await conn.query(
-          `SELECT ${supMst.name} AS partyName FROM ${supMst.table} WHERE ${supMst.code} = ?`,
-          [row.supCode]
-        );
-        const partyName = supRows[0]?.partyName || row.supCode;
-
         savedVouchers.push({
+          batchNo,
           vchrNo,
           jvDate: asOnDate,
           chqNo: row.chqNo,
+          chqDt: row.chqDt,
           partyCode: row.supCode,
           partyName,
-          pdcHead: row.pdcHead,
+          pdcCode: row.pdcCode,
+          pdcHead,
+          chqBank: row.chqBank,
+          bankName,
           amount,
         });
       }
 
+      if (savedVouchers.length === 0) {
+        await conn.rollback();
+        return res.status(400).json({ message: "No rows with a positive amount" });
+      }
+
       await conn.commit();
-      res.json({ vouchers: savedVouchers });
+      console.log(
+        `[pdc-isu-reversal] ${batchNo}: ${savedVouchers.length} voucher(s) by ${username || "unknown"}`
+      );
+      res.json({ batchNo, vouchers: savedVouchers });
     } catch (err) {
       await conn.rollback();
       console.error("[pdc-isu-reversal/save]", err);
