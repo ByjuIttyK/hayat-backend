@@ -7523,8 +7523,8 @@ app.get("/api/lastdo-all", function (req, res) {
 app.get("/api/jobRcp-all", function (req, res) {
   connection.query(
     `SELECT f.JOB_NO,SUM(a.STLD_AMT) AS RCP_AMT
-FROM ADJ_DTL a
-INNER JOIN FAB_INV_HDR f ON a.STLD_DOC = f.INV_NO
+FROM adj_dtl a
+INNER JOIN fab_inv_hdr f ON a.STLD_DOC = f.INV_NO
 WHERE  a.STLD_TYPE = '06' GROUP BY f.JOB_NO`,
     function (err, result) {
       if (err) throw err;
