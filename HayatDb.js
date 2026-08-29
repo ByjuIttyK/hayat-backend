@@ -598,7 +598,7 @@ LEFT JOIN (
   FROM fab_inv_hdr
   GROUP BY job_no
 ) f ON f.job_no = a.JOB_NO
-ORDER BY a.START_DATE DESC;
+ORDER BY a.JOB_NO DESC;
   `;
 
   connection.query(sql, (err, rows) => {
@@ -2985,10 +2985,10 @@ app.post("/api/save-payment", async (req, res) => {
     const { vchrData, chqData, tranaccData, InvStlData } = req.body; // Extract form data & grid rows from payload
     //, StlData
     console.log("SAVE PV 2", req.body);
-    console.log("R.V vchrData=>**", vchrData);
-    console.log("R.V ChqData=>**", chqData);
-    console.log("R.V tranAccData=>**", tranaccData);
-    console.log("R.V InvStlData=>**", InvStlData);
+    console.log("P.V vchrData=>**", vchrData);
+    console.log("P.V ChqData=>**", chqData);
+    console.log("P.V tranAccData=>**", tranaccData);
+    console.log("P.V InvStlData=>**", InvStlData);
     //,StlData
     // Start transaction
     //delete old record
@@ -3035,8 +3035,8 @@ app.post("/api/save-payment", async (req, res) => {
           const vchrQuery = `
                INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
                                      CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
-                                      AMOUNT) 
-               VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?) 
+                                      AMOUNT,VCHR_TYPE) 
+               VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?,?) 
                ON DUPLICATE KEY UPDATE 
                DATTE= VALUES(DATTE),
                CUST_CODE = VALUES(CUST_CODE),
@@ -3046,7 +3046,8 @@ app.post("/api/save-payment", async (req, res) => {
                NARRATION1 = VALUES(NARRATION1),
                PAID_TO = VALUES(PAID_TO),
                AMOUNT_FRGN = VALUES(AMOUNT_FRGN),
-               AMOUNT = VALUES(AMOUNT);
+               AMOUNT = VALUES(AMOUNT),
+               VCHR_TYPE = VALUES(VCHR_TYPE);
               `;
 
           await new Promise((resolve, reject) => {
@@ -3055,7 +3056,7 @@ app.post("/api/save-payment", async (req, res) => {
               [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
               vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
               vchrData.Particulars, vchrData.PaidTo,
-              vchrData.FrgnAmt, vchrData.Amount],
+              vchrData.FrgnAmt, vchrData.Amount, vchrData.VchrType],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -4531,7 +4532,8 @@ app.get("/api/payvouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
-    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
+    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD ,"+
+    " a.AMOUNT, a.AMOUNT_FRGN,a.VCHR_TYPE" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
@@ -5366,12 +5368,12 @@ app.get("/api/acclist", function (req, res) {
 });
 app.get("/api/purNsDrCode/:id", (req, res) => {
   const jobNo = req.params.id;
-  
+
   // Example SQL Query execution:
   connection.query(
     "SELECT ACC_CODE AS DR_CODE FROM job_expenses_link WHERE JOB_NO = ? LIMIT 1",
     [jobNo],
-    
+
 
     function (error, result) {
       if (error) {
@@ -5382,8 +5384,8 @@ app.get("/api/purNsDrCode/:id", (req, res) => {
 
       }
     }
-    
-    );
+
+  );
 });
 
 
@@ -7480,8 +7482,56 @@ app.get("/api/variationsjob/:Job", function (req, res) {
     }
   );
 });
-
-
+//for Job List
+app.get("/api/variations-totals", function (req, res) {
+  connection.query(
+    "SELECT JOB_NO, SUM(AMOUNT) AS VARIATION_AMT " +
+    "FROM job_variations " +
+    "GROUP BY JOB_NO",
+    function (err, result) {
+      if (err) throw err;
+      res.json(result);
+      console.log("VARIATION TOTALS", result);
+    }
+  );
+});
+// last Inv list -jobs
+app.get("/api/lastinv-all", function (req, res) {
+  connection.query(
+    "SELECT JOB_NO, MAX(INV_NO) AS INV_NO " +
+    "FROM fab_inv_hdr " +
+    "GROUP BY JOB_NO",
+    function (err, result) {
+      if (err) throw err;
+      res.json(result);
+    }
+  );
+});
+// last Inv list -jobs
+app.get("/api/lastdo-all", function (req, res) {
+  connection.query(
+    "SELECT JOB_NO, MAX(INV_NO) AS DO_NO " +
+    "FROM fab_do_hdr " +
+    "GROUP BY JOB_NO",
+    function (err, result) {
+      if (err) throw err;
+      res.json(result);
+    }
+  );
+});
+// lat Inv list -jobs
+app.get("/api/jobRcp-all", function (req, res) {
+  connection.query(
+    `SELECT f.JOB_NO,SUM(a.STLD_AMT) AS RCP_AMT
+FROM ADJ_DTL a
+INNER JOIN FAB_INV_HDR f ON a.STLD_DOC = f.INV_NO
+WHERE  a.STLD_TYPE = '06' GROUP BY f.JOB_NO`,
+    function (err, result) {
+      if (err) throw err;
+      res.json(result);
+    }
+  );
+})
 
 app.get("/api/expaccjob/:Job", function (req, res) {
   connection.query(
@@ -10860,4 +10910,4 @@ const purchNsJvRoutes = require("./routes/purchNsJvRoutes")(connection);
 app.use("/api", purchNsJvRoutes);
 //
 const jobPanelLovRoutes = require("./routes/jobPanelLovRoutes")(connection);
- app.use("/api", jobPanelLovRoutes);
+app.use("/api", jobPanelLovRoutes);

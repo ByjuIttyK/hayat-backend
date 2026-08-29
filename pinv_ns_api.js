@@ -75,19 +75,21 @@ module.exports = function (connection) {
         //tran_acc Debit Entry
         // Debit line — Taxable Amt
         await conn.query(
-          `INSERT INTO tran_acc (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR, NARRATION1, NARRATION2, SR_NO, TRANS_DATE, TRANS_TIME)
-     VALUES ('07', ?, ?, ?, ?, 'D', ?, ?, ?, CURDATE(), ?)`,
+          `INSERT INTO tran_acc (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR, 
+           NARRATION1, NARRATION2, SR_NO, TRANS_DATE, TRANS_TIME,JOB_NO,PANEL_NO)
+     VALUES ('07', ?, ?, ?, ?, 'D', ?, ?, ?, CURDATE(), ?,?,?)`,
           [netData.PJV_NO, netData.PJV_DATE, it.DR_CODE, it.taxableAmt,
-          netData.supName, `Inv:${netData.INV_NO}:${netData.INV_DATE}`, i, currentTime]
+          netData.supName, `Inv:${netData.INV_NO}:${netData.INV_DATE}`, i, currentTime,it.JOB_NO,it.PANEL_NO]
         );
 
         i++;
         // Debit line — VAT Amt
         await conn.query(
-          `INSERT INTO tran_acc (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR, NARRATION1, NARRATION2, SR_NO, TRANS_DATE, TRANS_TIME)
-     VALUES ('07', ?, ?, ?, ?, 'D', ?, ?, ?, CURDATE(), ?)`,
+          `INSERT INTO tran_acc (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR, 
+          NARRATION1, NARRATION2, SR_NO, TRANS_DATE, TRANS_TIME,JOB_NO,PANEL_NO)
+     VALUES ('07', ?, ?, ?, ?, 'D', ?, ?, ?, CURDATE(), ?,?,?)`,
           [netData.PJV_NO, netData.PJV_DATE, '142-004-0-001', it.vatAmt,
-          netData.supName, `Inv:${netData.INV_NO}:${netData.INV_DATE}`, i, currentTime]
+          netData.supName, `Inv:${netData.INV_NO}:${netData.INV_DATE}`, i, currentTime,it.JOB_NO,it.PANEL_NO]
         );
       }
 
