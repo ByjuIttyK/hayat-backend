@@ -610,14 +610,15 @@ ORDER BY a.JOB_NO DESC;
     res.json(rows);
   });
 });
+
 app.post("/api/jobcard-save", async (req, res) => {
   try {
     console.log("jobcard-save ==>", req.body);
 
     const { jobCard, jobPanel } = req.body;
     console.log("save -1");
-    console.log("jobNo:", jobCard.jobNo);  // ADD THIS
-    console.log("Full jobCard:", JSON.stringify(jobCard, null, 2));  // ADD THIS
+    console.log("jobNo:", jobCard.jobNo);
+    console.log("Full jobCard:", JSON.stringify(jobCard, null, 2));
 
     if (!jobCard || !jobCard.jobNo) {
       return res.status(400).json({ message: "Invalid job card data format" });
@@ -626,6 +627,7 @@ app.post("/api/jobcard-save", async (req, res) => {
     console.log("Job Card Data ==>", jobCard);
     console.log('Save-3');
     console.log('Job Card -Panels===>>', jobPanel);
+
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
@@ -682,6 +684,7 @@ app.post("/api/jobcard-save", async (req, res) => {
               CONSULTANT        = VALUES(CONSULTANT);
           `;
 
+          // Step 1: Insert/Update job_card
           await new Promise((resolve, reject) => {
             conn.query(
               jobCardQuery,
@@ -722,45 +725,42 @@ app.post("/api/jobcard-save", async (req, res) => {
             );
           });
 
-          // job panel deletion
-          const jobPaneldel = ` DELETE FROM job_panels where job_no=?`;
-          await new Promise((resolve, reject) => {
-            conn.query(
-              jobPaneldel,
-              [jobCard.jobNo], (err, result) => {
-                if (err) return reject(err);
-                console.log("JOB_CARD Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-              INSERT INTO job_panels (JOB_NO, SR_NO, PANEL_REF, QTY,DRAW_NO,DELIVERY_REQ,REMARKS)
-              VALUES ? 
-              ON DUPLICATE KEY UPDATE 
-              PANEL_REF = COALESCE(VALUES(PANEL_REF), PANEL_REF), 
-              QTY = COALESCE(VALUES(QTY), QTY), 
-              DRAW_NO      = COALESCE(VALUES(DRAW_NO), DRAW_NO), 
-              DELIVERY_REQ      = COALESCE(VALUES(DELIVERY_REQ),DELIVERY_REQ), 
-              REMARKS      = COALESCE(VALUES(REMARKS), REMARKS);
-            `;
+          // Step 2: Delete and re-insert job_panels
           const values = jobPanel.panels.map(row => [
             jobPanel.jobNo, row.srNo, row.panelRef, row.qty, row.drawNo,
             toMySQLDate(row.deliveryReq), row.remarks
           ]);
 
+          console.log("Panel values to insert:", values);
+
           await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
+            conn.query(
+              `DELETE FROM job_panels WHERE JOB_NO = ?`,
+              [jobPanel.jobNo],
+              (err) => {
+                if (err) return reject(err);
+
+                if (!values || values.length === 0) {
+                  console.log("No panels to insert, skipping.");
+                  return resolve();
+                }
+
+                const itemsQuery = `
+                  INSERT INTO job_panels (JOB_NO, SR_NO, PANEL_REF, QTY, DRAW_NO, DELIVERY_REQ, REMARKS)
+                  VALUES ?
+                `;
+                conn.query(itemsQuery, [values], (err, result) => {
+                  if (err) return reject(err);
+                  console.log("Job Panels Insert:", result);
+                  resolve(result);
+                });
               }
-              console.log("Job Panels Insert/Update:", result);
-              resolve(result);
-            });
+            );
           });
 
-          // ✅ Commit transaction
+          console.log("*** passed Job_panels*****");
+
+          // Step 3: Commit — always reached regardless of panels
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
@@ -770,8 +770,8 @@ app.post("/api/jobcard-save", async (req, res) => {
               });
             }
             conn.release();
-            console.log("✅ Job Card saved successfully:", jobCard.jobNo);
-            res.status(200).json({ message: "Job card saved successfully", jobNo: jobCard.jobNo });
+            console.log("*** Transaction committed successfully ***");
+            res.json({ message: "Job card saved successfully" });
           });
 
         } catch (queryErr) {
@@ -789,6 +789,7 @@ app.post("/api/jobcard-save", async (req, res) => {
     res.status(500).json({ message: "Server error", error: err });
   }
 });
+
 
 // ✅ Returns the next available JOB_NO (plain number, e.g. "1025") for
 // pre-filling a new Job Card in ADD mode. CAST(...AS UNSIGNED) guards
@@ -4447,7 +4448,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-     "SELECT MAX(VCHR_NO) AS MXVCHR FROM tran_acc WHERE TRAN_TYPE = ? AND SUBSTR(VCHR_NO, 1, 1) < 'A' AND YEAR(DATTE) >= 2025",
+      "SELECT MAX(VCHR_NO) AS MXVCHR FROM tran_acc WHERE TRAN_TYPE = ? AND SUBSTR(VCHR_NO, 1, 1) < 'A' AND YEAR(DATTE) >= 2025",
       [req.params.Tp],
 
       function (err, result) {
@@ -4532,7 +4533,7 @@ app.get("/api/payvouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
-    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD ,"+
+    "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD ," +
     " a.AMOUNT, a.AMOUNT_FRGN,a.VCHR_TYPE" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
@@ -10914,3 +10915,8 @@ app.use("/api", jobPanelLovRoutes);
 //
 const saveJvRouter = require('./routes/save-jv');
 app.use('/api', saveJvRouter(connection));
+//// near the other route requires, at the top
+const jobExpLinkRoutes = require('./routes/jobExpLinkRoutes');
+
+// near the other app.use("/api", ...) registrations
+app.use("/api", jobExpLinkRoutes(connection));
