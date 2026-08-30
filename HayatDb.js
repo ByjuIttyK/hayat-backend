@@ -4447,7 +4447,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
     );
   } else {
     connection.query(
-      "select MAX(VCHR_NO) as  MXVCHR  FROM tran_acc WHERE TRAN_TYPE =? and Substr(Vchr_no,1,1)<'A' ",
+     "SELECT MAX(VCHR_NO) AS MXVCHR FROM tran_acc WHERE TRAN_TYPE = ? AND SUBSTR(VCHR_NO, 1, 1) < 'A' AND YEAR(DATTE) >= 2025",
       [req.params.Tp],
 
       function (err, result) {
