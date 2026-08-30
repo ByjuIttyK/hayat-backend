@@ -10911,3 +10911,6 @@ app.use("/api", purchNsJvRoutes);
 //
 const jobPanelLovRoutes = require("./routes/jobPanelLovRoutes")(connection);
 app.use("/api", jobPanelLovRoutes);
+//
+const saveJvRouter = require('./routes/save-jv');
+app.use('/api', saveJvRouter(connection));

@@ -22,6 +22,7 @@ const CONFIG = {
     date: "DATTE",
     refNo: "REF_NO",
     narration: "NARRATION1",
+    username: "USERNAME",
   },
   tranAcc: {
     table: "tran_acc",
@@ -37,6 +38,16 @@ const CONFIG = {
     narration2: "NARRATION2",
   },
   accMst: { table: "acc_mst", code: "ACC_CODE", desc: "ACC_HEAD" },
+  company: {
+    table: "company",
+    name: "NAME",
+    place: "PLACE",
+    address1: "ADDRESS1",
+    address2: "ADDRESS2",
+    phone: "PHONE",
+    email: "EMAIL",
+    website: "WEB_SITE",
+  },
   supMst: { table: "sup_mst", code: "SUP_CODE", name: "SUP_NAME" },
   bankMst: { table: "bank_mst", code: "BANK_CODE", name: "BANK_NAME" },
 };
@@ -67,6 +78,34 @@ module.exports = function (connection) {
   const express = require("express");
   const router = express.Router();
   const db = connection.promise();
+
+  // Company letterhead, read once and cached. It changes about never, and
+  // every print would otherwise re-query it.
+  let companyCache = null;
+  const getCompany = async () => {
+    if (companyCache) return companyCache;
+    const { company } = CONFIG;
+    try {
+      const [rows] = await db.query(
+        `SELECT ${company.name} AS name, ${company.place} AS place,
+                ${company.address1} AS address1, ${company.address2} AS address2,
+                ${company.phone} AS phone, ${company.email} AS email,
+                ${company.website} AS website
+         FROM ${company.table} LIMIT 1`
+      );
+      const r = rows[0] || {};
+      companyCache = {
+        name: r.name || "",
+        address: [r.address1, r.address2].filter(Boolean).join(", "),
+        contact: [r.phone, r.email, r.website].filter(Boolean).join("  |  "),
+      };
+    } catch (err) {
+      // A missing letterhead must not stop a voucher printing.
+      console.error("[pdc-isu-reversal/company]", err.message);
+      companyCache = { name: "", address: "", contact: "" };
+    }
+    return companyCache;
+  };
 
   // -------------------------------------------------------------------------
   // GET /api/pdc-isu-reversal/pending?asOnDate=YYYY-MM-DD
@@ -137,29 +176,133 @@ module.exports = function (connection) {
   });
 
   // -------------------------------------------------------------------------
+  // GET /api/pdc-isu-reversal/batches?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Batch list for the lookup screen — one row per batch, newest first.
+  // Users won't remember "PIR000005", so they pick from this rather than
+  // typing a batch number.
+  // -------------------------------------------------------------------------
+  router.get("/batches", async (req, res) => {
+    const { from, to } = req.query;
+    try {
+      const { vouchers } = CONFIG;
+      const where = [`${vouchers.tranType} = ?`, `${vouchers.refNo} LIKE '${BATCH_PREFIX}%'`];
+      const args = [TRAN_TYPE_REVERSAL];
+      if (from) { where.push(`${vouchers.date} >= ?`); args.push(from); }
+      if (to)   { where.push(`${vouchers.date} <= ?`); args.push(to); }
+
+      const [rows] = await db.query(
+        `SELECT ${vouchers.refNo} AS BATCH_NO,
+                MIN(${vouchers.date}) AS BATCH_DATE,
+                DATE_FORMAT(MIN(${vouchers.date}), '%d/%m/%Y') AS BATCH_DATE_FMT,
+                COUNT(*) AS VOUCHER_COUNT,
+                MIN(${vouchers.vchrNo}) AS FIRST_VCHR,
+                MAX(${vouchers.vchrNo}) AS LAST_VCHR,
+                MAX(${vouchers.username}) AS CREATED_BY
+         FROM ${vouchers.table}
+         WHERE ${where.join(" AND ")}
+         GROUP BY ${vouchers.refNo}
+         ORDER BY ${vouchers.refNo} DESC`,
+        args
+      );
+
+      // Batch totals come from tran_acc (the header carries no amount), so
+      // fetch them in one grouped query and stitch rather than N+1.
+      const { tranAcc } = CONFIG;
+      const [totRows] = await db.query(
+        `SELECT ${tranAcc.refNo} AS BATCH_NO, SUM(${tranAcc.amount}) AS TOTAL_AMOUNT
+         FROM ${tranAcc.table}
+         WHERE ${tranAcc.tranType} = ? AND ${tranAcc.dbCr} = 'D'
+           AND ${tranAcc.refNo} LIKE '${BATCH_PREFIX}%'
+         GROUP BY ${tranAcc.refNo}`,
+        [TRAN_TYPE_REVERSAL]
+      );
+      const totals = Object.fromEntries(
+        totRows.map((r) => [r.BATCH_NO, Number(r.TOTAL_AMOUNT) || 0])
+      );
+
+      res.json(rows.map((r) => ({ ...r, TOTAL_AMOUNT: totals[r.BATCH_NO] ?? 0 })));
+    } catch (err) {
+      console.error("[pdc-isu-reversal/batches]", err);
+      res.status(500).json({ message: "Failed to fetch batch list" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // GET /api/pdc-isu-reversal/batch/:batchNo
-  // Everything posted under one batch — for review or a reprint.
+  //
+  // Everything posted under one batch, shaped exactly as the register print
+  // needs it. Both the fresh print and any reprint read from here rather than
+  // from the /save response, so a reprint is guaranteed to match what was
+  // actually posted — and a print is still possible after the browser that
+  // ran the save has long since closed.
+  //
+  // Returns { batchNo, batchDate, createdBy, vouchers: [...], total }
   // -------------------------------------------------------------------------
   router.get("/batch/:batchNo", async (req, res) => {
+    const batchNo = req.params.batchNo;
     try {
-      const { tranAcc, accMst } = CONFIG;
+      const { vouchers, tranAcc, accMst, supMst } = CONFIG;
+
+      // One row per voucher: the two legs pivoted into Dr/Cr columns. Every
+      // reversal is exactly two legs, so the pivot is safe here.
       const [rows] = await db.query(
-        `SELECT t.${tranAcc.vchrNo}   AS VCHR_NO,
-                t.${tranAcc.srNo}     AS SR_NO,
-                t.${tranAcc.accCode}  AS ACC_CODE,
-                COALESCE(a.${accMst.desc}, '') AS ACC_HEAD,
-                t.${tranAcc.amount}   AS AMOUNT,
-                t.${tranAcc.dbCr}     AS DB_CR,
-                t.${tranAcc.narration}  AS NARRATION1,
-                t.${tranAcc.narration2} AS NARRATION2,
-                t.${tranAcc.date}     AS DATTE
-         FROM ${tranAcc.table} t
-         LEFT JOIN ${accMst.table} a ON a.${accMst.code} = t.${tranAcc.accCode}
-         WHERE t.${tranAcc.tranType} = ? AND t.${tranAcc.refNo} = ?
-         ORDER BY CAST(t.${tranAcc.vchrNo} AS UNSIGNED), t.${tranAcc.srNo}`,
-        [TRAN_TYPE_REVERSAL, req.params.batchNo]
+        `SELECT
+           v.${vouchers.vchrNo}  AS VCHR_NO,
+           v.${vouchers.date}    AS JV_DATE,
+           DATE_FORMAT(v.${vouchers.date}, '%d/%m/%Y') AS JV_DATE_FMT,
+           v.${vouchers.username} AS CREATED_BY,
+           dr.${tranAcc.accCode} AS PDC_CODE,
+           COALESCE(da.${accMst.desc}, '') AS PDC_HEAD,
+           cr.${tranAcc.accCode} AS CHQ_BANK,
+           COALESCE(ca.${accMst.desc}, '') AS BANK_NAME,
+           dr.${tranAcc.amount}  AS AMOUNT,
+           dr.${tranAcc.narration2} AS PARTY,
+           p.CHQ_NO,
+           DATE_FORMAT(p.CHQ_DATE, '%d/%m/%y') AS CHQ_DATE_FMT,
+           p.SUP_CODE
+         FROM ${vouchers.table} v
+         JOIN ${tranAcc.table} dr
+           ON dr.${tranAcc.tranType} = v.${vouchers.tranType}
+          AND dr.${tranAcc.vchrNo}   = v.${vouchers.vchrNo}
+          AND dr.${tranAcc.dbCr}     = 'D'
+         JOIN ${tranAcc.table} cr
+           ON cr.${tranAcc.tranType} = v.${vouchers.tranType}
+          AND cr.${tranAcc.vchrNo}   = v.${vouchers.vchrNo}
+          AND cr.${tranAcc.dbCr}     = 'C'
+         LEFT JOIN ${accMst.table} da ON da.${accMst.code} = dr.${tranAcc.accCode}
+         LEFT JOIN ${accMst.table} ca ON ca.${accMst.code} = cr.${tranAcc.accCode}
+         LEFT JOIN pdc_isu p ON p.JV_NO_RLZ = v.${vouchers.vchrNo}
+         WHERE v.${vouchers.tranType} = ? AND v.${vouchers.refNo} = ?
+         ORDER BY CAST(v.${vouchers.vchrNo} AS UNSIGNED)`,
+        [TRAN_TYPE_REVERSAL, batchNo]
       );
-      res.json(rows);
+
+      if (rows.length === 0) {
+        return res.status(404).json({ message: `Batch ${batchNo} not found` });
+      }
+
+      const out = rows.map((r) => ({
+        vchrNo: r.VCHR_NO,
+        jvDate: r.JV_DATE_FMT,
+        chqNo: r.CHQ_NO || "",
+        chqDt: r.CHQ_DATE_FMT || "",
+        party: r.PARTY || r.SUP_CODE || "",
+        partyCode: r.SUP_CODE || "",
+        pdcCode: r.PDC_CODE,
+        pdcHead: r.PDC_HEAD,
+        chqBank: r.CHQ_BANK,
+        bankName: r.BANK_NAME,
+        amount: Number(r.AMOUNT) || 0,
+      }));
+
+      res.json({
+        batchNo,
+        batchDate: rows[0].JV_DATE_FMT,
+        createdBy: rows[0].CREATED_BY || "",
+        company: await getCompany(),
+        vouchers: out,
+        total: out.reduce((s, v) => s + v.amount, 0),
+      });
     } catch (err) {
       console.error("[pdc-isu-reversal/batch]", err);
       res.status(500).json({ message: "Failed to fetch batch" });
@@ -246,9 +389,9 @@ module.exports = function (connection) {
         // 2. Voucher header — carries the batch no.
         await conn.query(
           `INSERT INTO ${vouchers.table}
-             (${vouchers.tranType}, ${vouchers.vchrNo}, ${vouchers.date}, ${vouchers.refNo}, ${vouchers.narration})
-           VALUES (?, ?, ?, ?, ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, batchNo, narration]
+             (${vouchers.tranType}, ${vouchers.vchrNo}, ${vouchers.date}, ${vouchers.refNo}, ${vouchers.narration}, ${vouchers.username})
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, batchNo, narration, username || null]
         );
 
         // 3a. Dr — PDC Payable suspense (clears the accrual).
