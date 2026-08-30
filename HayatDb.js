@@ -7440,7 +7440,7 @@ app.get("/api/grtnitemsjob/:Job", function (req, res) {
     " a.QTY, a.UNIT_COST COST, ROUND( COALESCE(a.QTY,0) * COALESCE(a.UNIT_COST,0) ,2) AS AMOUNT " +
     " from goods_rtn_items a   " +
     " LEFT OUTER JOIN item_mst c ON a.PROD_CODE = c.ITEM_CODE " +
-    ", goods_rtn_Hdr b" +
+    ", goods_rtn_hdr b" +
     " WHERE  b.JOB_NO = ? and a.SRV_NO =b.SRV_NO  " +
     " ORDER BY a.SRV_NO",
     [req.params.Job],
