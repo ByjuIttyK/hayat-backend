@@ -10843,7 +10843,7 @@ app.use(require('./FabInvSuggestRoutes')(connection))
 
 app.use('/api/srno-sync', require('./routes/srnoSyncRoutes')(connection));
 //
-app.use('/api/pdc-rcd-reversal', require('./routes/pdcRcdReversalRoutes')(connection));
+//app.use('/api/pdc-rcd-reversal', require('./routes/pdcRcdReversalRoutes')(connection));
 //
 app.use('/api/pdc-isu-reversal', require('./routes/pdcIsuReversalRoutes')(connection));
 //
@@ -10920,3 +10920,10 @@ const jobExpLinkRoutes = require('./routes/jobExpLinkRoutes');
 
 // near the other app.use("/api", ...) registrations
 app.use("/api", jobExpLinkRoutes(connection));
+
+const pdcRcdReversal = require("./routes/pdc-rcd-reversal");
+app.use("/api/pdc-rcd-reversal", authMiddleware, pdcRcdReversal(connection));
+//
+const pdcRcdRegister = require("./routes/pdc-rcd-register");
+app.use("/api/pdc-rcd-register", authMiddleware, pdcRcdRegister(connection));
+ 
