@@ -463,19 +463,20 @@ app.post("/api/save-lpo", async (req, res) => {
           // cleared on screen (item code on a free-text line, a description, a
           // unit) is actually cleared in the table.
           const itemsQuery = `
-              INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME, QTY, UNIT, RATE, CAT_CODE)
+              INSERT INTO lpo_items (LPO_NO, SR_NO, MAIN_SR_NO, ITEM_CODE, ITEM_NAME,PART_NO, QTY, UNIT, RATE, CAT_CODE)
               VALUES ? 
               ON DUPLICATE KEY UPDATE 
               MAIN_SR_NO = VALUES(MAIN_SR_NO),
               ITEM_CODE  = VALUES(ITEM_CODE), 
               ITEM_NAME  = VALUES(ITEM_NAME), 
+              PART_NO  = VALUES(PART_NO),
               QTY        = VALUES(QTY), 
               UNIT       = VALUES(UNIT), 
               RATE       = VALUES(RATE),
               CAT_CODE   = VALUES(CAT_CODE);
             `;
           const values = lpoItems.map(row => [
-            row.LPO_NO, row.SR_NO, row.MAIN_SR_NO, row.ITEM_CODE, row.ITEM_NAME,
+            row.LPO_NO, row.SR_NO, row.MAIN_SR_NO, row.ITEM_CODE, row.ITEM_NAME,row.PART_NO,
             row.QTY, row.UNIT, row.RATE, row.CAT_CODE
           ]);
 
@@ -4470,7 +4471,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
 app.get("/api/lpoitemget", function (req, res) {
   console.log(req.params);
   connection.query(
-    "select LPO_NO,SR_NO, JOB_NO, ITEM_CODE,ITEM_NAME, QTY, UNIT," +
+    "select LPO_NO,SR_NO, JOB_NO, ITEM_CODE,ITEM_NAME, PART_NO,QTY, UNIT," +
     "RATE " +
     "FROM lpo_items ",
     [req.params.id],
@@ -4934,7 +4935,7 @@ app.get("/api/tranacc/:tp/:vchr", function (req, res) {
     "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc  a " +
     " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
-    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? ORDER BY a.SR_NO",
+    " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? ORDER BY lpad(a.SR_NO,4,'0')",
     [req.params.tp, req.params.vchr],
     //LEFT JOIN = ALL ROWS OF LEFT TABLE  (tran_acc Here)
     function (err, result) {
@@ -9326,7 +9327,7 @@ app.get("/api/lpoitems/:po", function (req, res) {
   console.log(req.params.po);
 
   connection.query(
-    "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,b.ARTICLE_CODE AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
+    "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,a.PART_NO,b.ARTICLE_CODE AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
     " round(a.qty*a.rate,2) AMOUNT" +
     " FROM lpo_items a  " +
     " Left Outer join item_mst b on a.ITEM_CODE = b.ITEM_CODE " +
@@ -9337,7 +9338,7 @@ app.get("/api/lpoitems/:po", function (req, res) {
     function (error, results) {
       if (error) throw error;
       res.json(results);
-      console.log('Lpo_items ==>', results);
+      console.log('Lpo_items 11==>', results);
     }
   );
 });
@@ -10222,9 +10223,9 @@ app.post("/api/save-jobstat", (req, res) => {
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
+      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers WHERE TRAN_TYPE=? order by VCHR_NO desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  join ac_list  on ac_code = acc_code   WHERE TRAN_TYPE=? order by VCHR_NO desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -10308,10 +10309,12 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const stDt = req.params.stdt;
   const endDt = req.params.enddt;
   console.log('Leddsp', acCode, stDt, endDt);
-  connection.query("select SR_NO,TRAN_TYPE,VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE,JOB_NO, NARRATION1, NARRATION2, " +
-    " CASE WHEN db_cr ='D' THEN AMOUNT ELSE 0 END AS AMOUNT_DR ," +
-    " CASE WHEN db_cr ='C' THEN AMOUNT ELSE 0 END  AS AMOUNT_CR FROM tran_acc WHERE ACC_CODE = ? AND " +
-    " DATTE BETWEEN ? AND ? ORDER BY DATE_FORMAT(DATTE,'%Y/%m/%d'), TRAN_TYPE ,VCHR_NO ", [acCode, stDt, endDt],
+  const updatedRows = [...rows, ...blankRows].map((row) => ({
+  ...row,
+  SR_NO: typeof row.SR_NO === 'string' ? Number(row.SR_NO) || 0 : row.SR_NO,
+}));
+
+setRowData(updatedRows);
     function (error, result) {
       if (error) {
         console.log("Ledger data select error", error);
@@ -10434,12 +10437,12 @@ app.get("/api/tranlst", function (req, res) {
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD, AMOUNT," +
+    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD AS ACC_HEAD, AMOUNT," +
     "IF(DB_CR='D', AMOUNT, 0) AS DR_AMOUNT, " +
     "IF(DB_CR='C', AMOUNT, 0) AS CR_AMOUNT, " +
     "DB_CR, NARRATION1, NARRATION2, JOB_NO " +
     "FROM tran_acc " +
-    " JOIN  ac_list   on ac_code = acc_code " +
+    " JOIN  ac_list   on AC_CODE = ACC_CODE " +
     " WHERE TRAN_TYPE = ? AND DATTE BETWEEN ? AND ? " +
     " ORDER BY VCHR_NO , db_cr desc",
     [ItemCd, start_date, end_date],
