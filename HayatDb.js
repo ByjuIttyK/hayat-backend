@@ -10219,6 +10219,21 @@ app.post("/api/save-jobstat", (req, res) => {
     res.json({ message: "Job Status  inserted/updated successfully", result });
   });
 })
+app.get("/api/pdc-rcd/:custCode", function (req, res) {
+  connection.query(
+    "SELECT CHQ_NO, CHQ_DATE, AMOUNT, REALISED" +
+    " FROM pdc_rcd WHERE CUST_CODE = ? AND REALISED <> 'Y'",
+    [req.params.custCode],
+    function (error, result) {
+      if (error) {
+        console.error("PDC query error:", error);
+        return res.status(500).json({ error: "Database error" });
+      }
+      console.log("PDC rows:", result);
+      res.json(result);
+    }
+  );
+});
 //SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
