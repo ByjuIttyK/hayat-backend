@@ -3681,10 +3681,10 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
 
   console.log("CustSt ==>", { as_on_date, p_cus });
 
-  let sql = "SELECT a.CUST_CODE, a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
+  let sql = "SELECT a.CUST_CODE, t.TYPE_ABBR as TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
     " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
     " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    " +
-    " WHERE a.DATTE < ? ";
+    "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE < ? ";  
   let params = [as_on_date];
 
   // ✅ Only add ACC_CODE filter if p_cus is provided
@@ -9327,7 +9327,7 @@ app.get("/api/lpoitems/:po", function (req, res) {
   console.log(req.params.po);
 
   connection.query(
-    "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,a.PART_NO,b.ARTICLE_CODE AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
+    "select a.LPO_NO,a.JOB_NO,a.SR_NO,a.MAIN_SR_NO,a.ITEM_CODE , a.ITEM_NAME ,COALESCE(a.PART_NO, b.ARTICLE_CODE) AS PART_NO, a.QTY, a.UNIT ,a.RATE ," +
     " round(a.qty*a.rate,2) AMOUNT" +
     " FROM lpo_items a  " +
     " Left Outer join item_mst b on a.ITEM_CODE = b.ITEM_CODE " +
@@ -10303,27 +10303,29 @@ app.get('/api/LedOp/:acode/:stdt', function (req, res) {
     });
 }
 );
-
 app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const acCode = req.params.acode;
-  const stDt = req.params.stdt;
-  const endDt = req.params.enddt;
+  const stDt   = req.params.stdt;
+  const endDt  = req.params.enddt;
   console.log('Leddsp', acCode, stDt, endDt);
-  const updatedRows = [...rows, ...blankRows].map((row) => ({
-  ...row,
-  SR_NO: typeof row.SR_NO === 'string' ? Number(row.SR_NO) || 0 : row.SR_NO,
-}));
 
-setRowData(updatedRows);
+  connection.query(
+    "SELECT a.SR_NO, t.TYPE_ABBR AS TRAN_TYPE, a.VCHR_NO, " +
+    " DATE_FORMAT(a.DATTE,'%d/%m/%Y') DATTE, a.JOB_NO, a.NARRATION1, a.NARRATION2, " +
+    " CASE WHEN a.db_cr='D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
+    " CASE WHEN a.db_cr='C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
+    " FROM tran_acc a " +
+    " LEFT JOIN tran_type t ON a.TRAN_TYPE = t.TRAN_TYPE " +
+    " WHERE a.ACC_CODE = ? AND a.DATTE BETWEEN ? AND ? " +
+    " ORDER BY DATE_FORMAT(a.DATTE,'%Y/%m/%d'), a.TRAN_TYPE, a.VCHR_NO ",
+    [acCode, stDt, endDt],
     function (error, result) {
       if (error) {
         console.log("Ledger data select error", error);
         res.status(500).send("Server error - select st. for ledger");
       } else {
-        //  console.log(result);
         res.json(result);
       }
-
     }
   );
 });
