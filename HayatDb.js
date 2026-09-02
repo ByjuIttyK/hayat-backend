@@ -10241,7 +10241,9 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, "+
       "CASE WHEN ACC_CODE IS NULL THEN CUST_CODE ELSE ACC_CODE END AS ACC_CODE,CUST_CODE,  CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  left outer join ac_list  on ac_list.ac_code = vouchers.acc_code   WHERE TRAN_TYPE=? order by VCHR_NO desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  "+
+    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
+     "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
       [req.params.tranId],
 
       function (error, result) {
