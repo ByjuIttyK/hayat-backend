@@ -2766,7 +2766,7 @@ app.post("/api/save-rcp", async (req, res) => {
       console.log("table tran_acc old record delete: " + result.affectedRows);
     });
     //pdc_isu
-    var sql = "DELETE FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    var sql = "DELETE FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO =?";
     connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
       if (err) throw err;
       console.log("table vouchers old record delete: " + result.affectedRows);
