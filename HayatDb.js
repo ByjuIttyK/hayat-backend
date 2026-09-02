@@ -476,7 +476,7 @@ app.post("/api/save-lpo", async (req, res) => {
               CAT_CODE   = VALUES(CAT_CODE);
             `;
           const values = lpoItems.map(row => [
-            row.LPO_NO, row.SR_NO, row.MAIN_SR_NO, row.ITEM_CODE, row.ITEM_NAME,row.PART_NO,
+            row.LPO_NO, row.SR_NO, row.MAIN_SR_NO, row.ITEM_CODE, row.ITEM_NAME, row.PART_NO,
             row.QTY, row.UNIT, row.RATE, row.CAT_CODE
           ]);
 
@@ -1929,8 +1929,8 @@ app.post("/api/save-fabinv", async (req, res) => {
             ModuleName: "FABINV",
             InvNo: fabInvNet.InvNo,
             Date: fabInvNet.InvDate,
-            Narr2: `Job:${fabInvNet.JobNo||''} ${fabInvNet.PaymentTerms || ""}`,
-      //      Narr1: fabInvNet.LpoNo || "",
+            Narr2: `Job:${fabInvNet.JobNo || ''} ${fabInvNet.PaymentTerms || ""}`,
+            //      Narr1: fabInvNet.LpoNo || "",
             Narr1: `Lpo: ${fabInvNet.LpoNo || ''}  Dt: ${fabInvNet.LpoDate || ''}`,
             CustCd: fabInvNet.CustCode,
             GrossAmt: fabInvNet.GrossAmt,        // Matches FIELD_NAME for FABINV rule
@@ -2753,30 +2753,6 @@ app.post("/api/save-rcp", async (req, res) => {
     console.log("R.V ChqData=>**", chqData);
     console.log("R.V tranAccData=>**", tranaccData);
     console.log("R.V InvStlData=>**", InvStlData);
-
-
-      var sql = "DELETE FROM vouchers WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
-    var sql = "DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table tran_acc old record delete: " + result.affectedRows);
-    });
-    //pdc_isu
-    var sql = "DELETE FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
-    //adj_dtl
-    var sql = "DELETE FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
     // delete old records over
 
     //,StlData
@@ -2795,6 +2771,27 @@ app.post("/api/save-rcp", async (req, res) => {
         }
 
         try {
+          // ✅ Deletes are now inside the transaction
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM vouchers WHERE TRAN_TYPE=? AND VCHR_NO=?",
+              [vchrData.TranType, vchrData.VchrNo],
+              (err, result) => err ? reject(err) : resolve(result));
+          });
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM tran_acc WHERE TRAN_TYPE=? AND VCHR_NO=?",
+              [vchrData.TranType, vchrData.VchrNo],
+              (err, result) => err ? reject(err) : resolve(result));
+          });
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM pdc_rcd WHERE TRAN_TYPE=? AND VCHR_NO=?",
+              [vchrData.TranType, vchrData.VchrNo],
+              (err, result) => err ? reject(err) : resolve(result));
+          });
+          await new Promise((resolve, reject) => {
+            conn.query("DELETE FROM adj_dtl WHERE SOURCE_TYPE=? AND SOURCE_DOC=?",
+              [vchrData.TranType, vchrData.VchrNo],
+              (err, result) => err ? reject(err) : resolve(result));
+          });
           // ✅ Step 1: Insert/Update NGP_NET table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
@@ -3711,7 +3708,7 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
   let sql = "SELECT a.CUST_CODE, t.TYPE_ABBR as TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
     " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
     " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    " +
-    "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE < ? ";  
+    "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE < ? ";
   let params = [as_on_date];
 
   // ✅ Only add ACC_CODE filter if p_cus is provided
@@ -10265,12 +10262,12 @@ app.get("/api/pdc-rcd/:custCode", function (req, res) {
 app.get("/api/vchrlst/:tranId", function (req, res) {
   if (req.params.tranId !== '05') {
     connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, "+
+      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, " +
       "CASE WHEN ACC_CODE IS NULL THEN CUST_CODE ELSE ACC_CODE END AS ACC_CODE,CUST_CODE,  CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  "+
-    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
-     "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  " +
+      " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
+      "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
       [req.params.tranId],
 
       function (error, result) {
@@ -10350,8 +10347,8 @@ app.get('/api/LedOp/:acode/:stdt', function (req, res) {
 );
 app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   const acCode = req.params.acode;
-  const stDt   = req.params.stdt;
-  const endDt  = req.params.enddt;
+  const stDt = req.params.stdt;
+  const endDt = req.params.enddt;
   console.log('Leddsp', acCode, stDt, endDt);
 
   connection.query(
@@ -10978,5 +10975,4 @@ app.use("/api/pdc-rcd-reversal", authMiddleware, pdcRcdReversal(connection));
 const pdcRcdRegister = require("./routes/pdc-rcd-register");
 app.use("/api/pdc-rcd-register", authMiddleware, pdcRcdRegister(connection));
 const ledgerRowSettlements = require("./routes/ledger-row-settlements");
- app.use("/api/ledger-row-settlements", authMiddleware, ledgerRowSettlements(connection));
- 
+app.use("/api/ledger-row-settlements", authMiddleware, ledgerRowSettlements(connection));
