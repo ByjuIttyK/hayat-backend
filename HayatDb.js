@@ -1929,8 +1929,9 @@ app.post("/api/save-fabinv", async (req, res) => {
             ModuleName: "FABINV",
             InvNo: fabInvNet.InvNo,
             Date: fabInvNet.InvDate,
-            Narr1: fabInvNet.PaymentTerms || "",
-            Narr2: fabInvNet.LpoNo || "",
+            Narr2: `Job:${fabInvNet.JobNo||''} ${fabInvNet.PaymentTerms || ""}`,
+      //      Narr1: fabInvNet.LpoNo || "",
+            Narr1: `Lpo: ${fabInvNet.LpoNo || ''}  Dt: ${fabInvNet.LpoDate || ''}`,
             CustCd: fabInvNet.CustCode,
             GrossAmt: fabInvNet.GrossAmt,        // Matches FIELD_NAME for FABINV rule
             VatAmt: fabInvNet.VatAmt,          // Matches FIELD_NAME for VAT rule
@@ -10328,7 +10329,7 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   console.log('Leddsp', acCode, stDt, endDt);
 
   connection.query(
-    "SELECT a.SR_NO, t.TYPE_ABBR AS TRAN_TYPE, a.VCHR_NO, " +
+    "SELECT a.SR_NO, a.TRAN_TYPE,t.TYPE_ABBR, a.VCHR_NO, " +
     " DATE_FORMAT(a.DATTE,'%d/%m/%Y') DATTE, a.JOB_NO, a.NARRATION1, a.NARRATION2, " +
     " CASE WHEN a.db_cr='D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     " CASE WHEN a.db_cr='C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
@@ -10949,4 +10950,6 @@ app.use("/api/pdc-rcd-reversal", authMiddleware, pdcRcdReversal(connection));
 //
 const pdcRcdRegister = require("./routes/pdc-rcd-register");
 app.use("/api/pdc-rcd-register", authMiddleware, pdcRcdRegister(connection));
+const ledgerRowSettlements = require("./routes/ledger-row-settlements");
+ app.use("/api/ledger-row-settlements", authMiddleware, ledgerRowSettlements(connection));
  
