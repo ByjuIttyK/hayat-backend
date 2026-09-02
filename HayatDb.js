@@ -10348,6 +10348,7 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
     }
   );
 });
+
 app.get('/api/Tbal/:dt', function (req, res) {
   console.log('Tbal query =', req.query); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
