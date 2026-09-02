@@ -2753,6 +2753,32 @@ app.post("/api/save-rcp", async (req, res) => {
     console.log("R.V ChqData=>**", chqData);
     console.log("R.V tranAccData=>**", tranaccData);
     console.log("R.V InvStlData=>**", InvStlData);
+
+
+      var sql = "DELETE FROM vouchers WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    var sql = "DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table tran_acc old record delete: " + result.affectedRows);
+    });
+    //pdc_isu
+    var sql = "DELETE FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    //adj_dtl
+    var sql = "DELETE FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC =?";
+    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
+      if (err) throw err;
+      console.log("table vouchers old record delete: " + result.affectedRows);
+    });
+    // delete old records over
+
     //,StlData
     // Start transaction
     connection.getConnection((err, conn) => {
