@@ -10240,7 +10240,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
       " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  join ac_list  on ac_code = acc_code   WHERE TRAN_TYPE=? order by VCHR_NO desc",
+      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  left outer join ac_list  on ac_code = acc_code   WHERE TRAN_TYPE=? order by VCHR_NO desc",
       [req.params.tranId],
 
       function (error, result) {
