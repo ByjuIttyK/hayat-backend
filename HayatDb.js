@@ -10274,7 +10274,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
         if (error) {
           throw error;
         } else {
-          console.log("Vchr list", result);
+        //  console.log("Vchr list", result);
           res.json(result);
 
         }
