@@ -241,23 +241,31 @@ module.exports = function (connection) {
       // two legs:
       //   Dr  CHQ_BANK   (SR_NO 1) — bank account debited
       //   Cr  PDC_CODE   (SR_NO 2) — PDC suspense cleared
-      // pdc_rcd.JV_NO_RLZ may be unpadded (old rows) or padded (new rows),
-      // so CAST both sides to UNSIGNED for a reliable numeric join.
+      //
+      // pdc_rcd.JV_NO_RLZ is a bare voucher number with no TRAN_TYPE beside
+      // it, so matching on the number alone pulls in rows closed by other
+      // processes that reused the same number — one JV then rendered twice.
+      // The join is therefore scoped by the accounts and amount that this
+      // voucher actually posted, and GROUP BY guarantees one row per voucher
+      // even if a residual collision survives.
+      //
+      // JV_NO_RLZ may be unpadded (old rows) or padded (new rows), so both
+      // sides are CAST to UNSIGNED for a reliable numeric comparison.
       const [rows] = await db.query(
         `SELECT
-           v.${vouchers.vchrNo}                            AS VCHR_NO,
-           v.${vouchers.date}                              AS JV_DATE,
-           DATE_FORMAT(v.${vouchers.date}, '%d/%m/%Y')     AS JV_DATE_FMT,
-           v.${vouchers.username}                          AS CREATED_BY,
-           cr.${tranAcc.accCode}                           AS PDC_CODE,
-           COALESCE(ca.${accMst.desc}, '')                 AS PDC_HEAD,
-           dr.${tranAcc.accCode}                           AS CHQ_BANK,
-           COALESCE(bk.${accMst.desc}, '')                 AS BANK_NAME,
-           COALESCE(c.${cusMst.name},  '')                 AS PARTY,
-           p.CUST_CODE,
-           p.CHQ_NO,
-           DATE_FORMAT(p.CHQ_DATE, '%d/%m/%y')             AS CHQ_DATE_FMT,
-           dr.${tranAcc.amount}                            AS AMOUNT
+           v.${vouchers.vchrNo}                                 AS VCHR_NO,
+           MIN(v.${vouchers.date})                              AS JV_DATE,
+           DATE_FORMAT(MIN(v.${vouchers.date}), '%d/%m/%Y')     AS JV_DATE_FMT,
+           MIN(v.${vouchers.username})                          AS CREATED_BY,
+           MIN(cr.${tranAcc.accCode})                           AS PDC_CODE,
+           COALESCE(MIN(ca.${accMst.desc}), '')                 AS PDC_HEAD,
+           MIN(dr.${tranAcc.accCode})                           AS CHQ_BANK,
+           COALESCE(MIN(bk.${accMst.desc}), '')                 AS BANK_NAME,
+           COALESCE(MIN(c.${cusMst.name}),  '')                 AS PARTY,
+           MIN(p.CUST_CODE)                                     AS CUST_CODE,
+           MIN(p.CHQ_NO)                                        AS CHQ_NO,
+           DATE_FORMAT(MIN(p.CHQ_DATE), '%d/%m/%y')             AS CHQ_DATE_FMT,
+           MIN(dr.${tranAcc.amount})                            AS AMOUNT
          FROM ${vouchers.table} v
          JOIN ${tranAcc.table} dr
            ON dr.${tranAcc.tranType} = v.${vouchers.tranType}
@@ -270,10 +278,15 @@ module.exports = function (connection) {
          LEFT JOIN ${accMst.table} ca  ON ca.${accMst.code}  = cr.${tranAcc.accCode}
          LEFT JOIN ${accMst.table} bk  ON bk.${accMst.code}  = dr.${tranAcc.accCode}
          LEFT JOIN pdc_rcd p
-           ON CAST(p.JV_NO_RLZ AS UNSIGNED) = CAST(v.${vouchers.vchrNo} AS UNSIGNED)
+           ON  CAST(p.JV_NO_RLZ AS UNSIGNED) = CAST(v.${vouchers.vchrNo} AS UNSIGNED)
+          AND  p.PDC_CODE    = cr.${tranAcc.accCode}
+          AND  p.CHQ_BANK    = dr.${tranAcc.accCode}
+          AND  p.AMOUNT      = dr.${tranAcc.amount}
+          AND  p.JV_DATE_RLZ = v.${vouchers.date}
          LEFT JOIN ${cusMst.table} c   ON c.${cusMst.code}   = p.CUST_CODE
          WHERE v.${vouchers.tranType} = ?
            AND v.${vouchers.refNo}    = ?
+         GROUP BY v.${vouchers.vchrNo}
          ORDER BY CAST(v.${vouchers.vchrNo} AS UNSIGNED)`,
         [TRAN_TYPE_REVERSAL, batchNo]
       );

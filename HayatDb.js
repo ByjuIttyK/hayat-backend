@@ -2379,27 +2379,42 @@ app.post("/api/save-sret", async (req, res) => {
             });
           });
 
-
+//
+  const glPayload = {
+            ModuleName: "SALRET",
+            InvNo: sretNet.SretNo,
+            Date: sretNet.SretDt,
+            Narration: sretNet.Narration1 || "",
+            SupCode: netData.SupCd,
+            GrossAmt: netData.GrossAmt,        // Matches FIELD_NAME for PURCHASE rule
+            VatAmt: netData.VatAmt,          // Matches FIELD_NAME for VAT rule
+            DiscAmt: netData.discAmt,        // Matches FIELD_NAME for DISCOUNT rule
+            NetAmt: netData.NetAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
+            JobNo: netData.JobNo || null,
+            PanelNo: netData.PanelNo || null
+          };
+          await postToTranAcc(glPayload, conn);
+//
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
               return res.status(500).json({ message: "Commit error", error: err });
             }
             conn.release(); // Release the connection back to the pool
-            res.json({ message: "Project Invoice saved successfully!" });
+            res.json({ message: "Sales Return saved successfully!" });
           });
 
         } catch (error) {
-          console.error("Proj. Inv. Transaction Failed:", error);
+          console.error("Sales return Transaction Failed:", error);
           conn.rollback(() => {
             conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Proj Inv. Transaction failed, rolled back", error });
+            res.status(500).json({ message: "Sales Return Transaction failed, rolled back", error });
           });
         };
       });
     });
   } catch (error) {
-    console.log("Project Inv save - internal error :", error)
+    console.log("Sales return save - internal error :", error)
     res.status(500).json({ message: "Internal Server Error (Project Invoice)", error });
   }
 });
@@ -2816,7 +2831,7 @@ app.post("/api/save-rcp", async (req, res) => {
               vchrQuery,
               [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
               vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
-              vchrData.Particulars, vchrData.PaidTo,
+              vchrData.PaidTo,vchrData.Particulars, 
               vchrData.FrgnAmt, vchrData.Amount],
               (err, result) => {
                 if (err) {
@@ -10974,5 +10989,10 @@ app.use("/api/pdc-rcd-reversal", authMiddleware, pdcRcdReversal(connection));
 //
 const pdcRcdRegister = require("./routes/pdc-rcd-register");
 app.use("/api/pdc-rcd-register", authMiddleware, pdcRcdRegister(connection));
+
 const ledgerRowSettlements = require("./routes/ledger-row-settlements");
 app.use("/api/ledger-row-settlements", authMiddleware, ledgerRowSettlements(connection));
+
+const fabInvForSret = require("./routes/fabInvForSret");
+app.use("/api", fabInvForSret(connection));
+//
