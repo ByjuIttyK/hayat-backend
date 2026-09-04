@@ -3068,7 +3068,7 @@ app.post("/api/save-payment", async (req, res) => {
 
     connection.getConnection((err, conn) => {
       if (err) {
-        console.error("R.V Bank save -Error getting connection:", err);
+        console.error("P.V Bank save -Error getting connection:", err);
         return res.status(500).json({ message: "R.V Bank save - Error getting connection" });
       }
 

@@ -28,7 +28,7 @@ module.exports = function (connection) {
 
       for (const chq of currentChqData) {
         const insertQuery = `
-          INSERT INTO CURRENT_CHQ 
+          INSERT INTO current_chq 
           (TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, CHQ_BANK, 
            PDC_CODE, SUP_CODE, AMOUNT, NARRATION, JV_NO_RLZ, JV_DATE_RLZ, 
            REALISED, MAIN_SR_NO)
