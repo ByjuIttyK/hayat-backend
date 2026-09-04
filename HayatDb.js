@@ -2379,19 +2379,23 @@ app.post("/api/save-sret", async (req, res) => {
             });
           });
 
+          //      sretNet.SretNo, sretNet.SretDt, sretNet.invNo, sretNet.CustCd,
+//sretNet.AccCd, sretNet.Narration1, sretNet.Narration2,
+          //      sretNet.SmanCd, sretNet.Discount, sretNet.TotAmt
+          //    ],
           //
           const glPayload = {
             ModuleName: "SALRET",
             InvNo: sretNet.SretNo,
             Date: sretNet.SretDt,
             Narration: sretNet.Narration1 || "",
-            SupCode: netData.SupCd,
-            GrossAmt: netData.GrossAmt,        // Matches FIELD_NAME for PURCHASE rule
-            VatAmt: netData.VatAmt,          // Matches FIELD_NAME for VAT rule
-            DiscAmt: netData.discAmt,        // Matches FIELD_NAME for DISCOUNT rule
-            NetAmt: netData.NetAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
-            JobNo: netData.JobNo || null,
-            PanelNo: netData.PanelNo || null
+            SupCode:sretNet.CustCd,
+            GrossAmt: sretNet.grossAmt,        // Matches FIELD_NAME for PURCHASE rule
+            VatAmt: sretNet.vatAmt,          // Matches FIELD_NAME for VAT rule
+            DiscAmt: sretNet.Discount,        // Matches FIELD_NAME for DISCOUNT rule
+            NetAmt: sretNet.TotAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
+            JobNo: sretNet.JobNo || null,
+           // PanelNo: netData.PanelNo || null
           };
           await postToTranAcc(glPayload, conn);
           //
