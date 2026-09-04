@@ -2379,8 +2379,8 @@ app.post("/api/save-sret", async (req, res) => {
             });
           });
 
-//
-  const glPayload = {
+          //
+          const glPayload = {
             ModuleName: "SALRET",
             InvNo: sretNet.SretNo,
             Date: sretNet.SretDt,
@@ -2394,7 +2394,7 @@ app.post("/api/save-sret", async (req, res) => {
             PanelNo: netData.PanelNo || null
           };
           await postToTranAcc(glPayload, conn);
-//
+          //
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
@@ -2802,7 +2802,7 @@ app.post("/api/save-rcp", async (req, res) => {
               [vchrData.TranType, vchrData.VchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
-           await new Promise((resolve, reject) => {
+          await new Promise((resolve, reject) => {
             conn.query("DELETE FROM current_chq WHERE TRAN_TYPE=? AND VCHR_NO=?",
               [vchrData.TranType, vchrData.VchrNo],
               (err, result) => err ? reject(err) : resolve(result));
@@ -2836,7 +2836,7 @@ app.post("/api/save-rcp", async (req, res) => {
               vchrQuery,
               [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
               vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
-              vchrData.PaidTo,vchrData.Particulars, 
+              vchrData.PaidTo, vchrData.Particulars,
               vchrData.FrgnAmt, vchrData.Amount],
               (err, result) => {
                 if (err) {
@@ -5029,13 +5029,13 @@ app.get("/api/pdcrcd/:tp/:vchr", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? "+
-    " UNION "+
+    "FROM pdc_rcd WHERE TRAN_TYPE = ? AND VCHR_NO = ? " +
+    " UNION " +
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
     "FROM current_chq WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE ",
-    [req.params.tp, req.params.vchr,req.params.tp, req.params.vchr],
+    [req.params.tp, req.params.vchr, req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
         console.error("Error executing query: ", err.message);
@@ -10299,7 +10299,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
         if (error) {
           throw error;
         } else {
-        //  console.log("Vchr list", result);
+          //  console.log("Vchr list", result);
           res.json(result);
 
         }
@@ -11008,3 +11008,6 @@ app.use("/api", fabInvForSret(connection));
 //
 const saveCurrentChq = require("./routes/saveCurrentChq");
 app.use("/api", saveCurrentChq(connection));
+
+const currentChqRoutes = require("./routes/CurrentChqRoutes");
+app.use("/api", currentChqRoutes(connection));
