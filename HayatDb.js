@@ -2380,7 +2380,7 @@ app.post("/api/save-sret", async (req, res) => {
           });
 
           //      sretNet.SretNo, sretNet.SretDt, sretNet.invNo, sretNet.CustCd,
-//sretNet.AccCd, sretNet.Narration1, sretNet.Narration2,
+          //sretNet.AccCd, sretNet.Narration1, sretNet.Narration2,
           //      sretNet.SmanCd, sretNet.Discount, sretNet.TotAmt
           //    ],
           //
@@ -2389,13 +2389,13 @@ app.post("/api/save-sret", async (req, res) => {
             InvNo: sretNet.SretNo,
             Date: sretNet.SretDt,
             Narration: sretNet.Narration1 || "",
-            SupCode:sretNet.CustCd,
+            SupCode: sretNet.CustCd,
             GrossAmt: sretNet.grossAmt,        // Matches FIELD_NAME for PURCHASE rule
             VatAmt: sretNet.vatAmt,          // Matches FIELD_NAME for VAT rule
             DiscAmt: sretNet.Discount,        // Matches FIELD_NAME for DISCOUNT rule
             NetAmt: sretNet.TotAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
             JobNo: sretNet.JobNo || null,
-           // PanelNo: netData.PanelNo || null
+            // PanelNo: netData.PanelNo || null
           };
           await postToTranAcc(glPayload, conn);
           //
@@ -5062,14 +5062,14 @@ app.get("/api/pdcisu/:tp/:vchr", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? "+
-    " union "+
+    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? " +
+    " union " +
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    " FROM current_chq WHERE TRAN_TYPE = ? AND VCHR_NO = ? "+
+    " FROM current_chq WHERE TRAN_TYPE = ? AND VCHR_NO = ? " +
     " ORDER BY CHQ_DATE",
-    [req.params.tp, req.params.vchr,req.params.tp, req.params.vchr],
+    [req.params.tp, req.params.vchr, req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
         console.error("Error executing query: ", err.message);
@@ -11021,3 +11021,10 @@ app.use("/api", saveCurrentChq(connection));
 
 const currentChqRoutes = require("./routes/CurrentChqRoutes");
 app.use("/api", currentChqRoutes(connection));
+
+//  const voiceTranscribe = require("./routes/voiceTranscribe");
+//    app.use("/api", voiceTranscribe());
+const voiceRoutes = require("./routes/voiceRoutes");
+app.use("/api/voicepair", voiceRoutes.pairing());   // BEFORE your JWT middleware
+//     // ... your JWT middleware ...
+app.use("/api", voiceRoutes.secure());   
