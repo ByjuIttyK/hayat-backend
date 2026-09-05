@@ -5062,8 +5062,14 @@ app.get("/api/pdcisu/:tp/:vchr", function (req, res) {
     "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
     "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
-    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? ORDER BY CHQ_DATE",
-    [req.params.tp, req.params.vchr],
+    "FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO = ? "+
+    " union "+
+    "select MAIN_SR_NO SR_NO ,TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
+    " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, " +
+    "CHQ_BANK, AMOUNT,  NARRATION DRAWN_BANK " +
+    " FROM current_chq WHERE TRAN_TYPE = ? AND VCHR_NO = ? "+
+    " ORDER BY CHQ_DATE",
+    [req.params.tp, req.params.vchr,req.params.tp, req.params.vchr],
     function (err, result) {
       if (err) {
         console.error("Error executing query: ", err.message);
