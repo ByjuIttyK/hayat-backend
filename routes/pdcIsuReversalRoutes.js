@@ -74,6 +74,23 @@ const toDdMmYy = (d) => {
 
 const padVchr = (n) => String(n).padStart(VCHR_NO_WIDTH, "0");
 
+// Guard for a client-supplied date. The grid's JV date editor commits ISO
+// yyyy-mm-dd, but the value comes off the wire, so anything that isn't a real
+// calendar date is rejected and the caller falls back to asOnDate.
+const isIsoDate = (v) => {
+  if (typeof v !== "string") return false;
+  const m = v.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const [, y, mo, d] = m;
+  const dt = new Date(`${y}-${mo}-${d}T00:00:00Z`);
+  return (
+    !isNaN(dt.getTime()) &&
+    dt.getUTCFullYear() === +y &&
+    dt.getUTCMonth() + 1 === +mo &&
+    dt.getUTCDate() === +d
+  );
+};
+
 module.exports = function (connection) {
   const express = require("express");
   const router = express.Router();
@@ -312,7 +329,10 @@ module.exports = function (connection) {
   // -------------------------------------------------------------------------
   // POST /api/pdc-isu-reversal/save
   // Body: { asOnDate, username, rows: [{ tranType, vchrNo, chqNo, chqDt,
-  //         pdcCode, pdcHead, chqBank, supCode, amount }, ...] }
+  //         pdcCode, pdcHead, chqBank, supCode, amount, jvDate }, ...] }
+  //
+  // jvDate is the per-row JV date edited in the grid (ISO yyyy-mm-dd); when
+  // absent or malformed the row falls back to asOnDate.
   //
   // Per selected row:
   //   1. Lock and derive the next JV number (TRAN_TYPE = '25').
@@ -355,6 +375,13 @@ module.exports = function (connection) {
         const amount = Number(row.amount) || 0;
         if (amount <= 0) continue;
 
+        // Per-row JV date. The grid lets the user override the JV date on each
+        // selected row (JV_DATE_RLZ, sent as jvDate in ISO yyyy-mm-dd); only
+        // fall back to the screen's asOnDate when the row carries nothing
+        // usable. Everything this row writes — voucher header, both tran_acc
+        // legs and the pdc_isu close-out — uses this one value.
+        const jvDate = isIsoDate(row.jvDate) ? row.jvDate.slice(0, 10) : asOnDate;
+
         // 1. Locked JV number for this row, inside the txn.
         const [maxRows] = await conn.query(
           `SELECT MAX(CAST(${vouchers.vchrNo} AS UNSIGNED)) AS maxVchr
@@ -391,7 +418,7 @@ module.exports = function (connection) {
           `INSERT INTO ${vouchers.table}
              (${vouchers.tranType}, ${vouchers.vchrNo}, ${vouchers.date}, ${vouchers.refNo}, ${vouchers.narration}, ${vouchers.username})
            VALUES (?, ?, ?, ?, ?, ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, batchNo, narration, username || null]
+          [TRAN_TYPE_REVERSAL, vchrNo, jvDate, batchNo, narration, username || null]
         );
 
         // 3a. Dr — PDC Payable suspense (clears the accrual).
@@ -399,7 +426,7 @@ module.exports = function (connection) {
           `INSERT INTO ${tranAcc.table}
              (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.srNo}, ${tranAcc.refNo}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration}, ${tranAcc.narration2})
            VALUES (?, ?, ?, ?, ?, ?, ?, 'D', ?, ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, 1, batchNo, row.pdcCode, amount, narration, partyName]
+          [TRAN_TYPE_REVERSAL, vchrNo, jvDate, 1, batchNo, row.pdcCode, amount, narration, partyName]
         );
 
         // 3b. Cr — Cheque bank (restores the balance the issue had reduced).
@@ -407,7 +434,7 @@ module.exports = function (connection) {
           `INSERT INTO ${tranAcc.table}
              (${tranAcc.tranType}, ${tranAcc.vchrNo}, ${tranAcc.date}, ${tranAcc.srNo}, ${tranAcc.refNo}, ${tranAcc.accCode}, ${tranAcc.amount}, ${tranAcc.dbCr}, ${tranAcc.narration}, ${tranAcc.narration2})
            VALUES (?, ?, ?, ?, ?, ?, ?, 'C', ?, ?)`,
-          [TRAN_TYPE_REVERSAL, vchrNo, asOnDate, 2, batchNo, row.chqBank, amount, narration, partyName]
+          [TRAN_TYPE_REVERSAL, vchrNo, jvDate, 2, batchNo, row.chqBank, amount, narration, partyName]
         );
 
         // 4. Close out the original pdc_isu row.
@@ -415,13 +442,13 @@ module.exports = function (connection) {
           `UPDATE pdc_isu
              SET JV_NO_RLZ = ?, JV_DATE_RLZ = ?, REALISED = 'Y'
            WHERE TRAN_TYPE = ? AND VCHR_NO = ? AND CHQ_NO = ?`,
-          [vchrNo, asOnDate, row.tranType, row.vchrNo, row.chqNo]
+          [vchrNo, jvDate, row.tranType, row.vchrNo, row.chqNo]
         );
 
         savedVouchers.push({
           batchNo,
           vchrNo,
-          jvDate: asOnDate,
+          jvDate,
           chqNo: row.chqNo,
           chqDt: row.chqDt,
           partyCode: row.supCode,
