@@ -178,6 +178,9 @@ app.post("/api/register", authMiddleware, authMiddleware.requireAdmin, async (re
     res.status(500).json({ message: "Password hashing failed" });
   }
 });
+//mobile qrcode before authMiddleware
+const voiceRoutes = require("./routes/voiceRoutes");
+app.use("/voicepair", voiceRoutes.pairing());
 
 /* Protect everything below */
 app.use("/api", authMiddleware);
@@ -11024,7 +11027,7 @@ app.use("/api", currentChqRoutes(connection));
 
 //  const voiceTranscribe = require("./routes/voiceTranscribe");
 //    app.use("/api", voiceTranscribe());
-const voiceRoutes = require("./routes/voiceRoutes");
-app.use("/api/voicepair", voiceRoutes.pairing());   // BEFORE your JWT middleware
+
 //     // ... your JWT middleware ...
 app.use("/api", voiceRoutes.secure());   
+
