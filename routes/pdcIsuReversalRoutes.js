@@ -10,8 +10,9 @@
 // (chqBank) — clearing the suspense and restoring the bank balance.
 //
 // Batch handling: one BatchNo per save run, written to REF_NO on both the
-// voucher header and every tran_acc leg, so a whole reversal run can be
-// pulled back or reported on as a unit.
+// voucher header and every tran_acc leg, and to BATCH_NO on the pdc_isu row
+// it closes (together with JV_TYPE = '25'), so a whole reversal run can be
+// pulled back or reported on as a unit from either side.
 // ---------------------------------------------------------------------------
 
 const CONFIG = {
@@ -262,6 +263,13 @@ module.exports = function (connection) {
 
       // One row per voucher: the two legs pivoted into Dr/Cr columns. Every
       // reversal is exactly two legs, so the pivot is safe here.
+      //
+      // The pdc_isu join is scoped to BATCH_NO as well as JV_NO_RLZ/JV_TYPE.
+      // JV_NO_RLZ alone is not unique — legacy rows closed by the old system
+      // carry the same voucher numbers, and matching on those duplicated the
+      // voucher line and double-counted its amount in the grand total. The
+      // GROUP BY is a second guard: even if two pdc rows ever match, the
+      // voucher still prints once.
       const [rows] = await db.query(
         `SELECT
            v.${vouchers.vchrNo}  AS VCHR_NO,
@@ -274,9 +282,9 @@ module.exports = function (connection) {
            COALESCE(ca.${accMst.desc}, '') AS BANK_NAME,
            dr.${tranAcc.amount}  AS AMOUNT,
            dr.${tranAcc.narration2} AS PARTY,
-           p.CHQ_NO,
-           DATE_FORMAT(p.CHQ_DATE, '%d/%m/%y') AS CHQ_DATE_FMT,
-           p.SUP_CODE
+           MIN(p.CHQ_NO) AS CHQ_NO,
+           DATE_FORMAT(MIN(p.CHQ_DATE), '%d/%m/%y') AS CHQ_DATE_FMT,
+           MIN(p.SUP_CODE) AS SUP_CODE
          FROM ${vouchers.table} v
          JOIN ${tranAcc.table} dr
            ON dr.${tranAcc.tranType} = v.${vouchers.tranType}
@@ -288,8 +296,15 @@ module.exports = function (connection) {
           AND cr.${tranAcc.dbCr}     = 'C'
          LEFT JOIN ${accMst.table} da ON da.${accMst.code} = dr.${tranAcc.accCode}
          LEFT JOIN ${accMst.table} ca ON ca.${accMst.code} = cr.${tranAcc.accCode}
-         LEFT JOIN pdc_isu p ON p.JV_NO_RLZ = v.${vouchers.vchrNo}
+         LEFT JOIN pdc_isu p
+           ON p.BATCH_NO  = v.${vouchers.refNo}
+          AND p.JV_NO_RLZ = v.${vouchers.vchrNo}
+          AND p.JV_TYPE   = v.${vouchers.tranType}
          WHERE v.${vouchers.tranType} = ? AND v.${vouchers.refNo} = ?
+         GROUP BY v.${vouchers.vchrNo}, v.${vouchers.date}, v.${vouchers.username},
+                  dr.${tranAcc.accCode}, da.${accMst.desc},
+                  cr.${tranAcc.accCode}, ca.${accMst.desc},
+                  dr.${tranAcc.amount}, dr.${tranAcc.narration2}
          ORDER BY CAST(v.${vouchers.vchrNo} AS UNSIGNED)`,
         [TRAN_TYPE_REVERSAL, batchNo]
       );
@@ -312,9 +327,21 @@ module.exports = function (connection) {
         amount: Number(r.AMOUNT) || 0,
       }));
 
+      // Batch date is the earliest voucher date in the run, matching the
+      // BATCH_DATE shown by /batches. Per-voucher JV dates are editable and
+      // can differ, so a single date at the top of the register can only be
+      // the batch's own date — each voucher prints its own JV date.
+      const earliest = rows.reduce(
+        (min, r) => (min === null || r.JV_DATE < min ? r.JV_DATE : min),
+        null
+      );
+      const batchDateFmt =
+        rows.find((r) => r.JV_DATE === earliest)?.JV_DATE_FMT ||
+        rows[0].JV_DATE_FMT;
+
       res.json({
         batchNo,
-        batchDate: rows[0].JV_DATE_FMT,
+        batchDate: batchDateFmt,
         createdBy: rows[0].CREATED_BY || "",
         company: await getCompany(),
         vouchers: out,
@@ -339,7 +366,8 @@ module.exports = function (connection) {
   //   2. Insert the voucher header, carrying the batch no in REF_NO.
   //   3. Insert two tran_acc legs — Dr pdcCode (SR_NO 1) / Cr chqBank
   //      (SR_NO 2). Supplier name goes in NARRATION2 on both legs.
-  //   4. Close the pdc_isu row (JV_NO_RLZ / JV_DATE_RLZ / REALISED).
+  //   4. Close the pdc_isu row (JV_NO_RLZ / JV_DATE_RLZ / REALISED) and
+  //      stamp it with BATCH_NO and JV_TYPE = '25'.
   //
   // Returns { batchNo, vouchers: JvPrintRow[] } for the print hook.
   // -------------------------------------------------------------------------
@@ -437,12 +465,18 @@ module.exports = function (connection) {
           [TRAN_TYPE_REVERSAL, vchrNo, jvDate, 2, batchNo, row.chqBank, amount, narration, partyName]
         );
 
-        // 4. Close out the original pdc_isu row.
+        // 4. Close out the original pdc_isu row. BATCH_NO and JV_TYPE are
+        //    stamped alongside the JV reference so the pdc_isu row on its own
+        //    says which reversal run closed it, and under which TRAN_TYPE —
+        //    JV_NO_RLZ alone is ambiguous, since voucher numbers restart per
+        //    tran type. BATCH_NO is varchar(10); the key is PIR + 6 digits.
         await conn.query(
           `UPDATE pdc_isu
-             SET JV_NO_RLZ = ?, JV_DATE_RLZ = ?, REALISED = 'Y'
+             SET JV_NO_RLZ = ?, JV_DATE_RLZ = ?, REALISED = 'Y',
+                 BATCH_NO  = ?, JV_TYPE     = ?
            WHERE TRAN_TYPE = ? AND VCHR_NO = ? AND CHQ_NO = ?`,
-          [vchrNo, jvDate, row.tranType, row.vchrNo, row.chqNo]
+          [vchrNo, jvDate, batchNo, TRAN_TYPE_REVERSAL,
+           row.tranType, row.vchrNo, row.chqNo]
         );
 
         savedVouchers.push({

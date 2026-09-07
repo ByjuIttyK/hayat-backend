@@ -10,8 +10,9 @@
 // head (PDC_CODE) — clearing the suspense.
 //
 // Batch handling: one BatchNo per save run, written to REF_NO on both the
-// voucher header and every tran_acc leg, so a whole reversal run can be
-// pulled back or reported on as a unit.
+// voucher header and every tran_acc leg, and to BATCH_NO on the pdc_rcd row
+// it closes (together with JV_TYPE = the reversal TRAN_TYPE), so a whole
+// reversal run can be pulled back or reported on as a unit from either side.
 // ---------------------------------------------------------------------------
 
 const CONFIG = {
@@ -296,6 +297,7 @@ module.exports = function (connection) {
          LEFT JOIN ${accMst.table} bk  ON bk.${accMst.code}  = dr.${tranAcc.accCode}
          LEFT JOIN pdc_rcd p
            ON  CAST(p.JV_NO_RLZ AS UNSIGNED) = CAST(v.${vouchers.vchrNo} AS UNSIGNED)
+          AND (p.JV_TYPE = v.${vouchers.tranType} OR p.JV_TYPE IS NULL)
           AND  p.PDC_CODE    = cr.${tranAcc.accCode}
           AND  p.CHQ_BANK    = dr.${tranAcc.accCode}
           AND  p.AMOUNT      = dr.${tranAcc.amount}
@@ -354,7 +356,8 @@ module.exports = function (connection) {
   //   3. Insert two tran_acc legs:
   //        Dr  CHQ_BANK   (SR_NO 1) — debit the bank account
   //        Cr  PDC_CODE   (SR_NO 2) — clear the PDC suspense
-  //   4. Close the pdc_rcd row (JV_NO_RLZ / JV_DATE_RLZ / REALISED = 'Y').
+  //   4. Close the pdc_rcd row (JV_NO_RLZ / JV_DATE_RLZ / REALISED = 'Y') and
+  //      stamp it with BATCH_NO and JV_TYPE.
   //
   // Returns { batchNo, vouchers: JvPrintRow[] } for the print hook.
   // -------------------------------------------------------------------------
@@ -454,12 +457,18 @@ module.exports = function (connection) {
            row.pdcCode, amount, narration, partyName]
         );
 
-        // 4. Close out the original pdc_rcd row.
+        // 4. Close out the original pdc_rcd row. BATCH_NO and JV_TYPE are
+        //    stamped alongside the JV reference so the pdc_rcd row on its own
+        //    says which reversal run closed it, and under which TRAN_TYPE —
+        //    JV_NO_RLZ alone is ambiguous, since voucher numbers restart per
+        //    tran type. BATCH_NO is varchar(10); the key is PRR + 6 digits.
         await conn.query(
           `UPDATE pdc_rcd
-             SET JV_NO_RLZ = ?, JV_DATE_RLZ = ?, REALISED = 'Y'
+             SET JV_NO_RLZ = ?, JV_DATE_RLZ = ?, REALISED = 'Y',
+                 BATCH_NO  = ?, JV_TYPE     = ?
            WHERE TRAN_TYPE = ? AND VCHR_NO = ? AND CHQ_NO = ?`,
-          [vchrNo, jvDate, row.tranType, row.vchrNo, row.chqNo]
+          [vchrNo, jvDate, batchNo, TRAN_TYPE_REVERSAL,
+           row.tranType, row.vchrNo, row.chqNo]
         );
 
         savedVouchers.push({

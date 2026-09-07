@@ -2765,6 +2765,46 @@ app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
   );
 });
 ///
+// ---------------------------------------------------------------------------
+// Voucher number allocation — server side, under a row lock.
+//
+// The entry screens still call /api/MaxVchrNo when they open, but that number
+// is only a PREVIEW now. It is picked when the screen loads and held in the
+// form until the user saves, which can be minutes later, so two users who open
+// the same voucher type in that window both compute the same number. Whoever
+// saved second used to win: these routes DELETE by (TRAN_TYPE, VCHR_NO) before
+// inserting, so the second save silently destroyed the first user's voucher and
+// replaced it with its own. No error, both users told "saved successfully".
+//
+// allocateVchrNo takes the number at SAVE time instead. FOR UPDATE locks the
+// rows scanned for this TRAN_TYPE, so a second session blocks until the first
+// commits and then reads a maximum that includes the row just written. The gap
+// between reading and inserting is microseconds and nothing else can slip into
+// it. Numbers stay gapless: a rollback consumes nothing.
+//
+// It only works on a single connection inside a transaction — called on the
+// pool, or with autocommit on, the lock is released immediately and the race
+// comes straight back.
+// ---------------------------------------------------------------------------
+const allocateVchrNo = (conn, tranType) =>
+  new Promise((resolve, reject) => {
+    conn.query(
+      `SELECT COALESCE(MAX(CAST(VCHR_NO AS UNSIGNED)), 0) + 1 AS nextNo
+         FROM vouchers
+        WHERE TRAN_TYPE = ?
+        FOR UPDATE`,
+      [tranType],
+      (err, rows) => {
+        if (err) return reject(err);
+        const next = Number(rows && rows[0] && rows[0].nextNo);
+        if (!Number.isFinite(next) || next < 1) {
+          return reject(new Error("allocateVchrNo: bad sequence for " + tranType));
+        }
+        resolve(String(next).padStart(10, "0"));
+      }
+    );
+  });
+
 app.post("/api/save-rcp", async (req, res) => {
   console.log("SAVE RECEIPTS");
   try {
@@ -2793,30 +2833,42 @@ app.post("/api/save-rcp", async (req, res) => {
         }
 
         try {
+          // On ADD the number is assigned here, not trusted from the client.
+          // Everything below — the deletes, and every child row — uses vchrNo
+          // rather than vchrData.VchrNo, so a stale number in the payload can
+          // neither overwrite another user's voucher nor scatter child rows
+          // under the wrong header. On EDIT the client's number is the record
+          // being edited and is kept as-is.
+          const isAdd = String(vchrData.Mode || "").toUpperCase() === "ADD";
+          const vchrNo = isAdd
+            ? await allocateVchrNo(conn, vchrData.TranType)
+            : vchrData.VchrNo;
+          console.log("vchrNo =>", vchrNo, isAdd ? "(allocated)" : "(client, EDIT)");
+
           // ✅ Deletes are now inside the transaction
           await new Promise((resolve, reject) => {
             conn.query("DELETE FROM vouchers WHERE TRAN_TYPE=? AND VCHR_NO=?",
-              [vchrData.TranType, vchrData.VchrNo],
+              [vchrData.TranType, vchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
           await new Promise((resolve, reject) => {
             conn.query("DELETE FROM tran_acc WHERE TRAN_TYPE=? AND VCHR_NO=?",
-              [vchrData.TranType, vchrData.VchrNo],
+              [vchrData.TranType, vchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
           await new Promise((resolve, reject) => {
             conn.query("DELETE FROM pdc_rcd WHERE TRAN_TYPE=? AND VCHR_NO=?",
-              [vchrData.TranType, vchrData.VchrNo],
+              [vchrData.TranType, vchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
           await new Promise((resolve, reject) => {
             conn.query("DELETE FROM current_chq WHERE TRAN_TYPE=? AND VCHR_NO=?",
-              [vchrData.TranType, vchrData.VchrNo],
+              [vchrData.TranType, vchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
           await new Promise((resolve, reject) => {
             conn.query("DELETE FROM adj_dtl WHERE SOURCE_TYPE=? AND SOURCE_DOC=?",
-              [vchrData.TranType, vchrData.VchrNo],
+              [vchrData.TranType, vchrNo],
               (err, result) => err ? reject(err) : resolve(result));
           });
           // ✅ Step 1: Insert/Update NGP_NET table
@@ -2841,9 +2893,14 @@ app.post("/api/save-rcp", async (req, res) => {
           await new Promise((resolve, reject) => {
             conn.query(
               vchrQuery,
-              [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
-              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
-              vchrData.PaidTo, vchrData.Particulars,
+              // NARRATION1 takes Particulars and PAID_TO takes PaidTo. These
+              // two were bound the other way round — the column order is
+              // NARRATION1 then PAID_TO — so the narration and the payee name
+              // went into each other's columns. save-payment already binds them
+              // correctly; this now matches it.
+              [vchrData.TranType, vchrNo, vchrData.VchrDate,
+              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.ConvRt,
+              vchrData.Particulars, vchrData.PaidTo,
               vchrData.FrgnAmt, vchrData.Amount],
               (err, result) => {
                 if (err) {
@@ -2880,7 +2937,7 @@ app.post("/api/save-rcp", async (req, res) => {
                   chqQuery,
                   [
                     chq.TranType,
-                    chq.VchrNo,
+                    vchrNo,
                     vchrData.VchrDate,   // still assuming it's a valid date string like '2025-05-15'
                     chq.ChqNo,
                     chq.ChqDt,
@@ -2925,7 +2982,7 @@ app.post("/api/save-rcp", async (req, res) => {
                 tranQuery,
                 [
                   trn.TranType,
-                  trn.VchrNo,
+                  vchrNo,
                   vchrData.VchrDate,
                   trn.SrNo,
                   trn.AccCode,
@@ -2967,7 +3024,7 @@ app.post("/api/save-rcp", async (req, res) => {
                 stlQuery,
                 [
                   trn.TranType,
-                  trn.SourceDoc,
+                  vchrNo,
                   trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
                   trn.AccCode,
                   trn.StldType,
@@ -2995,7 +3052,9 @@ app.post("/api/save-rcp", async (req, res) => {
             }
             console.log('PDC_RCD insert end');
             conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
+            // vchrNo goes back so the screen can adopt the number actually
+            // written — on ADD it is not the one the client sent.
+            res.json({ message: "Data saved successfully!", vchrNo });
           });
 
         } catch (error) {
@@ -3043,31 +3102,13 @@ app.post("/api/save-payment", async (req, res) => {
     console.log("P.V tranAccData=>**", tranaccData);
     console.log("P.V InvStlData=>**", InvStlData);
     //,StlData
-    // Start transaction
-    //delete old record
-    var sql = "DELETE FROM vouchers WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
-    var sql = "DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table tran_acc old record delete: " + result.affectedRows);
-    });
-    //pdc_isu
-    var sql = "DELETE FROM pdc_isu WHERE TRAN_TYPE = ? AND VCHR_NO =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
-    //adj_dtl
-    var sql = "DELETE FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC =?";
-    connection.query(sql, [vchrData.TranType, vchrData.VchrNo], function (err, result) {
-      if (err) throw err;
-      console.log("table vouchers old record delete: " + result.affectedRows);
-    });
-    // delete old records over
+    // The deletes used to run HERE — on the pool, before the transaction was
+    // opened, fire-and-forget, and keyed on the client's voucher number. Three
+    // problems in one: they were outside the transaction so a later rollback
+    // could not bring the rows back; `throw err` inside a mysql callback is
+    // uncatchable and takes the process down; and on ADD a stale number meant
+    // deleting somebody else's voucher. They now run inside the transaction
+    // below, against the allocated number.
 
     connection.getConnection((err, conn) => {
       if (err) {
@@ -3083,6 +3124,34 @@ app.post("/api/save-payment", async (req, res) => {
         }
 
         try {
+          // On ADD the number is assigned here, not trusted from the client.
+          // Everything below — the deletes, and every child row — uses vchrNo
+          // rather than vchrData.VchrNo, so a stale number in the payload can
+          // neither overwrite another user's voucher nor scatter child rows
+          // under the wrong header. On EDIT the client's number is the record
+          // being edited and is kept as-is.
+          const isAdd = String(vchrData.Mode || "").toUpperCase() === "ADD";
+          const vchrNo = isAdd
+            ? await allocateVchrNo(conn, vchrData.TranType)
+            : vchrData.VchrNo;
+          console.log("vchrNo =>", vchrNo, isAdd ? "(allocated)" : "(client, EDIT)");
+
+          // Clear this voucher's existing rows, inside the transaction. On ADD
+          // vchrNo is freshly allocated so these match nothing; on EDIT they
+          // clear the record being replaced.
+          for (const del of [
+            ["DELETE FROM vouchers WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
+            ["DELETE FROM tran_acc WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
+            ["DELETE FROM pdc_isu WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
+            ["DELETE FROM current_chq WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
+            ["DELETE FROM adj_dtl WHERE SOURCE_TYPE=? AND SOURCE_DOC=?", vchrNo],
+          ]) {
+            await new Promise((resolve, reject) => {
+              conn.query(del[0], [vchrData.TranType, del[1]],
+                (err, result) => err ? reject(err) : resolve(result));
+            });
+          }
+
           // ✅ Step 1: Insert/Update NGP_NET table
           // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
           const vchrQuery = `
@@ -3106,8 +3175,8 @@ app.post("/api/save-payment", async (req, res) => {
           await new Promise((resolve, reject) => {
             conn.query(
               vchrQuery,
-              [vchrData.TranType, vchrData.VchrNo, vchrData.VchrDate,
-              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.CovRt,
+              [vchrData.TranType, vchrNo, vchrData.VchrDate,
+              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.ConvRt,
               vchrData.Particulars, vchrData.PaidTo,
               vchrData.FrgnAmt, vchrData.Amount, vchrData.VchrType],
               (err, result) => {
@@ -3145,7 +3214,7 @@ app.post("/api/save-payment", async (req, res) => {
                   chqQuery,
                   [
                     chq.TranType,
-                    chq.VchrNo,
+                    vchrNo,
                     vchrData.VchrDate,   // still assuming it's a valid date string like '2025-05-15'
                     chq.ChqNo,
                     chq.ChqDt,
@@ -3190,7 +3259,7 @@ app.post("/api/save-payment", async (req, res) => {
                 tranQuery,
                 [
                   trn.TranType,
-                  trn.VchrNo,
+                  vchrNo,
                   vchrData.VchrDate,
                   trn.SrNo,
                   trn.AccCode,
@@ -3232,7 +3301,7 @@ app.post("/api/save-payment", async (req, res) => {
                 stlQuery,
                 [
                   trn.TranType,
-                  trn.SourceDoc,
+                  vchrNo,
                   trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
                   trn.AccCode,
                   trn.StldType,
@@ -3265,7 +3334,9 @@ app.post("/api/save-payment", async (req, res) => {
             }
             console.log('PDC_RCD insert end');
             conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
+            // vchrNo goes back so the screen can adopt the number actually
+            // written — on ADD it is not the one the client sent.
+            res.json({ message: "Data saved successfully!", vchrNo });
           });
 
         } catch (error) {
@@ -4562,7 +4633,7 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
 app.get("/api/vouchers/:tp/:vchr", function (req, res) {
   console.log("vouchers", req.params);
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
-    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
+    "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE,a.CUR_CODE, a.CONV_RATE, " +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.CUST_NAME ,c.ACC_HEAD , a.AMOUNT, a.AMOUNT_FRGN" +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  cus_mst b ON a.CUST_CODE = b.CUST_CODE " +
@@ -4586,7 +4657,7 @@ app.get("/api/payvouchers/:tp/:vchr", function (req, res) {
   connection.query(  //DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS
     "select a.TRAN_TYPE,a.VCHR_NO,DATE_FORMAT(a.DATTE, '%d/%m/%Y') AS DATTE, a.CUST_CODE," +
     "a.PAID_TO ,a.NARRATION1,a.PAID_TO, a.ACC_CODE, b.SUP_NAME ,c.ACC_HEAD ," +
-    " a.AMOUNT, a.AMOUNT_FRGN,a.VCHR_TYPE" +
+    " a.AMOUNT, a.AMOUNT_FRGN,a.VCHR_TYPE,a.CUR_CODE,a.CONV_RATE " +
     " FROM vouchers a " +
     " LEFT OUTER JOIN  sup_mst b ON a.CUST_CODE = b.SUP_CODE " +
     " LEFT OUTER JOIN acc_mst c ON a.ACC_CODE = c.ACC_CODE " +
@@ -11030,4 +11101,9 @@ app.use("/api", currentChqRoutes(connection));
 
 //     // ... your JWT middleware ...
 app.use("/api", voiceRoutes.secure());   
-
+//
+app.use("/api/currencymst", require("./routes/currencyMstRoutes")(connection));
+//
+const invSettleRoutes = require("./routes/invSettle");
+ app.use("/api", authMiddleware, invSettleRoutes(connection));
+//
