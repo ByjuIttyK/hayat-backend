@@ -10591,7 +10591,7 @@ app.get("/api/tranlst", function (req, res) {
   console.log('query  =', req.query);        // { start_date: '2024-01-01', end_date: '2024-01-31' }
 
   connection.query(
-    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD AS ACC_HEAD, AMOUNT," +
+    "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') AS DATTE, ACC_CODE,AC_HEAD , AMOUNT," +
     "IF(DB_CR='D', AMOUNT, 0) AS DR_AMOUNT, " +
     "IF(DB_CR='C', AMOUNT, 0) AS CR_AMOUNT, " +
     "DB_CR, NARRATION1, NARRATION2, JOB_NO " +
