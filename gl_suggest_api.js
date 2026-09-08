@@ -44,6 +44,62 @@ function extractNameTokens(narration) {
     .filter(w => w.length >= 4 && !NAME_STOPWORDS.has(w.toLowerCase()));
 }
 
+// ── Helper: tokens for matching ACCOUNT heads. Unlike extractNameTokens,
+//    which looks only at the party phrase after "from"/"to", this scans the
+//    whole narration — the bank is usually named at the end ("...into ENBD").
+//    Bank names are short, so the minimum length is 3, not 4.
+const ACC_STOPWORDS = new Set([
+  ...['from', 'to', 'with', 'chq', 'chqs', 'cheque', 'cheques', 'amount', 'received',
+      'paid', 'towards', 'against', 'for', 'the', 'and', 'llc', 'ltd', 'dhs', 'aed',
+      'date', 'dtd', 'inv', 'invoice', 'no', 'into', 'via', 'through', 'deposit',
+      'deposited', 'transfer', 'split', 'dated', 'our', 'their', 'account'],
+]);
+function extractAccountTokens(narration) {
+  return String(narration || '')
+    .split(/[^A-Za-z0-9]+/)
+    .map(w => w.trim())
+    .filter(w => w.length >= 3 && !/^\d+$/.test(w) && !ACC_STOPWORDS.has(w.toLowerCase()));
+}
+
+// ── Helper: LIKE search over a master table using a supplied token list ─────
+async function findCandidatesByTokens(connection, table, codeCol, nameCol, tokens, limit = 40) {
+  if (!tokens.length) return [];
+  try {
+    const whereClauses = tokens.map(() => `${nameCol} LIKE ?`).join(' OR ');
+    const scoreClauses = tokens.map(() => `CASE WHEN ${nameCol} LIKE ? THEN 1 ELSE 0 END`).join(' + ');
+    const likeParams = tokens.map(t => `%${t}%`);
+    return await dbQuery(
+      connection,
+      `SELECT ${codeCol} AS CODE, ${nameCol} AS NAME, (${scoreClauses}) AS MATCH_COUNT
+       FROM ${table}
+       WHERE ${whereClauses}
+       ORDER BY MATCH_COUNT DESC
+       LIMIT ${limit}`,
+      [...likeParams, ...likeParams]
+    );
+  } catch (e) {
+    console.error(`gl-suggest: account lookup failed for ${table}:`, e.message);
+    return [];
+  }
+}
+
+// ── Helper: UAE bank abbreviations people actually write in narrations.
+//    Fed to the prompt so "into ENBD" is not matched to whichever bank
+//    happens to sit near the top of the chart of accounts. Extend freely —
+//    it is only a hint list, never a hard mapping. ──────────────────────────
+const BANK_ALIAS_HINTS = [
+  'ENBD / EMIRATES NBD = Emirates NBD Bank',
+  'RAK / RAKBANK = National Bank of Ras Al Khaimah',
+  'ADCB = Abu Dhabi Commercial Bank',
+  'FAB / NBAD = First Abu Dhabi Bank',
+  'DIB = Dubai Islamic Bank',
+  'CBD = Commercial Bank of Dubai',
+  'ADIB = Abu Dhabi Islamic Bank',
+  'MASHREQ / MASHREQBANK = Mashreq Bank',
+  'SCB = Standard Chartered Bank',
+  'HSBC = HSBC Bank Middle East',
+].join('\n');
+
 // ── Helper: token-set of a string (uppercased, unfiltered) for Jaccard scoring
 function tokenSet(s) {
   return new Set(String(s || '').toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean));
@@ -287,21 +343,37 @@ RECEIPT TYPE: ${isBankRcpt ? 'Bank Receipt (may involve PDC cheques, bank transf
 CUSTOMER MASTER (CUST_CODE - CUST_NAME) — candidates extracted from the narration are listed first:
 ${custList}
 
+ACCOUNTS WHOSE NAME APPEARS IN THE NARRATION — prefer these for the debit side:
+${namedAccList}
+
 CHART OF ACCOUNTS (ACC_CODE - ACC_HEAD):
 ${accList}
+
+COMMON UAE BANK ABBREVIATIONS (a hint only — always confirm against the account heads above):
+${BANK_ALIAS_HINTS}
 
 EXTRACTION RULES:
 1. crAcc / crHead  → Party paying us. Match customer name from narration against CUSTOMER MASTER. Pick the closest match. Return CUST_CODE as crAcc, CUST_NAME as crHead. NEVER return an ACC_CODE from the chart of accounts here — crAcc must always come from CUSTOMER MASTER, even if the match is imperfect.
 2. drAcc / drHead  → Debit side account from CHART OF ACCOUNTS (where the money lands):
-   - If narration mentions PDC / post-dated / cheque / bank transfer / NEFT / wire / online → find the BANK account.
+   - If the narration NAMES a bank, use THAT bank's account. Check the abbreviation list above, then match it against the account heads. Never substitute a different bank because its name looks similar.
+   - If a cheque / PDC / transfer / NEFT / wire is mentioned and no bank is named → find the BANK account.
    - If cash → find CASH IN HAND or PETTY CASH account.
-3. amount          → Total receipt amount as a number. 0 if not found.
-4. cheques         → Array of cheque objects extracted from narration. Each: { chqNo, chqDt (YYYY-MM-DD), amount (number) }. Empty array [] if none.
-5. narration       → Clean one-line voucher narration max 100 chars summarising the receipt.
-6. confidence      → "high" if customer + amount clearly found, "medium" if partial, "low" if guessed.
+   - When the receipt is split across several accounts, drAcc is the LARGEST of them (it is only the voucher header; every split still goes in "lines").
+3. lines           → The full double entry, one object per ledger line:
+   { "acc": "", "head": "", "dr": 0, "cr": 0 }
+   - A receipt can land in MORE THAN ONE account. "8,000 into ENBD and 4,500 to cash" is TWO debit lines, not one. Emit one line per account named, each with its own amount.
+   - Debit account codes come from CHART OF ACCOUNTS; credit account codes come from CUSTOMER MASTER.
+   - Each line carries an amount in either dr or cr, never both.
+   - Total dr must equal total cr.
+   - Even a plain one-to-one receipt returns exactly two lines.
+4. amount          → Total receipt amount, i.e. the sum of the debit lines. 0 if not found.
+5. cheques         → Array of cheque objects extracted from narration. Each: { chqNo, chqDt (YYYY-MM-DD), amount (number) }. Empty array [] if none.
+6. narration       → Clean one-line voucher narration max 100 chars summarising the receipt.
+7. confidence      → "high" if customer + amount clearly found, "medium" if partial, "low" if guessed.
 
 Return ONLY this JSON:
 {
+  "lines": [{ "acc": "", "head": "", "dr": 0, "cr": 0 }],
   "drAcc": "",
   "drHead": "",
   "crAcc": "",
@@ -322,7 +394,7 @@ Return ONLY this JSON:
           }],
           generationConfig: {
             temperature: 0,
-            maxOutputTokens: 512,
+            maxOutputTokens: 1024,
             responseMimeType: 'application/json',
           },
         }),
@@ -354,12 +426,74 @@ Return ONLY this JSON:
       const finalCrAcc = bestCustomerMatch ? bestCustomerMatch.code : String(suggestion.crAcc || '').trim();
       const finalCrHead = bestCustomerMatch ? bestCustomerMatch.name : String(suggestion.crHead || '').trim();
 
+      // ── 6a. Normalise the ledger lines ────────────────────────────────────
+      // The model is asked for a "lines" array so a receipt can be split over
+      // several bank/cash accounts. Everything here is defensive: a model that
+      // ignores the instruction, or an older deployment, still yields the plain
+      // two-line entry the screen has always handled.
+      const accByCode = new Map(mergedAccounts.map(r => [String(r.code).trim(), r.name]));
+      const custByCode = new Map(mergedCustomers.map(r => [String(r.code).trim(), r.name]));
+
+      let lines = (Array.isArray(suggestion.lines) ? suggestion.lines : [])
+        .map(l => ({
+          acc: String(l?.acc || '').trim(),
+          head: String(l?.head || '').trim(),
+          dr: Number(l?.dr || 0) || 0,
+          cr: Number(l?.cr || 0) || 0,
+        }))
+        // a line must name an account and carry an amount on exactly one side
+        .filter(l => l.acc && (l.dr > 0) !== (l.cr > 0))
+        // trust the master tables over the model for the head text
+        .map(l => ({
+          ...l,
+          head: (l.cr > 0 ? custByCode.get(l.acc) : accByCode.get(l.acc)) || l.head,
+        }));
+
+      // The deterministic customer match wins on the credit side too.
+      if (bestCustomerMatch) {
+        lines = lines.map(l => (l.cr > 0
+          ? { ...l, acc: bestCustomerMatch.code, head: bestCustomerMatch.name }
+          : l));
+      }
+
+      const sumDr = lines.reduce((t, l) => t + l.dr, 0);
+      const sumCr = lines.reduce((t, l) => t + l.cr, 0);
+      const headerAmount = Number(suggestion.amount || 0) || sumDr || sumCr;
+
+      // No usable lines came back — rebuild the classic single Dr / single Cr
+      // pair so the screen behaves exactly as it did before.
+      if (!lines.length) {
+        const dr = String(suggestion.drAcc || '').trim();
+        if (dr) lines.push({ acc: dr, head: accByCode.get(dr) || String(suggestion.drHead || '').trim(), dr: headerAmount, cr: 0 });
+        if (finalCrAcc) lines.push({ acc: finalCrAcc, head: finalCrHead, dr: 0, cr: headerAmount });
+      } else if (sumCr === 0 && finalCrAcc) {
+        // Debits only — the party line is implied.
+        lines.push({ acc: finalCrAcc, head: finalCrHead, dr: 0, cr: sumDr });
+      }
+
+      // A receipt has one paying party, so a single credit line is simply the
+      // debit total. Anything more complicated is left alone and flagged.
+      const crLines = lines.filter(l => l.cr > 0);
+      const drTotal = lines.reduce((t, l) => t + l.dr, 0);
+      let balanced = false;
+      if (crLines.length === 1 && Math.abs(crLines[0].cr - drTotal) > 0.005) {
+        crLines[0].cr = Number(drTotal.toFixed(2));
+        balanced = true;
+      }
+      const crTotal = lines.reduce((t, l) => t + l.cr, 0);
+
+      // The header shows the largest debit — the main bank on a split receipt.
+      const biggestDr = lines
+        .filter(l => l.dr > 0)
+        .reduce((big, l) => (!big || l.dr > big.dr ? l : big), null);
+
       res.json({
-        drAcc: String(suggestion.drAcc || '').trim(),
-        drHead: String(suggestion.drHead || '').trim(),
+        lines,
+        drAcc: biggestDr ? biggestDr.acc : String(suggestion.drAcc || '').trim(),
+        drHead: biggestDr ? biggestDr.head : String(suggestion.drHead || '').trim(),
         crAcc: finalCrAcc,
         crHead: finalCrHead,
-        amount: Number(suggestion.amount || 0),
+        amount: Number((drTotal || headerAmount).toFixed(2)),
         cheques: Array.isArray(suggestion.cheques) ? suggestion.cheques : [],
         narration: String(suggestion.narration || '').substring(0, 100),
         confidence: bestCustomerMatch
@@ -369,7 +503,12 @@ Return ONLY this JSON:
         // is missing from the Network-tab response entirely, the server is
         // still running an older copy of this file.
         _debug: {
-          version: 'gl-suggest-v2-jaccard',
+          version: 'gl-suggest-v3-lines',
+          lineCount: lines.length,
+          drTotal, crTotal, balanced,
+          accountCandidates: accountCandidates.map(r => `${r.CODE} - ${r.NAME}`),
+          geminiLines: suggestion.lines,
+          geminiDrAcc: suggestion.drAcc,
           extractedPhrase: extractNamePhrase(narration),
           candidatesConsidered: mergedCustomers.length,
           topScores: mergedCustomers

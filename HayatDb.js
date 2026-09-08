@@ -3796,7 +3796,6 @@ app.get("/api/CusAgeingInv", function (req, res) {
     }
   );
 });
-
 app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
   const as_on_date = req.params.as_on_date || new Date().toISOString().split('T')[0];
   const p_cus = req.params.p_cus ? req.params.p_cus.trim().toUpperCase() : null;
@@ -3804,7 +3803,13 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
   console.log("CustSt ==>", { as_on_date, p_cus });
 
   let sql = "SELECT a.CUST_CODE, t.TYPE_ABBR as TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
-    " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE,DATE_FORMAT(b.DO_DATE,'%d/%m/%y') AS DUE_DATE " +
+    " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE," +
+    // Due date is not stored. Where the invoice carries credit terms it is
+    // INV_DATE + CR_DAYS; DO_DATE remains the fallback for invoices with none.
+    " CASE WHEN COALESCE(b.CR_DAYS,0) > 0" +
+    "      THEN DATE_FORMAT(DATE_ADD(b.INV_DATE, INTERVAL b.CR_DAYS DAY),'%d/%m/%y')" +
+    "      ELSE '' " +
+    " END AS DUE_DATE " +
     " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    " +
     "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE < ? ";
   let params = [as_on_date];
@@ -3826,6 +3831,7 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
     res.json(results);
   });
 });
+
 app.get("/api/supst/:p_cus/:as_on_date", function (req, res) {
   const as_on_date = req.params.as_on_date || new Date().toISOString().split('T')[0];
   const p_cus = req.params.p_cus ? req.params.p_cus.trim().toUpperCase() : null;
@@ -3833,7 +3839,7 @@ app.get("/api/supst/:p_cus/:as_on_date", function (req, res) {
   console.log("SupSt ==>", { as_on_date, p_cus });
 
   let sql = "SELECT ACC_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
-    "  DR_AMT, CR_AMT, BALANCE,'' AS NAR" +
+    "  DR_AMT, CR_AMT, BALANCE, NAR" +
     " FROM v_sup_outstanding_bill" +
     " WHERE DATTE < ?";
   let params = [as_on_date];
