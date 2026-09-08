@@ -11113,3 +11113,8 @@ app.use("/api/currencymst", require("./routes/currencyMstRoutes")(connection));
 const invSettleRoutes = require("./routes/invSettle");
  app.use("/api", authMiddleware, invSettleRoutes(connection));
 //
+   const stmtRunRoutes = require("./routes/stmtRun");
+   app.use("/api", authMiddleware, stmtRunRoutes(connection));
+   //
+   
+      app.use("/api", require("./routes/statementMail")(connection))
