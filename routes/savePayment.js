@@ -55,6 +55,101 @@ module.exports = function (connection) {
 
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+  /* ---- GET /api/lpo-settlements/:tranType/:vchrNo -------------------------
+   * The LPO panel's rows on EDIT. Ordered by MAIN_SR_NO so they come back in
+   * the order they were keyed — that is what the save assigns it for.
+   * ---------------------------------------------------------------------- */
+  router.get("/lpo-settlements/:tranType/:vchrNo", async (req, res) => {
+    try {
+      const [rows] = await dbp.query(
+        `SELECT PV_TYPE, PV_NO, LPO_NO, DETAILS, AMOUNT_STL, SUP_CODE, MAIN_SR_NO
+           FROM lpo_pv_settlements
+          WHERE PV_TYPE = ? AND PV_NO = ?
+          ORDER BY MAIN_SR_NO`,
+        [req.params.tranType, req.params.vchrNo]
+      );
+      res.json(
+        rows.map((r) => ({
+          LPO_NO: r.LPO_NO || "",
+          DETAILS: r.DETAILS || "",
+          // DECIMAL comes back as a string from mysql2; the grid sums it
+          AMOUNT_STL: Number(r.AMOUNT_STL) || 0,
+          SUP_CODE: r.SUP_CODE || "",
+          MAIN_SR_NO: Number(r.MAIN_SR_NO) || null,
+        }))
+      );
+    } catch (err) {
+      console.error("[lpo-settlements] read failed:", err);
+      res.status(500).json({ message: "Could not read the LPO settlements." });
+    }
+  });
+
+  /* ---- GET /api/lpos-by-supplier/:supCode --------------------------------
+   * The F9 lookup on the LPO panel: this supplier's LPOs with what is still
+   * open on each.
+   *
+   * Optional ?pvType=04&pvNo=0000004326 — when editing a voucher, its own
+   * settlements are added back to the balance. Without that an LPO already
+   * settled by the voucher being edited would show as closed, and the line
+   * could not be re-picked or corrected.
+   *
+   * The LPO's value is AMOUNT less DISCOUNT plus ROUND_OFF and VAT_AMOUNT.
+   * Check that against how LpoPrn prints a total — if the printed figure is
+   * built differently, this is the one line to change.
+   * ---------------------------------------------------------------------- */
+  router.get("/lpos-by-supplier/:supCode", async (req, res) => {
+    const supCode = String(req.params.supCode || "").trim();
+    if (!supCode) return res.status(400).json({ message: "No supplier code." });
+
+    const { pvType = null, pvNo = null } = req.query;
+
+    try {
+      const [rows] = await dbp.query(
+        `
+        SELECT n.LPO_NO,
+               DATE_FORMAT(n.lpo_date, '%d/%m/%Y')                      AS LPO_DATE,
+               COALESCE(NULLIF(TRIM(n.NARRATION), ''), LEFT(n.PAY_TERMS, 100)) AS DETAILS,
+               n.JOB_NO,
+               ROUND(COALESCE(n.AMOUNT,0) - COALESCE(n.DISCOUNT,0)
+                   + COALESCE(n.ROUND_OFF,0) + COALESCE(n.VAT_AMOUNT,0), 2) AS LPO_AMOUNT,
+               ROUND(COALESCE(s.settled, 0), 2)                          AS SETTLED,
+               ROUND(COALESCE(n.AMOUNT,0) - COALESCE(n.DISCOUNT,0)
+                   + COALESCE(n.ROUND_OFF,0) + COALESCE(n.VAT_AMOUNT,0)
+                   - COALESCE(s.settled, 0), 2)                          AS BALANCE
+          FROM lpo_net n
+          LEFT JOIN (
+                SELECT LPO_NO, SUM(AMOUNT_STL) AS settled
+                  FROM lpo_pv_settlements
+                 WHERE (? IS NULL OR NOT (PV_TYPE = ? AND PV_NO = ?))
+                 GROUP BY LPO_NO
+               ) s ON s.LPO_NO = n.LPO_NO
+         WHERE n.SUP_CODE = ?
+           AND COALESCE(n.CANCELLED, 'N') <> 'Y'
+        HAVING BALANCE > 0.005
+         ORDER BY n.lpo_date DESC, n.LPO_NO DESC
+         LIMIT 300
+        `,
+        [pvNo || null, pvType || null, pvNo || null, supCode]
+      );
+
+      // mysql2 returns DECIMAL as a string and the picker does arithmetic on it
+      res.json(
+        rows.map((r) => ({
+          LPO_NO: r.LPO_NO,
+          LPO_DATE: r.LPO_DATE || "",
+          DETAILS: r.DETAILS || "",
+          JOB_NO: r.JOB_NO || "",
+          LPO_AMOUNT: Number(r.LPO_AMOUNT) || 0,
+          SETTLED: Number(r.SETTLED) || 0,
+          BALANCE: Number(r.BALANCE) || 0,
+        }))
+      );
+    } catch (err) {
+      console.error("[lpos-by-supplier] failed:", err);
+      res.status(500).json({ message: "Could not read the supplier's LPOs." });
+    }
+  });
+
   router.post("/save-payment", async (req, res) => {
     const {
       vchrData,
@@ -273,12 +368,13 @@ module.exports = function (connection) {
     for (const lpo of lpoData.filter((l) => l && String(l.LpoNo || "").trim())) {
       await conn.query(
         `INSERT INTO lpo_pv_settlements
-           (PV_TYPE, PV_NO, LPO_NO, AMOUNT_STL, SUP_CODE, MAIN_SR_NO)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+           (PV_TYPE, PV_NO, LPO_NO, DETAILS, AMOUNT_STL, SUP_CODE, MAIN_SR_NO)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           vchrData.TranType,
           vchrNo,
           String(lpo.LpoNo).trim(),
+          lpo.Details ?? null,
           lpo.Amount,
           lpo.SupCode,
           lpo.MainSrNo ?? null,
