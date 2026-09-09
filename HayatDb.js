@@ -2791,8 +2791,7 @@ const allocateVchrNo = (conn, tranType) =>
     conn.query(
       `SELECT COALESCE(MAX(CAST(VCHR_NO AS UNSIGNED)), 0) + 1 AS nextNo
          FROM vouchers
-        WHERE TRAN_TYPE = ?
-        FOR UPDATE`,
+        WHERE TRAN_TYPE = ?`,
       [tranType],
       (err, rows) => {
         if (err) return reject(err);
@@ -3090,270 +3089,6 @@ app.get("/api/adjdtl/:tp/:vchr", (req, res) => {
     res.json(rows);
   });
 });
-
-app.post("/api/save-payment", async (req, res) => {
-  console.log("SAVE PAYMENTS");
-  try {
-    const { vchrData, chqData, tranaccData, InvStlData } = req.body; // Extract form data & grid rows from payload
-    //, StlData
-    console.log("SAVE PV 2", req.body);
-    console.log("P.V vchrData=>**", vchrData);
-    console.log("P.V ChqData=>**", chqData);
-    console.log("P.V tranAccData=>**", tranaccData);
-    console.log("P.V InvStlData=>**", InvStlData);
-    //,StlData
-    // The deletes used to run HERE — on the pool, before the transaction was
-    // opened, fire-and-forget, and keyed on the client's voucher number. Three
-    // problems in one: they were outside the transaction so a later rollback
-    // could not bring the rows back; `throw err` inside a mysql callback is
-    // uncatchable and takes the process down; and on ADD a stale number meant
-    // deleting somebody else's voucher. They now run inside the transaction
-    // below, against the allocated number.
-
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("P.V Bank save -Error getting connection:", err);
-        return res.status(500).json({ message: "R.V Bank save - Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // On ADD the number is assigned here, not trusted from the client.
-          // Everything below — the deletes, and every child row — uses vchrNo
-          // rather than vchrData.VchrNo, so a stale number in the payload can
-          // neither overwrite another user's voucher nor scatter child rows
-          // under the wrong header. On EDIT the client's number is the record
-          // being edited and is kept as-is.
-          const isAdd = String(vchrData.Mode || "").toUpperCase() === "ADD";
-          const vchrNo = isAdd
-            ? await allocateVchrNo(conn, vchrData.TranType)
-            : vchrData.VchrNo;
-          console.log("vchrNo =>", vchrNo, isAdd ? "(allocated)" : "(client, EDIT)");
-
-          // Clear this voucher's existing rows, inside the transaction. On ADD
-          // vchrNo is freshly allocated so these match nothing; on EDIT they
-          // clear the record being replaced.
-          for (const del of [
-            ["DELETE FROM vouchers WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
-            ["DELETE FROM tran_acc WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
-            ["DELETE FROM pdc_isu WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
-            ["DELETE FROM current_chq WHERE TRAN_TYPE=? AND VCHR_NO=?", vchrNo],
-            ["DELETE FROM adj_dtl WHERE SOURCE_TYPE=? AND SOURCE_DOC=?", vchrNo],
-          ]) {
-            await new Promise((resolve, reject) => {
-              conn.query(del[0], [vchrData.TranType, del[1]],
-                (err, result) => err ? reject(err) : resolve(result));
-            });
-          }
-
-          // ✅ Step 1: Insert/Update NGP_NET table
-          // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
-          const vchrQuery = `
-               INSERT INTO vouchers (TRAN_TYPE, VCHR_NO, DATTE,      CUST_CODE,    ACC_CODE,
-                                     CUR_CODE ,CONV_RATE,NARRATION1, PAID_TO,    AMOUNT_FRGN,
-                                      AMOUNT,VCHR_TYPE) 
-               VALUES (?, ?, ?, ?,?,?, ?,?,?,?,?,?) 
-               ON DUPLICATE KEY UPDATE 
-               DATTE= VALUES(DATTE),
-               CUST_CODE = VALUES(CUST_CODE),
-               ACC_CODE= VALUES(ACC_CODE),
-               CUR_CODE = VALUES(CUR_CODE),
-               CONV_RATE = VALUES(CONV_RATE),
-               NARRATION1 = VALUES(NARRATION1),
-               PAID_TO = VALUES(PAID_TO),
-               AMOUNT_FRGN = VALUES(AMOUNT_FRGN),
-               AMOUNT = VALUES(AMOUNT),
-               VCHR_TYPE = VALUES(VCHR_TYPE);
-              `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              vchrQuery,
-              [vchrData.TranType, vchrNo, vchrData.VchrDate,
-              vchrData.CustCd, vchrData.DrAc, vchrData.CurCd, vchrData.ConvRt,
-              vchrData.Particulars, vchrData.PaidTo,
-              vchrData.FrgnAmt, vchrData.Amount, vchrData.VchrType],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("vouchers Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-          // ✅
-          if (vchrData.TranType !== "05") {
-            console.log('PDC_ISU insert start');
-
-            for (const chq of chqData.filter(chq =>
-              chq.ChqNo && chq.ChqNo.trim() !== "")) {
-              const chqQuery = `
-                  INSERT INTO pdc_isu(
-                    TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
-                    PDC_CODE, SUP_CODE, CHQ_BANK, AMOUNT, NARRATION
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                  ON DUPLICATE KEY UPDATE
-                    VCHR_DATE = VALUES(VCHR_DATE),
-                    CHQ_DATE = VALUES(CHQ_DATE),
-                    PDC_CODE = VALUES(PDC_CODE),
-                    SUP_CODE = VALUES(SUP_CODE),
-                    CHQ_BANK = VALUES(CHQ_BANK),
-                    AMOUNT = VALUES(AMOUNT),
-                    NARRATION = VALUES(NARRATION);
-                `;
-
-              await new Promise((resolve, reject) => {
-                conn.query(
-                  chqQuery,
-                  [
-                    chq.TranType,
-                    vchrNo,
-                    vchrData.VchrDate,   // still assuming it's a valid date string like '2025-05-15'
-                    chq.ChqNo,
-                    chq.ChqDt,
-                    chq.PdcCode,
-                    chq.SupCode,
-                    chq.ChqBank,
-                    chq.Amount,
-                    chq.Narration
-                  ],
-                  (err, result) => {
-                    if (err) {
-                      console.error("Error inserting/updating chq row:", chq, err);
-                      return reject(err);
-                    }
-                    console.log("Inserted/Updated row:", chq.VchrNo, result);
-                    resolve(result);
-                  }
-                );
-              });
-            }
-          }
-          console.log('tran_acc insert start', tranaccData);
-          for (const trn of tranaccData) {
-            const tranQuery = `
-  INSERT INTO tran_acc (
-    TRAN_TYPE, VCHR_NO, DATTE, SR_NO,ACC_CODE,
-    AMOUNT, DB_CR,NARRATION1,NARRATION2, JOB_NO
-  ) VALUES (?, ?, ?, ?, ?,?, ?, ?,?,?)
-  ON DUPLICATE KEY UPDATE
-    DATTE = VALUES(DATTE),
-    ACC_CODE = VALUES(ACC_CODE),
-    AMOUNT = VALUES(AMOUNT),
-    DB_CR = VALUES(DB_CR),
-    AMOUNT = VALUES(AMOUNT),
-    NARRATION1 = VALUES(NARRATION1),
-    NARRATION2 = VALUES(NARRATION2),
-    JOB_NO = VALUES(JOB_NO);
-`;
-
-            await new Promise((resolve, reject) => {
-              conn.query(
-                tranQuery,
-                [
-                  trn.TranType,
-                  vchrNo,
-                  vchrData.VchrDate,
-                  trn.SrNo,
-                  trn.AccCode,
-                  trn.Amount,
-                  trn.DbCr,
-                  trn.Narration1,
-                  trn.Narration2,
-                  trn.JobNo,
-                ],
-                (err, result) => {
-                  if (err) {
-                    console.error("Error inserting/updating trn row:", trn, err);
-                    return reject(err);
-                  }
-                  console.log("Inserted/Updated row:", trn.VchrNo, result);
-                  resolve(result);
-                }
-              );
-            });
-          }
-          console.log("InvStl INSERT START:");
-          for (const trn of InvStlData) {
-            const stlQuery = `
-                  INSERT INTO adj_dtl (
-                    SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE,
-                     STLD_TYPE,STLD_DOC,STLD_DATE,STLD_AMT, MAIN_SR_NO
-                  ) VALUES (?, ?, ?, ?, ?,?, ?, ?, ?)
-                  ON DUPLICATE KEY UPDATE
-                   SOURCE_DATE=VALUES(SOURCE_DATE),
-                   ACC_CODE=VALUES(ACC_CODE),
-                   STLD_TYPE=VALUES(STLD_TYPE),
-                   STLD_DOC =VALUES(STLD_DOC),
-                   STLD_DATE = VALUES(STLD_DATE),
-                   STLD_AMT = VALUES(STLD_AMT)
-                  `;
-            //PK SOURCE_TYPE,SOURCE_DOC, MAIN_SR_NO
-            await new Promise((resolve, reject) => {
-              conn.query(
-                stlQuery,
-                [
-                  trn.TranType,
-                  vchrNo,
-                  trn.SourceDate,   // still assuming it's a valid date string like '2025-05-15'
-                  trn.AccCode,
-                  trn.StldType,
-                  trn.StldDoc,
-                  trn.StldDate,
-                  trn.Amount,
-                  // MAIN_SR_NO is part of the key (SOURCE_TYPE, SOURCE_DOC,
-                  // MAIN_SR_NO). It was never supplied, so every settlement
-                  // line of a voucher shared one key and ON DUPLICATE KEY
-                  // UPDATE overwrote the last — only one row survived.
-                  trn.MainSrNo ?? null
-                ],
-                (err, result) => {
-                  if (err) {
-                    console.error("Error inserting/updating adj_dtl row:", trn, err);
-                    return reject(err);
-                  }
-                  console.log("Inserted/Updated adj_dtl row/END:", trn.VchrNo, result);
-                  resolve(result);
-                }
-              );
-            });
-          }
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            console.log('PDC_RCD insert end');
-            conn.release(); // Release the connection back to the pool
-            // vchrNo goes back so the screen can adopt the number actually
-            // written — on ADD it is not the one the client sent.
-            res.json({ message: "Data saved successfully!", vchrNo });
-          });
-
-        } catch (error) {
-          console.error("Receipt vouchers failed to save:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error("Server Error Foreign Purchase:", error);
-    res.status(500).json({ message: "Internal Server Error :Bank Receipt vouchers ", error });
-  }
-})
-
 app.post("/api/save-frgnpurch", async (req, res) => {
   try {
     const { netData, expData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -10590,6 +10325,39 @@ app.get('/api/supbal', function (req, res) {
     });
 }
 );
+
+
+
+app.get('/api/cusbal', function (req, res) {
+  //  const acCode = req.params.acode;
+  const { end_date } = req.query;
+
+  console.log('Cust.Leddsp  Bal ', end_date);
+  connection.query(
+    "SELECT CUST_CODE, CUST_NAME, BALANCE, " +
+    "CASE WHEN BALANCE > 0 THEN BALANCE ELSE 0 END AS DR_BALANCE, " +
+    "CASE WHEN BALANCE < 0 THEN ABS(BALANCE) ELSE 0 END AS CR_BALANCE " +
+    "FROM ( " +
+    "  SELECT b.CUST_CODE, b.CUST_NAME, " +
+    "  SUM(CASE WHEN db_cr = 'D' THEN AMOUNT ELSE AMOUNT * -1 END) AS BALANCE " +
+    "  FROM tran_acc a JOIN cus_mst b ON a.ACC_CODE = b.CUST_CODE " +
+    "  WHERE DATTE < ? " +
+    "  GROUP BY b.CUST_CODE, b.CUST_NAME " +
+    ") AS summary ORDER BY CUST_CODE",
+    [end_date],
+
+    function (error, result) {
+      if (error) {
+        console.log("Sup.Bal Select error", error);
+        res.status(500).send("Server error - select Sup.Bal");
+      } else {
+        console.log(result);
+        res.json(result);
+      }
+    });
+}
+);
+
 app.get("/api/tranlst", function (req, res) {
   const { ItemCd, start_date, end_date } = req.query; // <-- ✅ Extract from query string
 
@@ -11116,5 +10884,11 @@ const invSettleRoutes = require("./routes/invSettle");
    const stmtRunRoutes = require("./routes/stmtRun");
    app.use("/api", authMiddleware, stmtRunRoutes(connection));
    //
-   
-      app.use("/api", require("./routes/statementMail")(connection))
+   app.use("/api", require("./routes/statementMail")(connection))
+//
+//const statementRunRoutes = require("./routes/statementRunRoutes");
+//app.use("/api", statementRunRoutes(connection));
+
+//
+const savePayment = require("./routes/savePayment");
+app.use("/api", savePayment(connection));

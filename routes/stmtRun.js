@@ -1,6 +1,6 @@
 // routes/stmtRun.js
-// Statement runs — build a month's list of customers with a balance, segment
-// them by share of the receivable, then track preview/send per customer.
+// Statement runs — build a month's list of customers with a balance, age it
+// into five buckets, then track preview/send per customer.
 //
 // Register in HayatDb.js:
 //   const stmtRunRoutes = require("./routes/stmtRun");
@@ -12,9 +12,29 @@ const express = require("express");
 const EMAIL_COL = "EMAIL";
 
 // Segment cut-offs by cumulative share of the total receivable.
-// A = the customers making up the first 80%, B = next 15%, C = the tail.
+// Still written to SEGMENT_AUTO / SEGMENT for the older reports, but the
+// statement screen no longer reads them — it derives A-D from the ageing
+// buckets below, so the letter follows how old the money is, not how big it is.
 const SEG_A = 80;
 const SEG_B = 95;
+
+// Ageing buckets in days: 0-30, 30-60, 60-90, 90-120, over 120.
+// The open amount is DR_AMT - CR_AMT per row; BALANCE on the view is a running
+// total and must never be summed. Spelled once so the buckets and the
+// outstanding total can never drift apart.
+const OPEN = "(v.DR_AMT - v.CR_AMT)";
+const AGE = "DATEDIFF(x.as_on, v.DATTE)";
+
+const AGE_COLS = `
+       ROUND(SUM(CASE WHEN ${AGE} <=  30 THEN ${OPEN} ELSE 0 END), 2) AS age_0_30,
+       ROUND(SUM(CASE WHEN ${AGE} >   30
+                       AND ${AGE} <=  60 THEN ${OPEN} ELSE 0 END), 2) AS age_30_60,
+       ROUND(SUM(CASE WHEN ${AGE} >   60
+                       AND ${AGE} <=  90 THEN ${OPEN} ELSE 0 END), 2) AS age_60_90,
+       ROUND(SUM(CASE WHEN ${AGE} >   90
+                       AND ${AGE} <= 120 THEN ${OPEN} ELSE 0 END), 2) AS age_90_120,
+       ROUND(SUM(CASE WHEN ${AGE} >  120 THEN ${OPEN} ELSE 0 END), 2) AS age_120_plus,
+       MAX(${AGE})                                                    AS oldest_days`;
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -64,18 +84,22 @@ module.exports = function (connection) {
       conn = await connection.promise().getConnection();
       await conn.query("START TRANSACTION");
 
-      // Customers with a balance as at the cut-off. Balance is DR - CR per row;
-      // BALANCE on the view is a running total and must not be summed.
-      const [rows] = await conn.execute(
+      // Customers with a balance as at the cut-off, aged into the five buckets.
+      // The cut-off is carried in a derived table so it is named once instead
+      // of repeated as a placeholder in every CASE — which is also why this
+      // one uses query() rather than execute().
+      const [rows] = await conn.query(
         `SELECT v.CUST_CODE                              AS custCode,
                 MAX(c.CUST_NAME)                         AS custName,
                 MAX(c.${EMAIL_COL})                      AS email,
-                ROUND(SUM(v.DR_AMT - v.CR_AMT), 2)       AS outstanding
+                ROUND(SUM(${OPEN}), 2)                   AS outstanding,
+                ${AGE_COLS}
            FROM v_cust_outstanding_bill v
+     CROSS JOIN (SELECT ? AS as_on) x
       LEFT JOIN cus_mst c ON c.CUST_CODE = v.CUST_CODE
-          WHERE v.DATTE < ?
+          WHERE v.DATTE < x.as_on
        GROUP BY v.CUST_CODE
-         HAVING ${includeZero ? "ROUND(SUM(v.DR_AMT - v.CR_AMT), 2) <> 0" : "ROUND(SUM(v.DR_AMT - v.CR_AMT), 2) > 0"}
+         HAVING ${includeZero ? `ROUND(SUM(${OPEN}), 2) <> 0` : `ROUND(SUM(${OPEN}), 2) > 0`}
        ORDER BY outstanding DESC`,
         [asOnDate]
       );
@@ -122,6 +146,14 @@ module.exports = function (connection) {
           r.custName || null,
           email || null,
           amt.toFixed(2),
+          Number(r.age_0_30 || 0).toFixed(2),
+          Number(r.age_30_60 || 0).toFixed(2),
+          Number(r.age_60_90 || 0).toFixed(2),
+          Number(r.age_90_120 || 0).toFixed(2),
+          Number(r.age_120_plus || 0).toFixed(2),
+          r.oldest_days === null || r.oldest_days === undefined
+            ? null
+            : Number(r.oldest_days),
           cum.toFixed(2),
           seg,
           seg,
@@ -132,7 +164,8 @@ module.exports = function (connection) {
       await conn.query(
         `INSERT INTO stmt_run_dtl
            (RUN_ID, CUST_CODE, CUST_NAME, EMAIL_ID, OUTSTANDING,
-            CUM_PERCENT, SEGMENT_AUTO, SEGMENT, ROW_STATUS)
+            age_0_30, age_30_60, age_60_90, age_90_120, age_120_plus,
+            oldest_days, CUM_PERCENT, SEGMENT_AUTO, SEGMENT, ROW_STATUS)
          VALUES ?`,
         [values]
       );
@@ -175,6 +208,12 @@ module.exports = function (connection) {
                 CUST_NAME     AS custName,
                 EMAIL_ID      AS email,
                 OUTSTANDING   AS outstanding,
+                age_0_30      AS AGE_0_30,
+                age_30_60     AS AGE_30_60,
+                age_60_90     AS AGE_60_90,
+                age_90_120    AS AGE_90_120,
+                age_120_plus  AS AGE_120_PLUS,
+                oldest_days   AS oldestDays,
                 CUM_PERCENT   AS cumPercent,
                 SEGMENT_AUTO  AS segmentAuto,
                 SEGMENT       AS segment,
@@ -184,7 +223,7 @@ module.exports = function (connection) {
                 ERROR_TEXT    AS errorText
            FROM stmt_run_dtl
           WHERE RUN_ID = ?${seg && seg !== "ALL" ? " AND SEGMENT = ?" : ""}
-       ORDER BY OUTSTANDING DESC`,
+       ORDER BY age_120_plus DESC, age_90_120 DESC, OUTSTANDING DESC`,
         seg && seg !== "ALL" ? [runId, seg] : [runId]
       );
       res.json(rows);
@@ -307,7 +346,17 @@ module.exports = function (connection) {
        GROUP BY SEGMENT, ROW_STATUS`,
         [runId]
       );
-      res.json({ ...hdr, counts });
+
+      const [[ageing]] = await db.execute(
+        `SELECT SUM(age_0_30)     AS b0_30,
+                SUM(age_30_60)    AS b30_60,
+                SUM(age_60_90)    AS b60_90,
+                SUM(age_90_120)   AS b90_120,
+                SUM(age_120_plus) AS b120_plus
+           FROM stmt_run_dtl WHERE RUN_ID = ?`,
+        [runId]
+      );
+      res.json({ ...hdr, counts, ageing });
     } catch (err) {
       fail(res, err, "run summary");
     }
