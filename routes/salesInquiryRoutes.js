@@ -128,8 +128,8 @@ module.exports = function (connection) {
   router.get("/sales-inquiry", async (req, res) => {
     try {
       const [rows] = await db.query(
-        `SELECT INQ_NO, INQ_DATE, INQ_TYPE, CUST_CODE, SUBJECT, SINQ_STAT, REGRET, QUOTE_NO, QUOTE_DATE
-         FROM sales_inquiry ORDER BY INQ_DATE DESC, INQ_NO DESC`
+        `SELECT INQ_NO, DATE_FORMAT(INQ_DATE,'%d/%m/%y') AS INQ_DATE, INQ_TYPE, CUST_CODE, SUBJECT, SINQ_STAT, REGRET, QUOTE_NO, QUOTE_DATE
+         FROM sales_inquiry ORDER BY  INQ_NO DESC`
       );
       res.json(rows);
     } catch (err) {

@@ -10892,3 +10892,6 @@ const invSettleRoutes = require("./routes/invSettle");
 //
 const savePayment = require("./routes/savePayment");
 app.use("/api", savePayment(connection));
+//
+ const voucherDelete = require("./routes/voucherDelete");
+  app.use("/api", voucherDelete(connection));
