@@ -2756,8 +2756,10 @@ app.post("/api/save-do", async (req, res) => {
 //
 app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
   connection.query(
-    "select STLD_DOC, STLD_TYPE, STLD_DATE, STLD_AMT, STLD_DBCR, ACC_CODE" +
-    " from adj_dtl where source_type = ? and source_doc = ?",
+    "select v.STLD_DOC, v.STLD_TYPE, DATE_FORMAT(v.STLD_DATE,'%d/%m/%y') as STLD_DATE, "+
+    " v.STLD_AMT, v.STLD_DBCR, v.ACC_CODE,h.JOB_NO" +
+    " from adj_dtl v  LEFT JOIN fab_inv_hdr h " +
+        " ON h.INV_NO = v.STLD_DOC where v.source_type = ? and v.source_doc = ?",
     [req.params.tranType, req.params.vchrNo],
     function (err, result) {
       if (err) { throw err; } else { res.json(result); }
@@ -3077,8 +3079,8 @@ app.post("/api/save-rcp", async (req, res) => {
 // previously settled. adj_dtl is keyed by the SOURCE (paying) voucher.
 app.get("/api/adjdtl/:tp/:vchr", (req, res) => {
   const sql =
-    "SELECT SOURCE_TYPE, SOURCE_DOC, SOURCE_DATE, ACC_CODE, " +
-    "       STLD_TYPE, STLD_DOC, STLD_DATE, STLD_AMT, MAIN_SR_NO " +
+    "SELECT SOURCE_TYPE, SOURCE_DOC, DATE_FORMAT(SOURCE_DATE,'%d/%m/%y') as SOURCE_DATE, ACC_CODE, " +
+    "       STLD_TYPE, STLD_DOC, DATE_FORMAT(STLD_DATE,'%d/%m/%y') as STLD_DATE, STLD_AMT, MAIN_SR_NO " +
     "FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
     "ORDER BY MAIN_SR_NO";
   connection.query(sql, [req.params.tp, req.params.vchr], (err, rows) => {
@@ -3601,9 +3603,9 @@ app.get("/api/supst/:p_cus/:as_on_date", function (req, res) {
 app.get("/api/InvStlCust/:custcd", function (req, res) {
   console.log("InvStlCust", req.params.custcd);
   connection.query(
-    "SELECT  CUST_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE, NAR," +
-    "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM v_cust_outstanding_bill WHERE CUST_CODE = ?",
+    "SELECT  v.CUST_CODE, v.VCHR_NO DOC_NO, v.TRAN_TYPE DOC_TYPE,DATE_FORMAT(v.DATTE,'%d/%m/%Y') DOC_DATE, v.NAR," +
+    "v.DR_AMT, v.CR_AMT, v.BALANCE INV_AMT,h.JOB_NO " +
+    "FROM v_cust_outstanding_bill  v LEFT JOIN fab_inv_hdr h ON h.INV_NO = v.VCHR_NO WHERE v.CUST_CODE = ?",
     [req.params.custcd],
     function (err, results) {
       if (err) {
@@ -4353,7 +4355,7 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select SOURCE_TYPE,SOURCE_DOC,SOURCE_DATE, ACC_CODE,STLD_DOC ,STLD_TYPE, STLD_AMT " +
+      "select SOURCE_TYPE,SOURCE_DOC,DATE_FORMAT(SOURCE_DATE,'%d/%m/%y') AS SOURCE_DATE , ACC_CODE,STLD_DOC ,STLD_TYPE, STLD_AMT " +
       "FROM adj_dtl WHERE SOURCE_TYPE = :1 AND SOURCE_DOC =:2 ",
       [req.params.tp, req.params.vchr],
       {
@@ -4799,6 +4801,32 @@ app.get("/api/tranacc/:tp/:vchr", function (req, res) {
     " FROM tran_acc  a " +
     " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
     " WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? ORDER BY lpad(a.SR_NO,4,'0')",
+    [req.params.tp, req.params.vchr],
+    //LEFT JOIN = ALL ROWS OF LEFT TABLE  (tran_acc Here)
+    function (err, result) {
+      if (err) {
+        console.error("Error executing query: ", err.message);
+        return res.status(500).send("Error executing query.");
+      } else {
+        console.log(" TranAcc :", result);
+        res.json(result);
+      }
+    }
+  );
+});
+
+
+app.get("/api/tranaccCR/:tp/:vchr", function (req, res) {
+  console.log("tranacc entered :", req.params);
+  connection.query(
+    "  SELECT a.SR_NO, a.TRAN_TYPE,a.VCHR_NO, DATE_FORMAT(a.DATTE, '%d/%m/%Y')  DATTE," +
+    "   a.ACC_CODE, a.AMOUNT,  a.DB_CR, a.NARRATION1,a.NARRATION2, a.JOB_NO, " +
+    "   a.USERNAME,b.AC_HEAD AS ACC_HEAD , " +
+    "   CASE WHEN a.DB_CR = 'D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
+    "  CASE WHEN a.DB_CR = 'C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
+    " FROM tran_acc  a " +
+    " LEFT JOIN ac_list b ON a.ACC_CODE = b.AC_CODE " +
+    " WHERE  a.TRAN_TYPE = ? AND a.VCHR_NO = ? and DB_CR='C' ORDER BY lpad(a.SR_NO,4,'0')",
     [req.params.tp, req.params.vchr],
     //LEFT JOIN = ALL ROWS OF LEFT TABLE  (tran_acc Here)
     function (err, result) {
