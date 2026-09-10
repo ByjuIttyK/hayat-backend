@@ -10923,3 +10923,7 @@ app.use("/api", savePayment(connection));
 //
  const voucherDelete = require("./routes/voucherDelete");
   app.use("/api", voucherDelete(connection));
+  //
+ const glAuditRoutes = require("./routes/glAuditRoutes");
+   app.use("/api", glAuditRoutes(connection));
+ 
