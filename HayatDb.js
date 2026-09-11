@@ -1324,9 +1324,9 @@ app.post("/api/save-localpurch", async (req, res) => {
           // Map netData fields to match acc_posting_setup field names
           const glPayload = {
             ModuleName: "PURCHASE_HDR",
-            InvNo: netData.PjvNo, 
+            InvNo: netData.PjvNo,
             Date: netData.PjvDt,
-            Narration: `Inv:${netData.InvNo}:${netData.InvDt}`|| "",
+            Narration: `Inv:${netData.InvNo}:${netData.InvDt}` || "",
             SupCode: netData.SupCd,
             GrossAmt: netData.GrossAmt,        // Matches FIELD_NAME for PURCHASE rule
             VatAmt: netData.VatAmt,          // Matches FIELD_NAME for VAT rule
@@ -2892,10 +2892,10 @@ app.post("/api/save-do", async (req, res) => {
 //
 app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
   connection.query(
-    "select v.STLD_DOC, v.STLD_TYPE, DATE_FORMAT(v.STLD_DATE,'%d/%m/%y') as STLD_DATE, "+
+    "select v.STLD_DOC, v.STLD_TYPE, DATE_FORMAT(v.STLD_DATE,'%d/%m/%y') as STLD_DATE, " +
     " v.STLD_AMT, v.STLD_DBCR, v.ACC_CODE,h.JOB_NO" +
     " from adj_dtl v  LEFT JOIN fab_inv_hdr h " +
-        " ON h.INV_NO = v.STLD_DOC where v.source_type = ? and v.source_doc = ?",
+    " ON h.INV_NO = v.STLD_DOC where v.source_type = ? and v.source_doc = ?",
     [req.params.tranType, req.params.vchrNo],
     function (err, result) {
       if (err) { throw err; } else { res.json(result); }
@@ -3605,7 +3605,7 @@ app.get("/api/paymentlov", function (req, res) {
 app.get("/api/cmpdetails", function (req, res) {
   // const tableName= "COMPANY";
   connection.query(
-    "select NAME, PLACE, ADDRESS1 " + " FROM company",
+    "select NAME, PLACE, ADDRESS1,ADDRESS2 , PHONE,EMAIL " + " FROM company",
 
     function (err, results, fields) {
       if (err) {
@@ -11038,17 +11038,17 @@ app.use("/api", currentChqRoutes(connection));
 //    app.use("/api", voiceTranscribe());
 
 //     // ... your JWT middleware ...
-app.use("/api", voiceRoutes.secure());   
+app.use("/api", voiceRoutes.secure());
 //
 app.use("/api/currencymst", require("./routes/currencyMstRoutes")(connection));
 //
 const invSettleRoutes = require("./routes/invSettle");
- app.use("/api", authMiddleware, invSettleRoutes(connection));
+app.use("/api", authMiddleware, invSettleRoutes(connection));
 //
-   const stmtRunRoutes = require("./routes/stmtRun");
-   app.use("/api", authMiddleware, stmtRunRoutes(connection));
-   //
-   app.use("/api", require("./routes/statementMail")(connection))
+const stmtRunRoutes = require("./routes/stmtRun");
+app.use("/api", authMiddleware, stmtRunRoutes(connection));
+//
+app.use("/api", require("./routes/statementMail")(connection))
 //
 //const statementRunRoutes = require("./routes/statementRunRoutes");
 //app.use("/api", statementRunRoutes(connection));
@@ -11057,10 +11057,16 @@ const invSettleRoutes = require("./routes/invSettle");
 const savePayment = require("./routes/savePayment");
 app.use("/api", savePayment(connection));
 //
- const voucherDelete = require("./routes/voucherDelete");
-  app.use("/api", voucherDelete(connection));
-  //
- const glAuditRoutes = require("./routes/glAuditRoutes");
-   app.use("/api", glAuditRoutes(connection));
- //
-  app.use("/api", require("./routes/ageingLov")(connection));
+const voucherDelete = require("./routes/voucherDelete");
+app.use("/api", voucherDelete(connection));
+//
+const glAuditRoutes = require("./routes/glAuditRoutes");
+app.use("/api", glAuditRoutes(connection));
+//
+app.use("/api", require("./routes/ageingLov")(connection));
+//
+const columnMetadataUtilRoutes = require("./routes/columnMetadataUtilRoutes");
+app.use("/api", columnMetadataUtilRoutes(connection));
+//
+ const pvPrintRoutes = require("./routes/pvPrintRoutes");
+  app.use("/api", pvPrintRoutes(connection));
