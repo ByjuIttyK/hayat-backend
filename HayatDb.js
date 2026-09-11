@@ -1324,9 +1324,9 @@ app.post("/api/save-localpurch", async (req, res) => {
           // Map netData fields to match acc_posting_setup field names
           const glPayload = {
             ModuleName: "PURCHASE_HDR",
-            InvNo: netData.PjvNo,
+            InvNo: netData.PjvNo, 
             Date: netData.PjvDt,
-            Narration: netData.Narration || "",
+            Narration: `Inv:${netData.InvNo}:${netData.InvDt}`|| "",
             SupCode: netData.SupCd,
             GrossAmt: netData.GrossAmt,        // Matches FIELD_NAME for PURCHASE rule
             VatAmt: netData.VatAmt,          // Matches FIELD_NAME for VAT rule
