@@ -11070,3 +11070,6 @@ app.use("/api", columnMetadataUtilRoutes(connection));
 //
  const pvPrintRoutes = require("./routes/pvPrintRoutes");
   app.use("/api", pvPrintRoutes(connection));
+//
+ app.use("/api", require("./routes/ledgerAiRoutes")(connection));
+ 
