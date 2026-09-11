@@ -41,6 +41,14 @@ const AUDIT_CHECKS = [
     dateCol: "INV_DATE",
     tranType: "06",
   },
+    {
+    key: "ngp",
+    title: "Non-Goods Purchases",
+    table: "ngp_net",
+    noCol: "PRCH_NO",
+    dateCol: "PRCH_DATE",
+    tranType: "07",
+  },
 ];
 
 const isValidIsoDate = (s) => {

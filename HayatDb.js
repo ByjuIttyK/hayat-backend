@@ -911,6 +911,56 @@ app.post("/api/save-fpo", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+//
+const NGP_GL = {
+  TRAN_TYPE: "07",
+  VAT_ACC: "142-004-0-001",
+  DISC_ACC: "502-001-0-002",
+  NARR1_MAX: 60, // set to the width of tran_acc.NARRATION1
+};
+
+// "1,234.50" / "" / null → 1234.5 / 0 / 0   (Discount arrives comma-formatted from the screen)
+const ngpNum = (v) => {
+  const n = Number(String(v ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+};
+const r2 = (n) => Math.round(n * 100) / 100;
+
+const httpError = (status, message) => Object.assign(new Error(message), { status, userMessage: message });
+
+// ── PJV number series ─────────────────────────────────────────────────────────
+// Purchase Invoices and Non-Goods Purchases share ONE voucher series under
+// TRAN_TYPE '07' (confirmed: 459 migrated NGP vouchers credit the supplier as 07).
+// The next number therefore has to clear every place a PJV number can live.
+// (Non-Stock Purchases post to tran_acc 07 on save, so they are covered by the
+//  tran_acc term.)
+const PJV_NO_WIDTH = 10;
+const PJV_LOCK = "pjv_07_vchr_no";
+
+const NEXT_PJV_SQL = `
+  SELECT GREATEST(
+    (SELECT IFNULL(MAX(CAST(VCHR_NO AS UNSIGNED)), 0)       FROM tran_acc WHERE TRAN_TYPE = '07'),
+    (SELECT IFNULL(MAX(CAST(TRIM(PJV_NO) AS UNSIGNED)), 0)  FROM purchase_hdr),
+    (SELECT IFNULL(MAX(CAST(PRCH_NO AS UNSIGNED)), 0)       FROM ngp_net)
+  ) + 1 AS nextNo`;
+
+const PJV_TAKEN_SQL = `
+  SELECT EXISTS(SELECT 1 FROM ngp_net      WHERE PRCH_NO = ?)                        AS ngp,
+         EXISTS(SELECT 1 FROM purchase_hdr WHERE TRIM(PJV_NO) = ?)                   AS pinv,
+         EXISTS(SELECT 1 FROM tran_acc     WHERE TRAN_TYPE = '07' AND VCHR_NO = ?)   AS gl`;
+
+const padPjv = (n) => String(n).padStart(PJV_NO_WIDTH, "0");
+
+// Provisional number for a new NGP voucher (shown on screen; re-checked on save)
+app.get("/api/ngp/next-no", (req, res) => {
+  connection.query(NEXT_PJV_SQL, (err, rows) => {
+    if (err) {
+      console.error("ngp next-no:", err);
+      return res.status(500).json({ message: err.sqlMessage || "Could not get next voucher no" });
+    }
+    res.json({ nextNo: padPjv(rows[0].nextNo) });
+  });
+});
 
 app.post("/api/save-ngp", async (req, res) => {
   try {
@@ -919,6 +969,50 @@ app.post("/api/save-ngp", async (req, res) => {
     if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
       return res.status(400).json({ message: "Invalid data format" });
     }
+
+    const mode = String(netData.Mode ?? "").toUpperCase() === "ADD" ? "ADD" : "EDIT";
+    let vchrNo = String(netData.LpoNo ?? "").trim();
+    const vchrDt = String(netData.LpoDt ?? "").trim();
+    const supCd = String(netData.SupCd ?? "").trim();
+    if (!vchrNo && mode === "EDIT") return res.status(400).json({ message: "Voucher No is required" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(vchrDt)) return res.status(400).json({ message: "Pjv Date is required" });
+    if (!supCd) return res.status(400).json({ message: "Supplier Code is required" });
+
+    // Supplier invoice reference (both optional)
+    const invNo = String(netData.InvNo ?? "").trim().slice(0, 30) || null;
+    const invDt = netData.InvDt ? String(netData.InvDt).trim() : null;
+    if (invDt && !/^\d{4}-\d{2}-\d{2}$/.test(invDt)) {
+      return res.status(400).json({ message: "Inv. Date must be yyyy-MM-dd" });
+    }
+    const narration1 =
+      [invNo && `Inv.No ${invNo}`, invDt && `Dt ${invDt.split("-").reverse().join("/")}`]
+        .filter(Boolean).join(" ").slice(0, NGP_GL.NARR1_MAX) || null;
+
+    // ── Amounts: recomputed here from the lines so the voucher always balances ──
+    const lines = itemsData
+      .map((r) => ({ acc: String(r.ACC_CODE ?? "").trim(), amt: r2(ngpNum(r.AMOUNT)) }))
+      .filter((l) => l.acc);
+    const gross = r2(lines.reduce((s, l) => s + l.amt, 0));
+    const disc = r2(ngpNum(netData.discAmt));
+    const vat = r2(ngpNum(netData.VatAmt));
+    const net = r2(gross - disc + vat);
+    if (Math.abs(net - ngpNum(netData.AMOUNT)) > 0.01) {
+      console.warn(`NGP ${vchrNo}: screen net ${netData.AMOUNT} ≠ computed net ${net}; using computed`);
+    }
+
+    // Signed legs: + = Debit, − = Credit
+    const legs = [
+      { acc: supCd, amt: -net },
+      ...lines.map((l) => ({ acc: l.acc, amt: l.amt })),
+      { acc: NGP_GL.VAT_ACC, amt: vat },
+      { acc: NGP_GL.DISC_ACC, amt: -disc },
+    ].filter((l) => l.amt !== 0);
+
+    const imbalanceCents = legs.reduce((s, l) => s + Math.round(l.amt * 100), 0);
+    if (imbalanceCents !== 0) {
+      return res.status(400).json({ message: `G/L voucher does not balance (difference ${imbalanceCents / 100})` });
+    }
+
     console.log("NGP HDR   =>", netData);
     console.log("NGP ITEMS =>", itemsData);
 
@@ -928,111 +1022,152 @@ app.post("/api/save-ngp", async (req, res) => {
         return res.status(500).json({ message: "Error getting connection" });
       }
 
+      const run = (sql, params) =>
+        new Promise((resolve, reject) =>
+          conn.query(sql, params, (e, result) => (e ? reject(e) : resolve(result)))
+        );
+
+      // GET_LOCK is held by the session, not the transaction: always release it
+      // before the connection goes back to the pool.
+      let lockHeld = false;
+      const finish = (send) => {
+        const done = () => { conn.release(); send(); };
+        if (!lockHeld) return done();
+        conn.query("SELECT RELEASE_LOCK(?)", [PJV_LOCK], () => done());
+      };
+
       conn.beginTransaction(async (err) => {
         if (err) {
           console.error("Transaction Error:", err);
-          conn.release();
-          return res.status(500).json({ message: "Transaction error", error: err });
+          return finish(() => res.status(500).json({ message: "Transaction error", error: err }));
         }
 
         try {
-          // ✅ Step 1: Insert/Update ngp_net (header)
-          const netQuery = `
-            INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE, NARRATION, DISCOUNT, AMOUNT)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-            PRCH_DATE = VALUES(PRCH_DATE),
-            SUP_CODE  = VALUES(SUP_CODE),
-            NARRATION = VALUES(NARRATION),
-            DISCOUNT  = VALUES(DISCOUNT),
-            AMOUNT    = VALUES(AMOUNT);
-          `;
+          // ✅ Step 0: voucher number
+          // Serialise number allocation across users (both NGP screens saving at
+          // once would otherwise read the same "next" number).
+          const [lock] = await run("SELECT GET_LOCK(?, 10) AS got", [PJV_LOCK]);
+          if (lock.got !== 1) throw httpError(503, "Voucher numbering is busy, please save again.");
+          lockHeld = true;
 
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [netData.LpoNo, netData.LpoDt, netData.SupCd,
-              netData.Narration, netData.discAmt, netData.AMOUNT],
-              (err, result) => {
-                if (err) return reject(err);
-                console.log("NGP_NET Insert/Update:", result);
-                resolve(result);
-              }
+          if (mode === "ADD") {
+            // Keep the number shown on screen if it is still free anywhere in the
+            // PJV series; otherwise take the next one. Never overwrite another
+            // voucher through the ngp_net upsert.
+            let free = false;
+            if (vchrNo) {
+              const [t] = await run(PJV_TAKEN_SQL, [vchrNo, vchrNo, vchrNo]);
+              free = !t.ngp && !t.pinv && !t.gl;
+            }
+            if (!free) {
+              const [n] = await run(NEXT_PJV_SQL, []);
+              const was = vchrNo;
+              vchrNo = padPjv(n.nextNo);
+              console.log(`NGP ADD: voucher no ${was || "(blank)"} taken, allocated ${vchrNo}`);
+            }
+          } else {
+            // EDIT: the number is fixed. Refuse if a Purchase Invoice owns it,
+            // otherwise Step 4 would delete that invoice's G/L lines.
+            const clash = await run(
+              `SELECT PJV_NO FROM purchase_hdr WHERE TRIM(PJV_NO) = ? LIMIT 1`,
+              [vchrNo]
             );
-          });
+            if (clash.length) {
+              throw httpError(409, `Voucher No ${vchrNo} is already used by a Purchase Invoice (tran type 07).`);
+            }
+          }
+
+          // ✅ Step 1: Insert/Update ngp_net (header)
+          const netResult = await run(
+            `INSERT INTO ngp_net (PRCH_NO, PRCH_DATE, SUP_CODE, INV_NO, INV_DATE, NARRATION, DISCOUNT, AMOUNT)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               PRCH_DATE = VALUES(PRCH_DATE),
+               SUP_CODE  = VALUES(SUP_CODE),
+               INV_NO    = VALUES(INV_NO),
+               INV_DATE  = VALUES(INV_DATE),
+               NARRATION = VALUES(NARRATION),
+               DISCOUNT  = VALUES(DISCOUNT),
+               AMOUNT    = VALUES(AMOUNT)`,
+            [vchrNo, vchrDt, supCd, invNo, invDt, netData.Narration, disc, net]
+          );
+          console.log("NGP_NET Insert/Update:", netResult.affectedRows);
 
           // ✅ Step 2: Insert/Update ngp_items (lines)
-          const itemsQuery = `
-            INSERT INTO ngp_items (PRCH_NO, SR_NO, ACC_CODE, NARRATION, JOB_NO, AMOUNT)
-            VALUES ?
-            ON DUPLICATE KEY UPDATE
-            ACC_CODE  = COALESCE(VALUES(ACC_CODE), ACC_CODE),
-            NARRATION = COALESCE(VALUES(NARRATION), NARRATION),
-            JOB_NO    = COALESCE(VALUES(JOB_NO), JOB_NO),
-            AMOUNT    = COALESCE(VALUES(AMOUNT), AMOUNT);
-          `;
-
           // PRCH_NO comes from the header, not the row: blank filler rows carry
           // PRCH_NO "" and would otherwise orphan the lines from their voucher.
-          const values = itemsData.map(row => [
-            netData.LpoNo, row.SR_NO, row.ACC_CODE,
-            row.NARRATION, row.JOB_NO, row.AMOUNT
+          const values = itemsData.map((row) => [
+            vchrNo, row.SR_NO, row.ACC_CODE,
+            row.NARRATION, row.JOB_NO, row.AMOUNT,
           ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) return reject(err);
-              console.log("NGP_ITEMS Insert/Update:", result);
-              resolve(result);
-            });
-          });
+          const itemsResult = await run(
+            `INSERT INTO ngp_items (PRCH_NO, SR_NO, ACC_CODE, NARRATION, JOB_NO, AMOUNT)
+             VALUES ?
+             ON DUPLICATE KEY UPDATE
+               ACC_CODE  = COALESCE(VALUES(ACC_CODE), ACC_CODE),
+               NARRATION = COALESCE(VALUES(NARRATION), NARRATION),
+               JOB_NO    = COALESCE(VALUES(JOB_NO), JOB_NO),
+               AMOUNT    = COALESCE(VALUES(AMOUNT), AMOUNT)`,
+            [values]
+          );
+          console.log("NGP_ITEMS Insert/Update:", itemsResult.affectedRows);
 
           // ✅ Step 3: Delete the lines the user removed in the grid.
-          // The upsert above can only add or update — a line deleted on the
-          // client simply stops being sent, so without this it survives in
-          // ngp_items and reappears the next time the voucher is opened.
-          // SR_NO is never resequenced on the client, so the surviving numbers
-          // here match what is already stored.
           const srNos = itemsData
-            .map(r => r.SR_NO)
-            .filter(v => v !== null && v !== undefined && String(v).trim() !== "");
+            .map((r) => r.SR_NO)
+            .filter((v) => v !== null && v !== undefined && String(v).trim() !== "");
+          const delItems = srNos.length
+            ? await run(`DELETE FROM ngp_items WHERE PRCH_NO = ? AND SR_NO NOT IN (?)`, [vchrNo, srNos])
+            : await run(`DELETE FROM ngp_items WHERE PRCH_NO = ?`, [vchrNo]);
+          console.log("NGP_ITEMS deleted rows:", delItems.affectedRows);
 
-          const deleteQuery = srNos.length
-            ? `DELETE FROM ngp_items WHERE PRCH_NO = ? AND SR_NO NOT IN (?)`
-            : `DELETE FROM ngp_items WHERE PRCH_NO = ?`;
+          // ✅ Step 4: G/L posting — replace this voucher's tran_acc lines
+          const delGl = await run(
+            `DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ?`,
+            [NGP_GL.TRAN_TYPE, vchrNo]
+          );
+          console.log("TRAN_ACC deleted rows:", delGl.affectedRows);
 
-          const deleteParams = srNos.length
-            ? [netData.LpoNo, srNos]
-            : [netData.LpoNo];
-
-          await new Promise((resolve, reject) => {
-            conn.query(deleteQuery, deleteParams, (err, result) => {
-              if (err) return reject(err);
-              console.log("NGP_ITEMS deleted rows:", result.affectedRows);
-              resolve(result);
-            });
-          });
+          if (legs.length) {
+            const glRows = legs.map((l, i) => [
+              NGP_GL.TRAN_TYPE,
+              vchrNo,
+              String(i + 1).padStart(4, "0"),   // SR_NO, same pattern as Non-Stock Purchase
+              vchrDt,                            // DATTE
+              l.acc,
+              Math.abs(l.amt),
+              l.amt > 0 ? "D" : "C",
+              narration1,
+            ]);
+            const glResult = await run(
+              `INSERT INTO tran_acc (TRAN_TYPE, VCHR_NO, SR_NO, DATTE, ACC_CODE, AMOUNT, DB_CR, NARRATION1)
+               VALUES ?`,
+              [glRows]
+            );
+            console.log("TRAN_ACC inserted rows:", glResult.affectedRows);
+          }
 
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
-              // Roll back and release — otherwise this connection leaks from
-              // the pool on every commit failure.
-              return conn.rollback(() => {
-                conn.release();
-                res.status(500).json({ message: "Commit error", error: err });
-              });
+              return conn.rollback(() =>
+                finish(() => res.status(500).json({ message: "Commit error", error: err }))
+              );
             }
-            conn.release();
-            res.json({ message: "Data saved successfully!" });
+            finish(() => res.json({ message: "Data saved successfully!", vchrNo, net, glLines: legs.length }));
           });
 
         } catch (error) {
           console.error("NGP Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release();
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
+          conn.rollback(() =>
+            finish(() =>
+              res.status(error.status || 500).json({
+                // sqlMessage surfaces tran_acc trigger errors (e.g. closed period) to the screen
+                message: error.userMessage || error.sqlMessage || "Transaction failed, rolled back",
+                error,
+              })
+            )
+          );
         }
       });
     });
@@ -1041,6 +1176,7 @@ app.post("/api/save-ngp", async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+
 //
 app.get("/api/srv-dup-inv", (req, res) => {
   const invNo = (req.query.invNo || "").toString().trim();
