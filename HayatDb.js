@@ -3660,13 +3660,22 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
     }
   );
 });
+
 app.get("/api/InvStlSup/:custcd", function (req, res) {
   // On EDIT the screen passes the voucher being edited (srcType/srcDoc).
-  // Its own adj_dtl allocations are added back into the balance, so a bill
-  // this PV settled to zero still comes through — with OWN_STL carrying the
-  // amount for Cur.Stlmnt and DR_AMT showing only what OTHER vouchers settled.
-  // On ADD both params are empty, the join matches nothing, and the result
-  // is identical to the old query.
+  //
+  // Leg 1: outstanding bills this voucher did NOT settle — the original query.
+  // Leg 2: bills this voucher DID settle, rebuilt from v_sup_unpaid_inv with
+  //   the same grouping as v_sup_outstanding_bill but without its
+  //   HAVING (SUM(Cr_amt) - SUM(Dr_amt)) <> 0, which is what dropped a bill
+  //   settled to zero. DR_AMT comes back net of this voucher (i.e. what OTHER
+  //   vouchers settled) and OWN_STL carries its own amount for Cur.Stlmnt.
+  //
+  // The NOT EXISTS on leg 1 keeps a PARTLY settled bill — still outstanding,
+  // so leg 1 would also return it — from appearing twice in the grid.
+  //
+  // On ADD both params are empty: NOT EXISTS never matches and leg 2's inner
+  // join returns nothing, so the result is identical to the old query.
   const srcType = req.query.srcType || "";
   const srcDoc  = req.query.srcDoc  || "";
   console.log("InvStlSup", req.params.custcd, srcType, srcDoc);
@@ -3674,19 +3683,27 @@ app.get("/api/InvStlSup/:custcd", function (req, res) {
   connection.query(
     "SELECT v.ACC_CODE SUP_CODE, v.VCHR_NO DOC_NO, v.TRAN_TYPE DOC_TYPE, " +
     "       DATE_FORMAT(v.DATTE,'%d/%m/%Y') DOC_DATE, v.NAR, " +
-    "       v.DR_AMT - IFNULL(o.own_stl,0) DR_AMT, " +
-    "       v.CR_AMT, " +
-    "       v.BALANCE + IFNULL(o.own_stl,0) INV_AMT, " +
-    "       IFNULL(o.own_stl,0) OWN_STL " +
+    "       v.DR_AMT, v.CR_AMT, v.BALANCE INV_AMT, 0 OWN_STL, v.DATTE SORT_DT " +
     "FROM v_sup_outstanding_bill v " +
-    "LEFT JOIN (SELECT STLD_DOC, STLD_TYPE, SUM(STLD_AMT) own_stl " +
-    "             FROM adj_dtl " +
-    "            WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
-    "            GROUP BY STLD_DOC, STLD_TYPE) o " +
-    "       ON o.STLD_DOC = v.VCHR_NO AND o.STLD_TYPE = v.TRAN_TYPE " +
-    "WHERE v.ACC_CODE = ? AND (v.BALANCE + IFNULL(o.own_stl,0)) > 0.005 " +
-    "ORDER BY v.DATTE ",
-    [srcType, srcDoc, req.params.custcd],
+    "WHERE v.ACC_CODE = ? AND v.BALANCE > 0 " +
+    "  AND NOT EXISTS (SELECT 1 FROM adj_dtl a " +
+    "                   WHERE a.SOURCE_TYPE = ? AND a.SOURCE_DOC = ? " +
+    "                     AND a.STLD_DOC = v.VCHR_NO AND a.STLD_TYPE = v.TRAN_TYPE) " +
+    "UNION ALL " +
+    "SELECT i.Acc_code, i.Vchr_no, i.Tran_type, " +
+    "       DATE_FORMAT(i.Datte,'%d/%m/%Y'), MAX(i.nar), " +
+    "       SUM(i.Dr_amt) - o.own_stl, SUM(i.Cr_amt), " +
+    "       SUM(i.Cr_amt) - SUM(i.Dr_amt) + o.own_stl, o.own_stl, i.Datte " +
+    "FROM v_sup_unpaid_inv i " +
+    "JOIN (SELECT STLD_DOC, STLD_TYPE, SUM(STLD_AMT) own_stl " +
+    "        FROM adj_dtl " +
+    "       WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
+    "       GROUP BY STLD_DOC, STLD_TYPE) o " +
+    "  ON o.STLD_DOC = i.Vchr_no AND o.STLD_TYPE = i.Tran_type " +
+    "WHERE i.Acc_code = ? " +
+    "GROUP BY i.Acc_code, i.Tran_type, i.Vchr_no, i.Datte, o.own_stl " +
+    "ORDER BY SORT_DT",
+    [req.params.custcd, srcType, srcDoc, srcType, srcDoc, req.params.custcd],
     function (err, results) {
       if (err) {
         console.error("Error executing query:", err);
@@ -3696,6 +3713,7 @@ app.get("/api/InvStlSup/:custcd", function (req, res) {
     }
   );
 });
+
 /*app.put("/saveInvItems", function (req, res) {
   const receivedData = req.body.data;
   // Process the received data (e.g., save to a database)
