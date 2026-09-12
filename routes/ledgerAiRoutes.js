@@ -37,13 +37,32 @@ const MASTERS = {
 // Words that carry no identity in an account name
 const STOP = new Set([
   "LLC", "L", "C", "LTD", "LIMITED", "CO", "COMPANY", "EST", "ESTABLISHMENT",
-  "FZE", "FZCO", "FZ", "FZC", "THE", "AND", "OF", "MS", "M", "S", "PVT", "INC",
-  "ACCOUNT", "AC", "A", "LEDGER", "STATEMENT", "FOR", "TO", "FROM",
+  "FZE", "FZCO", "FZ", "FZC", "FZLLC", "DMCC", "WLL", "PVT", "INC", "PLC", "SA", "SARL",
+  "THE", "AND", "OF", "MS", "MESSRS", "M", "S", "GENERAL", "GEN",
+  "ACCOUNT", "ACCOUNTS", "AC", "A", "LEDGER", "STATEMENT", "FOR", "TO", "FROM",
 ]);
 
+// Spoken forms that speech recognition leaves in the text
+const SPOKEN_FIX = [
+  [/\bM\s*\/?\s*S\b/g, " "],            // M/s, M s
+  [/\bMESSRS\b/g, " "],
+  [/\bDOUBLE\s+([A-Z])\b/g, "$1$1"],     // "double L" -> LL
+  [/\bTRIPLE\s+([A-Z])\b/g, "$1$1$1"],
+  [/\bDASH\b|\bHYPHEN\b/g, " "],
+];
+const DIGIT_WORD = {
+  ZERO: "0", OH: "0", O: "0", ONE: "1", TWO: "2", THREE: "3", FOUR: "4",
+  FIVE: "5", SIX: "6", SEVEN: "7", EIGHT: "8", NINE: "9", DOUBLE: "", NOUGHT: "0",
+};
+
 // ── Text helpers ────────────────────────────────────────────────────────────
-const norm = (s) => String(s || "").toUpperCase().replace(/&/g, " AND ").replace(/[^A-Z0-9]+/g, " ").trim();
-// Spelled-out letters are joined first: "A B B" -> ABB, "L L C" -> LLC (then dropped)
+const norm = (s) => {
+  let t = String(s || "").toUpperCase().replace(/&/g, " AND ").replace(/[^A-Z0-9]+/g, " ").trim();
+  for (const [re, to] of SPOKEN_FIX) t = t.replace(re, to);
+  return t.replace(/\s+/g, " ").trim();
+};
+
+// Spelled-out letters are joined: "A B B" -> ABB, "L L C" -> LLC (then dropped)
 const tokens = (s) => {
   const parts = norm(s).split(" ").filter(Boolean);
   const merged = [];
@@ -58,10 +77,27 @@ const tokens = (s) => {
 };
 const compact = (s) => tokens(s).join("");
 
+// Soundex — catches speech spellings the edit distance misses (GULPH/GULF, CO-OP/COOP)
+function soundex(word) {
+  const w = String(word || "").toUpperCase().replace(/[^A-Z]/g, "");
+  if (!w) return "";
+  const code = (c) => ("BFPV".includes(c) ? "1" : "CGJKQSXZ".includes(c) ? "2"
+    : "DT".includes(c) ? "3" : c === "L" ? "4" : "MN".includes(c) ? "5" : c === "R" ? "6" : "");
+  let out = w[0];
+  let prev = code(w[0]);
+  for (let i = 1; i < w.length && out.length < 4; i++) {
+    const c = code(w[i]);
+    if (c && c !== prev) out += c;
+    if (!"HW".includes(w[i])) prev = c;
+  }
+  return (out + "000").slice(0, 4);
+}
+
 function levenshtein(a, b) {
   if (a === b) return 0;
   const m = a.length, n = b.length;
   if (!m || !n) return m || n;
+  if (Math.abs(m - n) > 3) return Math.abs(m - n);   // far apart — skip the matrix
   let prev = Array.from({ length: n + 1 }, (_, j) => j);
   for (let i = 1; i <= m; i++) {
     const cur = [i];
@@ -78,40 +114,56 @@ function tokenScore(q, t) {
   if (q === t) return 1;
   const short = q.length <= t.length ? q : t;
   const long = q.length <= t.length ? t : q;
-  if (short.length >= 3 && long.startsWith(short)) return 0.85;   // LIGHT ~ LIGHTS
-  if (short.length >= 4) {
+  let best = 0;
+  if (short.length >= 3 && long.startsWith(short)) best = 0.88;           // LIGHT ~ LIGHTS
+  if (short.length >= 3) {
     const sim = 1 - levenshtein(q, t) / Math.max(q.length, t.length);
-    if (sim >= 0.75) return sim * 0.8;                              // speech misspellings
+    if (sim >= 0.7) best = Math.max(best, sim * 0.85);                     // SCHNIEDER ~ SCHNEIDER, RACK ~ RAK
   }
-  return 0;
+  if (short.length >= 3 && soundex(q) === soundex(t)) best = Math.max(best, 0.72);  // GULPH ~ GULF
+  return best;
 }
 
-// Name similarity: mostly "did every spoken word match", a little "how much of the name was said"
-function nameScore(query, name) {
-  const qt = tokens(query);
-  const nt = tokens(name);
+// Rare words identify an account; common ones (TRADING, GENERAL, AL) barely narrow it.
+// idf is a Map of token -> weight built from the master; absent tokens get the max weight.
+const idfWeight = (idf, token) => (idf ? (idf.get(token) ?? idf.maxWeight ?? 1) : 1);
+
+/**
+ * Similarity of a spoken query to one account name (0..1).
+ * qt / nt are pre-tokenised; idf is the master's token weights.
+ */
+function scoreTokens(qt, nt, idf) {
   if (!qt.length || !nt.length) return 0;
   const qc = qt.join(""), nc = nt.join("");
   if (qc === nc) return 1;
 
-  let recall = 0;
+  let gotWeight = 0, totWeight = 0;
   const used = new Set();
   for (const q of qt) {
+    const w = idfWeight(idf, q);
+    totWeight += w;
     let best = 0, bestIdx = -1;
     nt.forEach((t, i) => {
       if (used.has(i)) return;
-      const s = tokenScore(q, t);
-      if (s > best) { best = s; bestIdx = i; }
+      const sc = tokenScore(q, t);
+      if (sc > best) { best = sc; bestIdx = i; }
     });
-    if (bestIdx >= 0 && best > 0) used.add(bestIdx);
-    recall += best;
+    if (bestIdx >= 0 && best > 0) { used.add(bestIdx); gotWeight += best * w; }
   }
-  recall /= qt.length;
-  const precision = used.size / nt.length;
-  let score = 0.75 * recall + 0.25 * precision;
-  if (qc.length >= 4 && nc.startsWith(qc)) score = Math.max(score, 0.9);   // "ALHAYAT" vs "AL HAYAT ELECT"
+  const recall = totWeight ? gotWeight / totWeight : 0;         // did every spoken word land?
+  // Long digit runs inside a name (an embedded bank account number) are never
+  // spoken, so they don't count against how much of the name was covered.
+  const spoken = nt.filter((t) => !(/^\d{5,}$/.test(t)));
+  const coverage = used.size / Math.max(spoken.length, 1);
+  let score = 0.78 * recall + 0.22 * coverage;
+
+  if (qc.length >= 4 && nc.startsWith(qc)) score = Math.max(score, 0.9);  // "ALHAYAT" vs "AL HAYAT ELECT"
+  if (qt.length >= 2 && recall >= 0.995) score = Math.max(score, 0.88);   // every spoken word matched
   return Math.round(Math.min(score, 0.99) * 1000) / 1000;
 }
+
+// Kept for direct use / tests
+const nameScore = (query, name, idf) => scoreTokens(tokens(query), tokens(name), idf);
 
 // ── Dates ───────────────────────────────────────────────────────────────────
 const isoToday = () => {
@@ -184,52 +236,128 @@ Text: """${String(text).slice(0, 500)}"""`;
 }
 
 // ── Account lookup ──────────────────────────────────────────────────────────
+// The three masters are held in memory (about 11,000 names in total) and every
+// row is scored, so a misheard word can't push the right account out of the
+// result the way a SQL LIKE would. Rebuilt on a timer; see MASTER_TTL_MS.
+const MASTER_TTL_MS = 5 * 60 * 1000;
+
 module.exports = function (connection) {
   const router = express.Router();
   const db = typeof connection.promise === "function" ? connection.promise() : connection;
 
-  async function findInMaster(type, accountText) {
-    const m = MASTERS[type];
-    const raw = String(accountText || "").trim();
-    const codeKey = raw.replace(/\s+/g, "").toUpperCase();
+  const masterCache = {};   // type -> { at, rows, byCode, idf }
+  const loading = {};       // type -> in-flight promise
 
-    // 1. Spoken/typed code — exact hit wins outright
-    if (/\d/.test(codeKey)) {
-      const [rows] = await db.query(
-        `SELECT ${m.code} AS code, ${m.name} AS name FROM ${m.table}
-          WHERE UPPER(REPLACE(${m.code}, ' ', '')) = ? LIMIT 1`,
-        [codeKey]
-      );
-      if (rows.length) return [{ type, code: String(rows[0].code).trim(), name: String(rows[0].name || "").trim(), score: 1 }];
+  function buildIndex(rows) {
+    const prepared = rows
+      .map((r) => {
+        const code = String(r.code ?? "").trim();
+        const name = String(r.name ?? "").trim();
+        return { code, name, tokens: tokens(name), compact: compact(name) };
+      })
+      .filter((r) => r.code);
+
+    // Document frequency per token -> idf weight
+    const df = new Map();
+    for (const r of prepared) {
+      for (const t of new Set(r.tokens)) df.set(t, (df.get(t) || 0) + 1);
     }
-
-    // 2. Name — narrow with LIKE, then score in JS
-    const qt = tokens(raw).filter((t) => t.length >= 2);
-    if (!qt.length) return [];
-    const likeParts = [];
-    const params = [];
-    for (const t of qt) {
-      likeParts.push(`UPPER(${m.name}) LIKE ?`);
-      params.push(`%${t.length >= 5 ? t.slice(0, t.length - 1) : t}%`);   // LIGHTS finds LIGHT
+    const n = Math.max(prepared.length, 1);
+    const idf = new Map();
+    let maxWeight = 1;
+    for (const [t, c] of df) {
+      const w = Math.log(1 + n / c);
+      idf.set(t, w);
+      if (w > maxWeight) maxWeight = w;
     }
-    likeParts.push(`UPPER(REPLACE(${m.name}, ' ', '')) LIKE ?`);
-    params.push(`%${qt.join("")}%`);
+    idf.maxWeight = maxWeight;
 
-    const [rows] = await db.query(
-      `SELECT ${m.code} AS code, ${m.name} AS name FROM ${m.table}
-        WHERE ${likeParts.join(" OR ")}
-        LIMIT 400`,
-      params
-    );
-    return rows
-      .map((r) => ({
-        type,
-        code: String(r.code || "").trim(),
-        name: String(r.name || "").trim(),
-        score: nameScore(raw, r.name),
-      }))
-      .filter((r) => r.code && r.score >= 0.35);
+    const byCode = new Map();
+    for (const r of prepared) byCode.set(r.code.replace(/\s+/g, "").toUpperCase(), r);
+
+    // Inverted index: exact token, 3-letter stem and soundex all point at the
+    // rows worth scoring, so a query never walks the whole master.
+    const postings = new Map();
+    const add = (key, i) => {
+      if (!key) return;
+      const list = postings.get(key);
+      if (list) list.push(i); else postings.set(key, [i]);
+    };
+    prepared.forEach((r, i) => {
+      for (const t of new Set(r.tokens)) {
+        add(`=${t}`, i);
+        add(`~${t.slice(0, 3)}`, i);
+        add(`#${soundex(t)}`, i);
+      }
+    });
+    return { rows: prepared, byCode, idf, postings };
   }
+
+  function getMaster(type) {
+    const cached = masterCache[type];
+    if (cached && Date.now() - cached.at < MASTER_TTL_MS) return Promise.resolve(cached);
+    if (loading[type]) return loading[type];
+
+    const m = MASTERS[type];
+    loading[type] = db
+      .query(`SELECT ${m.code} AS code, ${m.name} AS name FROM ${m.table}`)
+      .then(([rows]) => {
+        const built = { at: Date.now(), ...buildIndex(rows) };
+        masterCache[type] = built;
+        return built;
+      })
+      .catch((err) => {
+        if (cached) return cached;   // a stale list beats no list
+        throw err;
+      })
+      .finally(() => { delete loading[type]; });
+    return loading[type];
+  }
+
+  // Spoken digits -> figures, for a dictated account code ("one G zero zero one zero")
+  const spokenCode = (raw) => {
+    const parts = norm(raw).split(" ").filter(Boolean);
+    if (!parts.length) return "";
+    const mapped = parts.map((p) => (DIGIT_WORD[p] !== undefined ? DIGIT_WORD[p] : p));
+    return mapped.join("");
+  };
+
+  async function findInMaster(type, accountText) {
+    const raw = String(accountText || "").trim();
+    if (!raw) return [];
+    const { rows, byCode, idf, postings } = await getMaster(type);
+
+    // 1. A code, typed or dictated — an exact hit wins outright
+    for (const key of new Set([raw.replace(/\s+/g, "").toUpperCase(), spokenCode(raw)])) {
+      const hit = key && byCode.get(key);
+      if (hit) return [{ type, code: hit.code, name: hit.name, score: 1 }];
+    }
+
+    // 2. Name — score the rows that share a token, stem or sound with the query
+    const qt = tokens(raw);
+    if (!qt.length) return [];
+
+    const seen = new Set();
+    for (const q of qt) {
+      for (const key of [`=${q}`, `~${q.slice(0, 3)}`, `#${soundex(q)}`]) {
+        const list = postings.get(key);
+        if (list) for (const i of list) seen.add(i);
+      }
+    }
+
+    const out = [];
+    for (const i of seen) {
+      const r = rows[i];
+      const score = scoreTokens(qt, r.tokens, idf);
+      if (score >= 0.4) out.push({ type, code: r.code, name: r.name, score });
+    }
+    return out;
+  }
+
+  // Warm the caches so the first enquiry of the day isn't the slow one
+  Promise.all(Object.keys(MASTERS).map((t) => getMaster(t).catch(() => null)))
+    .then(() => console.log("[ledger-ai] account masters loaded"))
+    .catch(() => undefined);
 
   router.post("/ledger-ai/parse", async (req, res) => {
     const text = String(req.body?.text || "").trim();
@@ -313,3 +441,5 @@ module.exports = function (connection) {
 
 // exported for tests
 module.exports._nameScore = nameScore;
+module.exports._tokens = tokens;
+module.exports._soundex = soundex;
