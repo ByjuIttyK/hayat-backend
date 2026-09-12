@@ -3363,103 +3363,6 @@ app.post("/api/save-frgnpurch", async (req, res) => {
 ///
 
 
-app.post("/api/save-sadj", async (req, res) => {
-  try {
-    const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
-
-    if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid data format" });
-    }
-    console.log("STOCK ADJUSTMENT=>**", netData);
-    // Start transaction
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          // console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
-          const netQuery = `
-            INSERT INTO STK_hdr (VCHR_NO, VCHR_DATE,NARRATION) 
-            VALUES (?, ?, ?) 
-            ON DUPLICATE KEY UPDATE 
-            VCHR_DATE= VALUES(VCHR_DATE),
-            NARRATION = VALUES(NARRATION);
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [netData.VchrNo, netData.VchrDt,
-              netData.Narration],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("STK_HDR Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-            INSERT INTO Stk_adj (VCHR_NO, SR_NO, ITEM_CODE, QTY)
-            VALUES ? 
-            ON DUPLICATE KEY UPDATE 
-            ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
-            QTY = COALESCE(VALUES(QTY), QTY);
-            `;
-
-          const values = itemsData.map(row => [
-            row.VCHR_NO, row.SR_NO, row.ITEM_CODE, row.QTY
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("STK_ADJ (items) Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error("Server Error:", error);
-    res.status(500).json({ message: "Internal Server Error", error });
-  }
-});
-
-
 app.post("/api/save-gtrn", async (req, res) => {
   try {
     const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
@@ -4420,7 +4323,7 @@ app.get("/api/MaxVchrNo/:Tp", function (req, res) {
   }
   else if (req.params.Tp == "SADJ") {
     connection.query(
-      "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_hdr",
+      "SELECT IFNULL(MAX(SUBSTR(VCHR_NO,4,7)), 0) AS MXVCHR FROM stk_adj_hdr",
       [],
 
       function (err, result) {
@@ -6491,7 +6394,7 @@ app.get("/api/sadjlst", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%y') AS VCHR_DATE," +
     "  a.NARRATION" +
-    " from stk_hdr a ORDER BY a.VCHR_NO ",
+    " from stk_adj_hdr a ORDER BY a.VCHR_NO ",
     [],
 
     function (err, result) {
@@ -6512,7 +6415,7 @@ app.get("/api/sadjhdr/:siv", function (req, res) {
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE," +
     "  a.NARRATION" +
-    " from stk_hdr a WHERE a.VCHR_NO=  ? ",
+    " from stk_adj_hdr a WHERE a.VCHR_NO=  ? ",
     [req.params.siv],
 
     function (err, result) {
@@ -8348,7 +8251,7 @@ app.get("/api/sadjlst/:dys", function (req, res) {
   connection.query(
     "select a.VCHR_NO,To_char(a.VCHR_DATE,'DD/MM/RRRR') VCHR_DATE," +
     " a.NARRATION " +
-    " from stk_hdr a where  a.VCHR_DATE >= SYSDATE - :dys " +
+    " from stk_adj_hdr a where  a.VCHR_DATE >= SYSDATE - :dys " +
     "  ORDER BY a.VCHR_NO DESC",
     [req.params.dys],
 
@@ -11072,4 +10975,7 @@ app.use("/api", columnMetadataUtilRoutes(connection));
   app.use("/api", pvPrintRoutes(connection));
 //
  app.use("/api", require("./routes/ledgerAiRoutes")(connection));
- 
+ //
+      const stkAdjRoutes = require("./routes/stkAdjRoutes");
+     app.use("/api", stkAdjRoutes(connection));
+     
