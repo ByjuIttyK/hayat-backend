@@ -3677,7 +3677,7 @@ app.get("/api/InvStlSup/:custcd", function (req, res) {
   // On ADD both params are empty: NOT EXISTS never matches and leg 2's inner
   // join returns nothing, so the result is identical to the old query.
   const srcType = req.query.srcType || "";
-  const srcDoc  = req.query.srcDoc  || "";
+  const srcDoc = req.query.srcDoc || "";
   console.log("InvStlSup", req.params.custcd, srcType, srcDoc);
 
   connection.query(
@@ -10208,16 +10208,39 @@ app.get("/api/pdc-rcd/:custCode", function (req, res) {
   );
 });
 //SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
+
+//"SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, " +
+//     "CASE WHEN ACC_CODE IS NULL THEN CUST_CODE ELSE ACC_CODE END AS ACC_CODE,CUST_CODE,  CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
+//     " BANK_NAME, PAID_TO, CAN_CEL," +
+//    " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  " +
+//    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
+//    "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
 app.get("/api/vchrlst/:tranId", function (req, res) {
-  if (req.params.tranId !== '05') {
+  const tranId = String(req.params.tranId || "");
+  const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
+
+  if (tranId !== "05") {
     connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, " +
-      "CASE WHEN ACC_CODE IS NULL THEN CUST_CODE ELSE ACC_CODE END AS ACC_CODE,CUST_CODE,  CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
-      " BANK_NAME, PAID_TO, CAN_CEL," +
-      " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  " +
-      " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
-      "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
-      [req.params.tranId],
+      "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
+      "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
+      "chq.CHEQUE_NO, chq.CHQ_COUNT, " +
+      "v.AMOUNT, v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
+      "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
+      "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
+      "FROM vouchers AS v " +
+      "LEFT OUTER JOIN ac_list " +
+      "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +
+      "LEFT OUTER JOIN (" +
+      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
+      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ FROM " + pdcTable + " WHERE TRAN_TYPE = ? " +
+      "    UNION ALL " +
+      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ FROM current_chq WHERE TRAN_TYPE = ? " +
+      "  ) u GROUP BY TRAN_TYPE, VCHR_NO) chq " +
+      "  ON chq.TRAN_TYPE = v.TRAN_TYPE AND chq.VCHR_NO = v.VCHR_NO " +
+      "WHERE v.TRAN_TYPE = ? " +
+      "ORDER BY v.VCHR_NO DESC",
+
+      [tranId, tranId, tranId],
 
       function (error, result) {
         if (error) {
@@ -11003,11 +11026,13 @@ app.use("/api", require("./routes/ageingLov")(connection));
 const columnMetadataUtilRoutes = require("./routes/columnMetadataUtilRoutes");
 app.use("/api", columnMetadataUtilRoutes(connection));
 //
- const pvPrintRoutes = require("./routes/pvPrintRoutes");
-  app.use("/api", pvPrintRoutes(connection));
+const pvPrintRoutes = require("./routes/pvPrintRoutes");
+app.use("/api", pvPrintRoutes(connection));
 //
- app.use("/api", require("./routes/ledgerAiRoutes")(connection));
- //
-      const stkAdjRoutes = require("./routes/stkAdjRoutes");
-     app.use("/api", stkAdjRoutes(connection));
-     
+app.use("/api", require("./routes/ledgerAiRoutes")(connection));
+//
+const stkAdjRoutes = require("./routes/stkAdjRoutes");
+app.use("/api", stkAdjRoutes(connection));
+//
+const voucherChequeRoutes = require("./routes/voucherChequeRoutes");
+app.use("/api", authMiddleware, voucherChequeRoutes(connection));
