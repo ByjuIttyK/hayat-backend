@@ -24,9 +24,14 @@
 const express = require("express");
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODELS = process.env.GEMINI_MODEL
-  ? [process.env.GEMINI_MODEL]
-  : ["gemini-2.5-flash-lite", "gemini-2.5-flash"];
+// GEMINI_MODEL (if set) is tried first; the rest are fallbacks, so a pinned
+// model that has been retired can't take the feature down on its own.
+const GEMINI_MODELS = [...new Set([
+  process.env.GEMINI_MODEL,
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash",
+  "gemini-flash-latest",
+].filter(Boolean))];
 
 const MASTERS = {
   CUSTOMERS: { table: "cus_mst", code: "cust_code", name: "cust_name" },
@@ -179,6 +184,9 @@ const validIso = (s) => {
 
 // ── Gemini ──────────────────────────────────────────────────────────────────
 async function geminiJson(prompt) {
+  if (typeof fetch !== "function") {
+    throw new Error("This Node build has no global fetch (needs Node 18 or newer).");
+  }
   let lastErr;
   for (const model of GEMINI_MODELS) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`;
@@ -190,13 +198,21 @@ async function geminiJson(prompt) {
         generationConfig: { temperature: 0, maxOutputTokens: 256, responseMimeType: "application/json" },
       }),
     });
-    if (resp.status === 404) { lastErr = new Error(`Gemini model ${model} not found`); continue; }
-    if (!resp.ok) throw new Error(`Gemini HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    if (resp.status === 404) { lastErr = new Error(`model ${model} not found`); continue; }
+    if (!resp.ok) {
+      const body = (await resp.text()).replace(/\s+/g, " ").slice(0, 160);
+      throw new Error(`Gemini HTTP ${resp.status} (${model}): ${body}`);
+    }
     const data = await resp.json();
     const raw = (data?.candidates?.[0]?.content?.parts || []).map((p) => p.text || "").join("");
-    return JSON.parse(raw.replace(/```json|```/g, "").trim());
+    if (!raw.trim()) throw new Error(`${model} returned nothing (blocked or empty response)`);
+    try {
+      return JSON.parse(raw.replace(/```json|```/g, "").trim());
+    } catch (_) {
+      throw new Error(`${model} did not return JSON: ${raw.replace(/\s+/g, " ").slice(0, 120)}`);
+    }
   }
-  throw lastErr || new Error("No Gemini model available");
+  throw new Error(`No Gemini model answered (tried ${GEMINI_MODELS.join(", ")})${lastErr ? ` — last: ${lastErr.message}` : ""}`);
 }
 
 function buildPrompt(text) {
@@ -359,17 +375,50 @@ module.exports = function (connection) {
     .then(() => console.log("[ledger-ai] account masters loaded"))
     .catch(() => undefined);
 
+  // GET /api/ledger-ai/health — says whether the key, the model and the
+  // account masters are all in working order. Safe to curl from the VPS.
+  router.get("/ledger-ai/health", async (_req, res) => {
+    const out = {
+      geminiKey: GEMINI_KEY ? `set (${GEMINI_KEY.length} chars)` : "MISSING",
+      modelsTried: GEMINI_MODELS,
+      nodeFetch: typeof fetch === "function",
+      masters: {},
+      gemini: "not tested",
+    };
+    for (const t of Object.keys(MASTERS)) {
+      try {
+        const { rows } = await getMaster(t);
+        out.masters[t] = `${rows.length} rows`;
+      } catch (err) {
+        out.masters[t] = `ERROR: ${err.message}`;
+      }
+    }
+    if (GEMINI_KEY) {
+      try {
+        const probe = await geminiJson('Return ONLY this JSON: {"ok": true}');
+        out.gemini = probe && probe.ok ? "ok" : `unexpected reply: ${JSON.stringify(probe).slice(0, 80)}`;
+      } catch (err) {
+        out.gemini = `ERROR: ${err.message}`;
+      }
+    }
+    res.json(out);
+  });
+
   router.post("/ledger-ai/parse", async (req, res) => {
     const text = String(req.body?.text || "").trim();
     if (text.length < 3) return res.status(400).json({ error: "Say or type what ledger you want to see." });
-    if (!GEMINI_KEY) return res.status(500).json({ error: "GEMINI_API_KEY is not set on the server." });
+    if (!GEMINI_KEY) {
+      return res.status(500).json({ error: "GEMINI_API_KEY is not set on the server (check the backend .env, then pm2 restart)." });
+    }
 
     let ai;
     try {
       ai = await geminiJson(buildPrompt(text));
     } catch (err) {
       console.error("ledger-ai gemini:", err.message);
-      return res.status(502).json({ error: "The AI could not read that request. Try again or rephrase it." });
+      return res.status(502).json({
+        error: `The AI could not read that request. ${String(err.message || "").slice(0, 180)}`,
+      });
     }
 
     const typeMap = { CUSTOMER: "CUSTOMERS", SUPPLIER: "SUPPLIERS", GL: "ACCOUNTS" };
