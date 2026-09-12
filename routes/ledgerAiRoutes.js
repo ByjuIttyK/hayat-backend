@@ -183,6 +183,28 @@ const validIso = (s) => {
 };
 
 // ── Gemini ──────────────────────────────────────────────────────────────────
+// Turns Google's 429 body into one readable line: which quota, and when to retry.
+function quotaDetail(body) {
+  try {
+    const err = JSON.parse(body)?.error || {};
+    const details = err.details || [];
+    const failure = details.find((d) => /QuotaFailure/.test(d["@type"] || ""));
+    const retry = details.find((d) => /RetryInfo/.test(d["@type"] || ""));
+    const id = failure?.violations?.[0]?.quotaId || "";
+    const perDay = /PerDay/i.test(id);
+    const secs = retry?.retryDelay ? parseInt(String(retry.retryDelay), 10) : null;
+    const scope = perDay ? "daily quota used up" : id ? "per-minute quota hit" : "quota exceeded";
+    const when = perDay
+      ? " — it resets at midnight US Pacific (about 12:30 PM UAE time)"
+      : secs
+        ? ` — try again in about ${secs} second${secs === 1 ? "" : "s"}`
+        : " — try again shortly";
+    return scope + when;
+  } catch (_) {
+    return "quota exceeded";
+  }
+}
+
 async function geminiJson(prompt) {
   if (typeof fetch !== "function") {
     throw new Error("This Node build has no global fetch (needs Node 18 or newer).");
@@ -199,6 +221,11 @@ async function geminiJson(prompt) {
       }),
     });
     if (resp.status === 404) { lastErr = new Error(`model ${model} not found`); continue; }
+    if (resp.status === 429) {
+      // Quotas are counted per model, so the next one may still have room
+      lastErr = new Error(`${model}: ${quotaDetail(await resp.text())}`);
+      continue;
+    }
     if (!resp.ok) {
       const body = (await resp.text()).replace(/\s+/g, " ").slice(0, 160);
       throw new Error(`Gemini HTTP ${resp.status} (${model}): ${body}`);
@@ -249,6 +276,136 @@ Dates:
 - nothing about a period -> both null
 
 Text: """${String(text).slice(0, 500)}"""`;
+}
+
+// ── Local fallback parser ───────────────────────────────────────────────────
+// Reads the common request shapes without Gemini, so a spent quota or an API
+// outage doesn't take the feature down. Same output shape as the AI.
+const MONTHS = {
+  JAN: 0, JANUARY: 0, FEB: 1, FEBRUARY: 1, MAR: 2, MARCH: 2, APR: 3, APRIL: 3,
+  MAY: 4, JUN: 5, JUNE: 5, JUL: 6, JULY: 6, AUG: 7, AUGUST: 7,
+  SEP: 8, SEPT: 8, SEPTEMBER: 8, OCT: 9, OCTOBER: 9, NOV: 10, NOVEMBER: 10, DEC: 11, DECEMBER: 11,
+};
+const MONTH_RE = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join("|");
+
+const isoOf = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const monthStart = (y, m) => new Date(y, m, 1);
+const monthEnd = (y, m) => new Date(y, m + 1, 0);
+
+// "01/07/2026", "1-7-26", "1st July 2026", "July 2026", "July"
+function parseOneDate(str, today, endOfPeriod) {
+  const t = String(str || "").toUpperCase().trim();
+  // Separators may be spaces: norm() has already turned 01/07/2026 into "01 07 2026"
+  let m = /^(\d{1,2})[\s\/\-.]+(\d{1,2})[\s\/\-.]+(\d{2,4})$/.exec(t);
+  if (m) {
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    const d = new Date(y, Number(m[2]) - 1, Number(m[1]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  m = new RegExp(`^(\\d{1,2})(?:ST|ND|RD|TH)?\\s+(${MONTH_RE})\\s*(\\d{4})?$`).exec(t)
+    || new RegExp(`^(${MONTH_RE})\\s+(\\d{1,2})(?:ST|ND|RD|TH)?\\s*(\\d{4})?$`).exec(t);
+  if (m) {
+    const dayFirst = /^\d/.test(m[1]);
+    const day = Number(dayFirst ? m[1] : m[2]);
+    const mon = MONTHS[dayFirst ? m[2] : m[1]];
+    const year = Number(m[3]) || today.getFullYear();
+    return new Date(year, mon, day);
+  }
+  m = new RegExp(`^(${MONTH_RE})\\s*(\\d{4})?$`).exec(t);
+  if (m) {
+    const mon = MONTHS[m[1]];
+    const year = Number(m[2]) || today.getFullYear();
+    return endOfPeriod ? monthEnd(year, mon) : monthStart(year, mon);
+  }
+  m = /^(20\d{2})$/.exec(t);
+  if (m) return endOfPeriod ? new Date(Number(m[1]), 11, 31) : new Date(Number(m[1]), 0, 1);
+  return null;
+}
+
+function parseLocally(text, today = new Date()) {
+  let t = ` ${norm(text)} `;
+  const eat = (re) => { t = t.replace(re, " "); };
+
+  // Ledger type
+  let ledgerType = null;
+  if (/\b(CUSTOMER|CUSTOMERS|CLIENT|DEBTOR|RECEIVABLE|RECEIVABLES)\b/.test(t)) ledgerType = "CUSTOMER";
+  else if (/\b(SUPPLIER|SUPPLIERS|VENDOR|CREDITOR|PAYABLE|PAYABLES)\b/.test(t)) ledgerType = "SUPPLIER";
+  else if (/\b(GL|G L|GENERAL LEDGER|NOMINAL)\b/.test(t)) ledgerType = "GL";
+  eat(/\b(CUSTOMERS?|CLIENT|DEBTOR|RECEIVABLES?|SUPPLIERS?|VENDOR|CREDITOR|PAYABLES?|GL|G L|GENERAL LEDGER|NOMINAL)\b/g);
+
+  // Period
+  const y = today.getFullYear(), mo = today.getMonth(), q = Math.floor(mo / 3);
+  let from = null, to = null;
+
+  const range = new RegExp(
+    `\\b(?:FROM|BETWEEN)\\s+(.+?)\\s+(?:TO|TILL|UNTIL|UPTO|UP TO|AND)\\s+(.+?)(?=\\s+(?:FOR|OF|LEDGER|ACCOUNT|STATEMENT)\\b|\\s*$)`
+  ).exec(t);
+  if (range) {
+    const a = parseOneDate(range[1], today, false);
+    const b = /^(TODAY|DATE|TILL DATE)$/i.test(range[2].trim()) ? today : parseOneDate(range[2], today, true);
+    if (a || b) { from = a; to = b; eat(new RegExp(range[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")); }
+  }
+
+  if (!from && !to) {
+    const rel = [
+      [/\bLAST MONTH\b/, () => [monthStart(y, mo - 1), monthEnd(y, mo - 1)]],
+      [/\b(THIS|CURRENT) MONTH\b/, () => [monthStart(y, mo), today]],
+      [/\bLAST YEAR\b/, () => [new Date(y - 1, 0, 1), new Date(y - 1, 11, 31)]],
+      [/\b(THIS|CURRENT) YEAR\b/, () => [new Date(y, 0, 1), today]],
+      [/\bLAST QUARTER\b/, () => [monthStart(y, (q - 1) * 3), monthEnd(y, (q - 1) * 3 + 2)]],
+      [/\b(THIS|CURRENT) QUARTER\b/, () => [monthStart(y, q * 3), today]],
+      [/\bLAST (\d{1,2}) MONTHS?\b/, (m) => [monthStart(y, mo - Number(m[1])), today]],
+      [/\bLAST (\d{1,3}) DAYS?\b/, (m) => [new Date(y, mo, today.getDate() - Number(m[1])), today]],
+      [/\bYEAR TO DATE\b|\bYTD\b/, () => [new Date(y, 0, 1), today]],
+      [new RegExp(`\\bQ([1-4])\\s*(\\d{4})?\\b`), (m) => {
+        const yy = Number(m[2]) || y, qq = Number(m[1]) - 1;
+        return [monthStart(yy, qq * 3), monthEnd(yy, qq * 3 + 2)];
+      }],
+    ];
+    for (const [re, fn] of rel) {
+      const m = re.exec(t);
+      if (m) { [from, to] = fn(m); eat(new RegExp(m[0], "g")); break; }
+    }
+  }
+
+  if (!from && !to) {
+    const since = new RegExp(`\\bSINCE\\s+(.+?)(?=\\s+(?:FOR|OF|LEDGER|ACCOUNT|STATEMENT)\\b|\\s*$)`).exec(t);
+    if (since) {
+      const a = parseOneDate(since[1], today, false);
+      if (a) { from = a; to = today; eat(new RegExp(since[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")); }
+    }
+  }
+
+  if (!from && !to) {
+    const upto = new RegExp(`\\b(?:TILL|UNTIL|UPTO|UP TO|AS ON|AS OF)\\s+(.+?)(?=\\s+(?:FOR|OF|LEDGER|ACCOUNT|STATEMENT)\\b|\\s*$)`).exec(t);
+    if (upto) {
+      const b = /^(TODAY|DATE)$/i.test(upto[1].trim()) ? today : parseOneDate(upto[1], today, true);
+      if (b) { to = b; eat(new RegExp(upto[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")); }
+    }
+  }
+
+  if (!from && !to) {
+    // A bare month name or year: "March", "March 2025", "2025"
+    const bare = new RegExp(`\\b(${MONTH_RE})\\s*(\\d{4})?\\b|\\b(20\\d{2})\\b`).exec(t);
+    if (bare) {
+      from = parseOneDate(bare[0], today, false);
+      to = parseOneDate(bare[0], today, true);
+      if (from) eat(new RegExp(bare[0], "g"));
+    }
+  }
+
+  // Whatever is left, minus filler, is the account
+  eat(/\b(LEDGER|ACCOUNT|ACCOUNTS|STATEMENT|SHOW|DISPLAY|OPEN|GET|FETCH|PLEASE|GIVE|ME|THE|A|OF|FOR|FROM|TO|PERIOD|DATED|BETWEEN|AND|ALL|TRANSACTIONS|ENTRIES|IN|ON|DURING|WITH)\b/g);
+  const accountText = t.replace(/\s+/g, " ").trim();
+
+  return {
+    ledgerType,
+    accountText: accountText || null,
+    fromDate: from ? isoOf(from) : null,
+    toDate: to ? isoOf(to) : null,
+  };
 }
 
 // ── Account lookup ──────────────────────────────────────────────────────────
@@ -412,13 +569,26 @@ module.exports = function (connection) {
     }
 
     let ai;
-    try {
-      ai = await geminiJson(buildPrompt(text));
-    } catch (err) {
-      console.error("ledger-ai gemini:", err.message);
-      return res.status(502).json({
-        error: `The AI could not read that request. ${String(err.message || "").slice(0, 180)}`,
-      });
+    let aiNote = "";
+    if (GEMINI_KEY) {
+      try {
+        ai = await geminiJson(buildPrompt(text));
+      } catch (err) {
+        console.error("ledger-ai gemini:", err.message);
+        aiNote = String(err.message || "").slice(0, 180);
+      }
+    } else {
+      aiNote = "GEMINI_API_KEY is not set on the server";
+    }
+
+    // Gemini unavailable (quota, outage, no key) — read it here instead
+    if (!ai) {
+      const local = parseLocally(text);
+      const gotSomething = local.ledgerType || local.accountText || local.fromDate || local.toDate;
+      if (!gotSomething) {
+        return res.status(502).json({ error: `The AI could not read that request. ${aiNote}` });
+      }
+      ai = local;
     }
 
     const typeMap = { CUSTOMER: "CUSTOMERS", SUPPLIER: "SUPPLIERS", GL: "ACCOUNTS" };
@@ -428,12 +598,19 @@ module.exports = function (connection) {
     if (fromDate && toDate && fromDate > toDate) [fromDate, toDate] = [toDate, fromDate];
     const accountText = ai?.accountText ? String(ai.accountText).trim() : "";
 
-    const out = { ledgerType: statedType, fromDate, toDate, accountText: accountText || null, match: null, candidates: [], message: "" };
+    const out = {
+      ledgerType: statedType, fromDate, toDate,
+      accountText: accountText || null,
+      match: null, candidates: [], message: "",
+      source: aiNote ? "local" : "ai",
+      aiNote,
+    };
 
     if (!accountText) {
       out.message = "No account name was found in the request.";
       return res.json(out);
     }
+
 
     try {
       const byScore = (a, b) => b.score - a.score || a.name.length - b.name.length;
@@ -490,5 +667,6 @@ module.exports = function (connection) {
 
 // exported for tests
 module.exports._nameScore = nameScore;
+module.exports._parseLocally = parseLocally;
 module.exports._tokens = tokens;
 module.exports._soundex = soundex;
