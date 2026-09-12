@@ -10216,6 +10216,7 @@ app.get("/api/pdc-rcd/:custCode", function (req, res) {
 //    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
 //    "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
 app.get("/api/vchrlst/:tranId", function (req, res) {
+  
   const tranId = String(req.params.tranId || "");
   const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
 
