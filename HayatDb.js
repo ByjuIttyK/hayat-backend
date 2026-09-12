@@ -3660,24 +3660,38 @@ app.get("/api/InvStlCust/:custcd", function (req, res) {
     }
   );
 });
-
 app.get("/api/InvStlSup/:custcd", function (req, res) {
-  console.log("InvStlSup", req.params.custcd);
+  // On EDIT the screen passes the voucher being edited (srcType/srcDoc).
+  // Its own adj_dtl allocations are added back into the balance, so a bill
+  // this PV settled to zero still comes through — with OWN_STL carrying the
+  // amount for Cur.Stlmnt and DR_AMT showing only what OTHER vouchers settled.
+  // On ADD both params are empty, the join matches nothing, and the result
+  // is identical to the old query.
+  const srcType = req.query.srcType || "";
+  const srcDoc  = req.query.srcDoc  || "";
+  console.log("InvStlSup", req.params.custcd, srcType, srcDoc);
+
   connection.query(
-    "SELECT ACC_CODE SUP_CODE, VCHR_NO DOC_NO, TRAN_TYPE DOC_TYPE,DATE_FORMAT(DATTE,'%d/%m/%Y') DOC_DATE,  NAR," +
-    "DR_AMT, CR_AMT, BALANCE INV_AMT " +
-    "FROM v_sup_outstanding_bill WHERE BALANCE > 0 AND ACC_CODE = ? ORDER BY DATTE ",
-    [req.params.custcd],
+    "SELECT v.ACC_CODE SUP_CODE, v.VCHR_NO DOC_NO, v.TRAN_TYPE DOC_TYPE, " +
+    "       DATE_FORMAT(v.DATTE,'%d/%m/%Y') DOC_DATE, v.NAR, " +
+    "       v.DR_AMT - IFNULL(o.own_stl,0) DR_AMT, " +
+    "       v.CR_AMT, " +
+    "       v.BALANCE + IFNULL(o.own_stl,0) INV_AMT, " +
+    "       IFNULL(o.own_stl,0) OWN_STL " +
+    "FROM v_sup_outstanding_bill v " +
+    "LEFT JOIN (SELECT STLD_DOC, STLD_TYPE, SUM(STLD_AMT) own_stl " +
+    "             FROM adj_dtl " +
+    "            WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
+    "            GROUP BY STLD_DOC, STLD_TYPE) o " +
+    "       ON o.STLD_DOC = v.VCHR_NO AND o.STLD_TYPE = v.TRAN_TYPE " +
+    "WHERE v.ACC_CODE = ? AND (v.BALANCE + IFNULL(o.own_stl,0)) > 0.005 " +
+    "ORDER BY v.DATTE ",
+    [srcType, srcDoc, req.params.custcd],
     function (err, results) {
       if (err) {
-        console.error("Error executing query:", err);  // Include the actual error
+        console.error("Error executing query:", err);
         return res.status(500).send("Error executing query.");
       }
-
-      // Log the results (optional)
-      console.log("Query results:", results);
-
-      // Send the results as JSON
       res.json(results);
     }
   );
