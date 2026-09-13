@@ -10257,16 +10257,21 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
   } else {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
+     "  ac_list.AC_HEAD AS ACC_HEAD,"+
       " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       "DB_CR " +
-      "  from tran_acc WHERE TRAN_TYPE=? order by vchr_no desc",
+      "  from tran_acc  "+
+       "LEFT OUTER JOIN ac_list " +
+      "  ON ac_list.AC_CODE = tran_acc.ACC_CODE " +
+     " WHERE TRAN_TYPE=? "+
+      " order by vchr_no desc",
       [req.params.tranId],
 
       function (error, result) {
         if (error) {
           throw error;
         } else {
-          //   console.log("Oracle  -Aclist", result);
+            console.log("Jv LIst", result);
           res.json(result);
 
         }
