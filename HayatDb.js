@@ -2563,98 +2563,6 @@ app.post("/api/save-sret", async (req, res) => {
 });
 
 
-
-app.post("/api/save-crnote", async (req, res) => {
-  try {
-    const { CrnHdr } = req.body;
-
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-        /* CrNoteNo: formik.values.CrNoteNo || null,
-        CrNoteDt: format(parse(formik.values.CrNoteDt, "dd/MM/yyyy", new Date()), "yyyy-MM-dd") || null,
-        CustCd: formik.values.CustCd || null,
-
-        InvNo: formik.values.InvNo || null,
-        AccCd: formik.values.AccCd || null,
-        Narration: formik.values.Narration || null,
-        SmanCd: formik.values.SmanCd || null,
-        Amount: formik.values.grossAmt || null,
-        VatAmt: formik.values.vatAmount || null*/
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          console.log("CrNoteNo, DoDt==>", CrnHdr);
-          const netQuery = `
-            INSERT INTO crnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, DEBIT_AC, 
-                                     NARRATION, AMOUNT, VAT_AMT,SMAN_CODE) 
-            VALUES (?,?,?,?, 
-                    ?,?,?,?) 
-            ON DUPLICATE KEY UPDATE 
-            VCHR_NO =VALUES(VCHR_NO),
-            VCHR_DATE= VALUES(VCHR_DATE),
-            CUST_CODE = VALUES(CUST_CODE),
-            DEBIT_AC = VALUES(DEBIT_AC),
-            NARRATION = VALUES(NARRATION),
-            AMOUNT = VALUES(AMOUNT),
-            VAT_AMT = VALUES (VAT_AMT),
-            SMAN_CODE = VALUES(SMAN_CODE);
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [CrnHdr.CrNoteNo, CrnHdr.CrNoteDt, CrnHdr.CustCd,
-              CrnHdr.AccCd, CrnHdr.Narration, CrnHdr.Amount, CrnHdr.vatAmt, CrnHdr.SmanCd],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("CRNOTE_HDR Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "CR Note Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Cr Note Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: " Cr Note Transaction failed, rolled back", error });
-          });
-        }
-      });
-
-    })
-  } catch (error) {
-    console.error("Transaction Failed:", error);
-    conn.rollback(() => {
-      conn.release(); // Release the connection back to the pool
-      res.status(500).json({ message: "Transaction failed, rolled back", error });
-    })
-  };
-
-})
-
 app.post("/api/save-drnote", async (req, res) => {
   try {
     const { CrnHdr } = req.body;
@@ -11045,3 +10953,5 @@ app.use("/api", authMiddleware, voucherChequeRoutes(connection));
 //
 const fabInvDoRoutes = require("./routes/fabInvDoRoutes");
 app.use("/api", fabInvDoRoutes(connection));
+//
+ app.use("/api", require("./routes/crnote")(connection));
