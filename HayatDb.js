@@ -2562,97 +2562,6 @@ app.post("/api/save-sret", async (req, res) => {
   }
 });
 
-
-app.post("/api/save-drnote", async (req, res) => {
-  try {
-    const { CrnHdr } = req.body;
-
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-        /* CrNoteNo: formik.values.CrNoteNo || null,
-        CrNoteDt: format(parse(formik.values.CrNoteDt, "dd/MM/yyyy", new Date()), "yyyy-MM-dd") || null,
-        CustCd: formik.values.CustCd || null,
-
-        InvNo: formik.values.InvNo || null,
-        AccCd: formik.values.AccCd || null,
-        Narration: formik.values.Narration || null,
-        SmanCd: formik.values.SmanCd || null,
-        Amount: formik.values.grossAmt || null,
-        VatAmt: formik.values.vatAmount || null*/
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          console.log("DrNoteNo, DoDt==>", CrnHdr);
-          const netQuery = `
-            INSERT INTO drnote_hdr ( VCHR_NO,VCHR_DATE, CUST_CODE, CREDIT_AC, 
-                                     SMAN_CODE,NARRATION, AMOUNT, VAT_AMT) 
-            VALUES (?,?,?,?, 
-                    ?,?,?,?) 
-            ON DUPLICATE KEY UPDATE 
-            VCHR_NO =VALUES(VCHR_NO),
-            VCHR_DATE= VALUES(VCHR_DATE),
-            CUST_CODE = VALUES(CUST_CODE),
-            CREDIT_AC = VALUES(CREDIT_AC),
-            SMAN_CODE = VALUES(SMAN_CODE),
-            NARRATION = VALUES(NARRATION),
-            AMOUNT = VALUES(AMOUNT),
-            VAT_AMT = VALUES (VAT_AMT);
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [CrnHdr.DrNoteNo, CrnHdr.DrNoteDt, CrnHdr.CustCd,
-              CrnHdr.AccCd, CrnHdr.SmanCd, CrnHdr.Narration, CrnHdr.Amount, CrnHdr.vatAmt],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("DRNOTE_HDR Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "DR Note Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Dr Note Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: " Dr Note Transaction failed, rolled back", error });
-          });
-        }
-      });
-
-    })
-  } catch (error) {
-    console.error("Transaction Failed:", error);
-    conn.rollback(() => {
-      conn.release(); // Release the connection back to the pool
-      res.status(500).json({ message: "Transaction failed, rolled back", error });
-    })
-  };
-
-})
 //
 app.post("/api/save-do", async (req, res) => {
   console.log('save-do, start ===>')
@@ -6949,28 +6858,6 @@ app.get("/api/getDrawReg/:id", function (req, res) {
   });
 });
 
-
-app.get("/api/drntHdr/:vchr", function (req, res) {
-  console.log("Oracle Cr.Note  req:=", req.params.vchr);
-  connection.query(
-    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
-    " b.CUST_NAME,a.SMAN_CODE, a.NARRATION, a.CREDIT_AC,a.VAT_AMT,  a.AMOUNT" +
-    " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
-    " WHERE  a.VCHR_NO = ? ",
-
-    [req.params.vchr],
-
-    function (err, result) {
-      if (err) {
-        throw err;
-      } else {
-        console.log("Oracle Cr.Note ", result);
-        res.json(result);
-
-      }
-    }
-  );
-});
 app.get("/api/drntlst/:dys", function (req, res) {
 
   connection.query(
@@ -10955,3 +10842,5 @@ const fabInvDoRoutes = require("./routes/fabInvDoRoutes");
 app.use("/api", fabInvDoRoutes(connection));
 //
  app.use("/api", require("./routes/crnote")(connection));
+ //drnote
+   app.use("/api", require("./routes/drnote")(connection));
