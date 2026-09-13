@@ -16,7 +16,7 @@ const express = require("express");
 // ---------------------------------------------------------------------------
 // CONFIG — confirm against the Oracle system before going live
 // ---------------------------------------------------------------------------
-const TRAN_TYPE = "10";                 // tran_acc.TRAN_TYPE for debit notes
+const TRAN_TYPE = "11";                 // tran_acc.TRAN_TYPE for debit notes
 const VAT_AC = "142-004-0-001";         // GL account the VAT part is posted to
 const DIV_CODE = "01";
 const DOC_PREFIX = "DR";
