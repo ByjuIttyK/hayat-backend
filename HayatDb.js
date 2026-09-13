@@ -11042,3 +11042,6 @@ app.use("/api", stkAdjRoutes(connection));
 //
 const voucherChequeRoutes = require("./routes/voucherChequeRoutes");
 app.use("/api", authMiddleware, voucherChequeRoutes(connection));
+//
+const fabInvDoRoutes = require("./routes/fabInvDoRoutes");
+app.use("/api", fabInvDoRoutes(connection));
