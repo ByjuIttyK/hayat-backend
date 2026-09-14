@@ -10318,7 +10318,7 @@ app.get("/api/trnprn/:tranId/:Vchr", function (req, res) {
     "IF(a.DB_CR='D', a.AMOUNT, 0) AS DR_AMOUNT, " +
     "IF(a.DB_CR='C', a.AMOUNT, 0) AS CR_AMOUNT, " +
     "a.DB_CR, a.NARRATION1, a.NARRATION2, a.JOB_NO " +
-    "FROM tran_acc a, AC_List b WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? " +
+    "FROM tran_acc a, ac_List b WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? " +
     "  and a.ACC_CODE = b.AC_CODE ORDER BY a.SR_NO ",
     [req.params.tranId, req.params.Vchr],
     function (error, result) {
