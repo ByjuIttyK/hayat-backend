@@ -10315,8 +10315,8 @@ app.get("/api/trnprn/:tranId/:Vchr", function (req, res) {
 
   connection.query(
     "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, a.ACC_CODE,b.AC_HEAD, a.AMOUNT," +
-    "IF(a.DB_CR='D', a.AMOUNT, 0) AS AMOUNT_DR, " +
-    "IF(a.DB_CR='C', a.AMOUNT, 0) AS AMOUNT_CR, " +
+    "IF(a.DB_CR='D', a.AMOUNT, 0) AS DR_AMOUNT, " +
+    "IF(a.DB_CR='C', a.AMOUNT, 0) AS CR_AMOUNT, " +
     "a.DB_CR, a.NARRATION1, a.NARRATION2, a.JOB_NO " +
     "FROM tran_acc a, AC_List b WHERE a.TRAN_TYPE = ? AND a.VCHR_NO = ? " +
     "  and a.ACC_CODE = b.AC_CODE ORDER BY a.SR_NO ",
