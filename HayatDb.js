@@ -10011,7 +10011,7 @@ app.get("/api/pdc-rcd/:custCode", function (req, res) {
 //    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
 //    "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
 app.get("/api/vchrlst/:tranId", function (req, res) {
-  
+
   const tranId = String(req.params.tranId || "");
   const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
 
@@ -10052,13 +10052,13 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
   } else {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
-     "  ac_list.AC_HEAD AS ACC_HEAD,"+
+      "  ac_list.AC_HEAD AS ACC_HEAD," +
       " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
       "DB_CR " +
-      "  from tran_acc  "+
-       "LEFT OUTER JOIN ac_list " +
+      "  from tran_acc  " +
+      "LEFT OUTER JOIN ac_list " +
       "  ON ac_list.AC_CODE = tran_acc.ACC_CODE " +
-     " WHERE TRAN_TYPE=? "+
+      " WHERE TRAN_TYPE=? " +
       " order by vchr_no desc",
       [req.params.tranId],
 
@@ -10066,7 +10066,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
         if (error) {
           throw error;
         } else {
-            console.log("Jv LIst", result);
+          console.log("Jv LIst", result);
           res.json(result);
 
         }
@@ -10841,6 +10841,9 @@ app.use("/api", authMiddleware, voucherChequeRoutes(connection));
 const fabInvDoRoutes = require("./routes/fabInvDoRoutes");
 app.use("/api", fabInvDoRoutes(connection));
 //
- app.use("/api", require("./routes/crnote")(connection));
- //drnote
-   app.use("/api", require("./routes/drnote")(connection));
+app.use("/api", require("./routes/crnote")(connection));
+//drnote
+app.use("/api", require("./routes/drnote")(connection));
+//
+const trnVouchersRoute = require("./routes/trn-vouchers");
+app.use("/api", trnVouchersRoute(connection));
