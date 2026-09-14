@@ -10232,7 +10232,7 @@ app.get('/api/supbal', function (req, res) {
     "  SELECT b.SUP_CODE, b.SUP_NAME, " +
     "  SUM(CASE WHEN db_cr = 'D' THEN AMOUNT ELSE AMOUNT * -1 END) AS BALANCE " +
     "  FROM tran_acc a JOIN sup_mst b ON a.ACC_CODE = b.SUP_CODE " +
-    "  WHERE DATTE < ? " +
+    "  WHERE DATTE <= ? " +
     "  GROUP BY b.SUP_CODE, b.SUP_NAME " +
     ") AS summary ORDER BY SUP_CODE",
     [end_date],
@@ -10249,8 +10249,6 @@ app.get('/api/supbal', function (req, res) {
 }
 );
 
-
-
 app.get('/api/cusbal', function (req, res) {
   //  const acCode = req.params.acode;
   const { end_date } = req.query;
@@ -10264,7 +10262,7 @@ app.get('/api/cusbal', function (req, res) {
     "  SELECT b.CUST_CODE, b.CUST_NAME, " +
     "  SUM(CASE WHEN db_cr = 'D' THEN AMOUNT ELSE AMOUNT * -1 END) AS BALANCE " +
     "  FROM tran_acc a JOIN cus_mst b ON a.ACC_CODE = b.CUST_CODE " +
-    "  WHERE DATTE < ? " +
+    "  WHERE DATTE <= ? " +
     "  GROUP BY b.CUST_CODE, b.CUST_NAME " +
     ") AS summary ORDER BY CUST_CODE",
     [end_date],
