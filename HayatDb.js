@@ -914,7 +914,7 @@ app.post("/api/save-fpo", async (req, res) => {
 //
 const NGP_GL = {
   TRAN_TYPE: "07",
-  VAT_ACC: "142-004-0-001",
+  VAT_ACC: "142-004-0-002",
   DISC_ACC: "502-001-0-002",
   NARR1_MAX: 60, // set to the width of tran_acc.NARRATION1
 };
