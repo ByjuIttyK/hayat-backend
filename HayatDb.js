@@ -10019,7 +10019,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
     connection.query(
       "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
       "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
-      "chq.CHEQUE_NO, chq.CHQ_COUNT, " +
+      "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT,chq.CHQ_COUNT, " +
       "v.AMOUNT, v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
       "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
       "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
@@ -10027,10 +10027,10 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
       "LEFT OUTER JOIN ac_list " +
       "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +
       "LEFT OUTER JOIN (" +
-      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
-      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ FROM " + pdcTable + " WHERE TRAN_TYPE = ? " +
+      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
+      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ, CHQ_DATE FROM " + pdcTable + " WHERE TRAN_TYPE = ? " +
       "    UNION ALL " +
-      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ FROM current_chq WHERE TRAN_TYPE = ? " +
+      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ ,CHQ_DATE FROM current_chq WHERE TRAN_TYPE = ? " +
       "  ) u GROUP BY TRAN_TYPE, VCHR_NO) chq " +
       "  ON chq.TRAN_TYPE = v.TRAN_TYPE AND chq.VCHR_NO = v.VCHR_NO " +
       "WHERE v.TRAN_TYPE = ? " +
