@@ -10015,7 +10015,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
   const tranId = String(req.params.tranId || "");
   const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
 
-  if (tranId !== "05") {
+  if (tranId !== "05" && tranId !== '02') {
     connection.query(
       "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
       "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
@@ -10049,7 +10049,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
       }
 
     );
-  } else {
+  } else if (tranId == "05") {
     connection.query(
       "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
       "  ac_list.AC_HEAD AS ACC_HEAD," +
@@ -10060,6 +10060,30 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
       "  ON ac_list.AC_CODE = tran_acc.ACC_CODE " +
       " WHERE TRAN_TYPE=? " +
       " order by vchr_no desc",
+      [req.params.tranId],
+      function (error, result) {
+        if (error) {
+          throw error;
+        } else {
+          //  console.log("Vchr list", result);
+          res.json(result);
+
+        }
+      });
+  }
+  else if (tranId == "02") {
+    connection.query(
+      "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
+  "       c.AC_HEAD AS ACC_HEAD, " +
+  "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, b.PAID_TO, a.NARRATION1, a.NARRATION2, " +
+  "       a.DB_CR " +
+  "  FROM tran_acc a " +
+  "  LEFT OUTER JOIN ac_list AS c " +
+  "    ON c.AC_CODE = a.ACC_CODE " +
+  "  LEFT OUTER JOIN vouchers AS b " +
+  "    ON b.TRAN_TYPE = a.TRAN_TYPE AND b.VCHR_NO = a.VCHR_NO " +
+  " WHERE a.TRAN_TYPE = ? " +
+  " ORDER BY a.VCHR_NO DESC, a.SR_NO",
       [req.params.tranId],
 
       function (error, result) {
@@ -10845,3 +10869,5 @@ app.use("/api", require("./routes/drnote")(connection));
 //
 const trnVouchersRoute = require("./routes/trn-vouchers");
 app.use("/api", trnVouchersRoute(connection));
+//
+app.use("/api", authMiddleware, require("./routes/ledgerEntryLines")(connection));
