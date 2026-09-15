@@ -10015,7 +10015,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
   const tranId = String(req.params.tranId || "");
   const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
 
-  if (tranId !== "05" && tranId !== '02'&& tranId !=='04') {
+  if (tranId !== "05" && tranId !== '02') {
     connection.query(
       "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
       "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
@@ -10071,7 +10071,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
         }
       });
   }
-  else if (tranId == "02" || tranId =='04') {
+  else if (tranId == "02") {
     connection.query(
       "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
   "       c.AC_HEAD AS ACC_HEAD, " +
