@@ -10871,3 +10871,8 @@ const trnVouchersRoute = require("./routes/trn-vouchers");
 app.use("/api", trnVouchersRoute(connection));
 //
 app.use("/api", authMiddleware, require("./routes/ledgerEntryLines")(connection));
+
+//
+app.use("/api", authMiddleware, require("./routes/TrialBalanceRoutes")(connection));
+//
+app.use("/api", authMiddleware, require("./routes/ProfitLossRoutes")(connection));
