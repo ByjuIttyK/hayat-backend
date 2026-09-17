@@ -2078,7 +2078,8 @@ app.post("/api/save-fabinv", async (req, res) => {
             NetAmt: fabInvNet.NetAmt,          // Matches FIELD_NAME for NET_PAYABLE rule
             JobNo: fabInvNet.JobNo || null,
             PanelNo: null,
-            PartyName: fabInvNet.CustName || null
+            PartyName: fabInvNet.CustName || null,
+            RevAc : fabInvNet.RevAc||null
           };
           await postToTranAcc(glPayload, conn);
           console.log('Sales Inv- glPayLoad=', glPayload);
@@ -9795,7 +9796,7 @@ app.get("/api/jobcard/:jobNo", function (req, res) {
                 VAT_PERC,
                 CONSULTANT,
                 SMAN_CODE,
-                DATE_OF_APPROVAL
+                DATE_OF_APPROVAL,REVENUE_AC
             FROM job_card
             WHERE JOB_NO = ?
         `;
