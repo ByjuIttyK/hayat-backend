@@ -2590,11 +2590,13 @@ app.post("/api/save-do", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update fab_do_hdr table
           console.log("DoNo, DoDt==>", DoHdr, DoHdr.DoNo, DoHdr.DoDt);
-          const netQuery = `
+               const netQuery = `
             INSERT INTO fab_do_hdr ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
-                                     LPO_NO, LPO_DATE, DO_NO, CONTACT_PERSON,DO_APPROVED) 
+                                     LPO_NO, LPO_DATE, DO_NO, CONTACT_PERSON,DO_APPROVED,
+                                     PROJECT_DETAIL) 
             VALUES (?,?,?,?, 
-                    ?,?,?,?,?) 
+                    ?,?,?,?,?,
+                    ?) 
             ON DUPLICATE KEY UPDATE 
             INV_NO =VALUES(INV_NO),
             INV_DATE= VALUES(INV_DATE),
@@ -2604,14 +2606,16 @@ app.post("/api/save-do", async (req, res) => {
             LPO_DATE = VALUES(LPO_DATE),
             DO_NO = VALUES (DO_NO),
             CONTACT_PERSON = VALUES(CONTACT_PERSON),
-            DO_APPROVED = VALUES(DO_APPROVED);
+            DO_APPROVED = VALUES(DO_APPROVED),
+            PROJECT_DETAIL = VALUES(PROJECT_DETAIL);
           `;
 
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
               [DoHdr.DoNo, DoHdr.DoDt, DoHdr.CustCd,
-              DoHdr.JobNo, DoHdr.LpoNo, DoHdr.LpoDt, DoHdr.InvNo, DoHdr.Attn, DoHdr.DoAprv],
+              DoHdr.JobNo, DoHdr.LpoNo, DoHdr.LpoDt, DoHdr.InvNo, DoHdr.Attn, DoHdr.DoAprv,
+              DoHdr.ClientPrjRef],
               (err, result) => {
                 if (err) {
                   return reject(err);
@@ -2621,7 +2625,6 @@ app.post("/api/save-do", async (req, res) => {
               }
             );
           });
-
           // ✅ Step 2: Insert/Update fab_do_dtl table
           const itemsQuery = `
             INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE,INV_ITEM_DESC, INV_QTY, INV_UNIT)
@@ -7658,7 +7661,7 @@ app.get("/api/fabdohdr/:doNo", function (req, res) {
   console.log("DO_HDR", req.params.doNo);
   connection.query(
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
-    "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, " +
+    "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, a.PROJECT_DETAIL," +
     "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.DO_APPROVED " +
     "FROM fab_do_hdr a " +
     "left outer join cus_mst b on a.cust_code = b.cust_code " +
@@ -10879,3 +10882,5 @@ app.use("/api", authMiddleware, require("./routes/TrialBalanceRoutes")(connectio
 app.use("/api", authMiddleware, require("./routes/ProfitLossRoutes")(connection));
 //
 app.use("/api", authMiddleware, require("./routes/BalanceSheetRoutes")(connection));
+//
+app.use("/api", authMiddleware, require("./routes/tbAudit")(connection));
