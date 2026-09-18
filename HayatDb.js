@@ -10619,6 +10619,29 @@ app.get("/api/fabinv-already-qty/:jobNo/:panelNo", function (req, res) {
     res.json({ ALREADY_INV_QTY: Number(rows?.[0]?.ALREADY_INV_QTY || 0) });
   });
 });
+app.get("/api/fabdo-prjrefs/:custCode", (req, res) => {
+  const custCode = String(req.params.custCode || "").trim();
+  if (!custCode) return res.json([]);
+
+  const sql = `
+    SELECT TRIM(PROJECT_DETAIL) AS PROJECT_DETAIL
+      FROM fab_do_hdr
+     WHERE CUST_CODE = ?
+       AND PROJECT_DETAIL IS NOT NULL
+       AND TRIM(PROJECT_DETAIL) <> ''
+     GROUP BY TRIM(PROJECT_DETAIL)
+     ORDER BY MAX(INV_DATE) DESC, MAX(INV_NO) DESC
+     LIMIT 300`;
+
+  connection.query(sql, [custCode], (err, rows) => {
+    if (err) {
+      console.error("fabdo-prjrefs failed:", err);
+      return res.status(500).json({ message: "Could not load project refs", error: err.sqlMessage || err.message });
+    }
+    console.log("PROJECT DETAILS",rows)
+    res.json(rows);
+  });
+});
 
 //Jv Routes
 const jvRoutes = require('./JvExcelEntryRoutes');
@@ -10884,3 +10907,5 @@ app.use("/api", authMiddleware, require("./routes/ProfitLossRoutes")(connection)
 app.use("/api", authMiddleware, require("./routes/BalanceSheetRoutes")(connection));
 //
 app.use("/api", authMiddleware, require("./routes/tbAudit")(connection));
+//fabdo-prjrefs-route
+//app.use("/api",authMiddleware,require("./routes/fabdo-prjrefs-route")(connection))
