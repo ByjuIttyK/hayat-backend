@@ -7616,7 +7616,7 @@ app.get("/api/nextdo", function (req, res) {
 app.get("/api/dolist/:dys", function (req, res) {
   connection.query(
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ," +
+    " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ,a.PROJECT_DETAIL," +
     " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE, a.CONTACT_PERSON " +
     " from fab_do_hdr a LEFT OUTER JOIN cus_mst b  ON (a.CUST_CODE = b.CUST_CODE) " +
     " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  " +
