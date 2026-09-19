@@ -10909,3 +10909,5 @@ app.use("/api", authMiddleware, require("./routes/BalanceSheetRoutes")(connectio
 app.use("/api", authMiddleware, require("./routes/tbAudit")(connection));
 //fabdo-prjrefs-route
 //app.use("/api",authMiddleware,require("./routes/fabdo-prjrefs-route")(connection))
+const vatPurchaseReport = require("./routes/vatPurchaseReport");
+app.use("/api", vatPurchaseReport(connection));

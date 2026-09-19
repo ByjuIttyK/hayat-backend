@@ -22,6 +22,10 @@ const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 
 const VAT_RATE = 0.05;
+
+/** Exports are zero-rated: anything outside the UAE carries no output VAT. */
+const isExport = (r) => r.nat_ind !== 'UAE';
+
 // ─── SQL ─────────────────────────────────────────────────────────────────────
 // sal_loc_mst joined via LEFT JOIN so rows without a matching sloc_code still
 // appear; sloc_name falls back to cn_code when no match.
@@ -91,8 +95,9 @@ function fetchRows(connection, { dt1, dt2, sloc }) {
 function decorateRows(rows) {
   return rows.map(r => {
     const taxable = round2(r.amt - r.discount);
-    const vat     = round2(taxable * VAT_RATE);
-    return { ...r, taxable, vat, total: round2(taxable + vat) };
+    // Export / international sales are zero-rated — no output VAT.
+    const vat = isExport(r) ? 0 : round2(taxable * VAT_RATE);
+    return { ...r, taxable, vat, total: round2(taxable + vat), zero_rated: isExport(r) };
   });
 }
 
@@ -144,71 +149,91 @@ function buildReport(rows) {
 const round2  = v  => Math.round(v * 100) / 100;
 const fmtNum  = v  => Number(v).toLocaleString('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const natLabelOf = n =>
+  n.nat_ind === 'UAE' ? 'UNITED ARAB EMIRATES' : `EXPORT — ZERO RATED (${n.nat_ind})`;
+
 // ─── Excel Builder ────────────────────────────────────────────────────────────
+// Print-friendly: no solid fills anywhere except the column header row.
 
 async function buildExcel(report, { dt1, dt2, sloc }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Telltron ERP';
-  const ws = wb.addWorksheet('Sales Register VAT', { views: [{ showGridLines: false }] });
+  const ws = wb.addWorksheet('Sales Register VAT', {
+    views: [{ showGridLines: false, state: 'frozen', ySplit: 5 }],
+    pageSetup: {
+      orientation: 'landscape', paperSize: 9,
+      fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      printTitlesRow: '5:5',
+      margins: { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.25 },
+    },
+    headerFooter: { oddFooter: '&L&9Telltron ERP&C&9Page &P of &N&R&9Printed &D' },
+  });
 
   ws.columns = [
     { width: 17 }, { width: 13 }, { width: 13 }, { width: 40 },
     { width: 18 }, { width: 18 }, { width: 18 }, { width: 8  }, { width: 8 },
   ];
 
-  const NAVY = '0D1B2A', GOLD = 'C9A84C', LGOLD = 'F5E6C8',
-        STEEL = '1B3A5C', STBG = 'E8F0F7', ALT = 'F4F8FC';
+  const NAVY = '0D1B2A', LBLUE = 'DCE7F3',
+        STEEL = '1B3A5C', GREY = '6B7280', RULE = '94A3B8';
 
   const fill  = a  => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: a } });
   const font  = (bold, argb, sz = 10) => ({ name: 'Calibri', bold, color: { argb }, size: sz });
   const aln   = (h = 'left', wrapText = false) => ({ horizontal: h, vertical: 'middle', wrapText });
   const thin  = c => ({ style: 'thin',   color: { argb: c } });
   const med   = c => ({ style: 'medium', color: { argb: c } });
+  const dbl   = c => ({ style: 'double', color: { argb: c } });
   const thinBorder = { top: thin('C0C0C0'), bottom: thin('C0C0C0'), left: thin('C0C0C0'), right: thin('C0C0C0') };
-  const goldBorder = { top: med(GOLD), bottom: med(GOLD), left: med(GOLD), right: med(GOLD) };
 
   let rn = 1;
-  const mergeRow = (val, bg, fg, sz, bold = true) => {
+
+  /** Heading line: plain text, no fill. */
+  const mergeRow = (val, fg, sz, bold = true, underline = null) => {
     ws.mergeCells(rn, 1, rn, 9);
     const c = ws.getCell(rn, 1);
-    c.value = val; c.fill = fill(bg); c.font = font(bold, fg, sz); c.alignment = aln('center');
-    ws.getRow(rn).height = sz + 14; rn++;
+    c.value = val; c.font = font(bold, fg, sz); c.alignment = aln('center');
+    if (underline) c.border = { bottom: thin(underline) };
+    ws.getRow(rn).height = sz + 10; rn++;
   };
 
-  mergeRow('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', NAVY, GOLD, 14);
-  mergeRow('SHARJAH, U.A.E.', NAVY, GOLD, 10, false);
-  mergeRow(`SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1}  to  ${dt2}  |  Location: ${sloc || 'ALL'}`, STEEL, 'F5E6C8', 9, false);
+  mergeRow('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', NAVY, 14);
+  mergeRow('SHARJAH, U.A.E.', GREY, 10, false);
+  mergeRow(
+    `SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1}  to  ${dt2}  |  Location: ${sloc || 'ALL'}`,
+    STEEL, 9, false, RULE
+  );
   ws.getRow(rn).height = 6; rn++;
 
-  const hdrs = ['Invoice No.','Inv. Date','Cust. Code','Customer Name','Taxable (AED)','VAT 5% (AED)','Total (AED)','Loc','Ctry'];
+  // ── the only shaded row in the sheet ──
+  const hdrs = ['Invoice No.','Inv. Date','Cust. Code','Customer Name','Taxable (AED)','VAT (AED)','Total (AED)','Loc','Ctry'];
   hdrs.forEach((h, i) => {
     const c = ws.getCell(rn, i + 1);
-    c.value = h; c.fill = fill(GOLD); c.font = font(true, NAVY, 9);
-    c.alignment = aln('center', true); c.border = goldBorder;
+    c.value = h; c.fill = fill(LBLUE); c.font = font(true, NAVY, 9);
+    c.alignment = aln('center', true);
+    c.border = { top: thin(STEEL), left: thin(RULE), right: thin(RULE), bottom: med(STEEL) };
   });
   ws.getRow(rn).height = 22; rn++;
 
   for (const nation of report.nations) {
     ws.mergeCells(rn, 1, rn, 9);
     const nc = ws.getCell(rn, 1);
-    nc.value = `  ${nation.nat_ind === 'UAE' ? 'UNITED ARAB EMIRATES' : `EXPORT — ${nation.nat_ind}`}`;
-    nc.fill = fill(STEEL); nc.font = font(true, 'FFFFFF', 10); nc.alignment = aln('left');
+    nc.value = `  ${natLabelOf(nation)}`;
+    nc.font = font(true, NAVY, 10); nc.alignment = aln('left');
+    nc.border = { bottom: thin(STEEL) };
     ws.getRow(rn).height = 20; rn++;
 
     for (const st of nation.states) {
       ws.mergeCells(rn, 1, rn, 9);
       const sc = ws.getCell(rn, 1);
-      // ── state_name from sal_loc_mst shown here ──
       sc.value = `    ${st.state_name}  ${st.state_name !== st.state ? `(${st.state})` : ''}`;
-      sc.fill = fill(STBG); sc.font = font(true, STEEL, 10); sc.alignment = aln('left');
+      sc.font = font(true, STEEL, 10); sc.alignment = aln('left');
       ws.getRow(rn).height = 18; rn++;
 
-      st.rows.forEach((r, idx) => {
-        const bg = idx % 2 === 0 ? 'FFFFFF' : ALT;
+      st.rows.forEach(r => {
         [r.inv_no, r.inv_date, r.cust_code, r.cust_name, r.taxable, r.vat, r.total,
          (r.sloc || '').substring(0, 3), r.nation_code].forEach((v, i) => {
           const c = ws.getCell(rn, i + 1);
-          c.value = v; c.fill = fill(bg); c.border = thinBorder;
+          c.value = v; c.border = thinBorder;
           if (i >= 4 && i <= 6) { c.numFmt = '#,##0.00'; c.font = font(false, STEEL, 9); c.alignment = aln('right'); }
           else if (i === 3)     { c.font = font(false, '000000', 9); c.alignment = aln('left', true); }
           else                  { c.font = font(false, '374151', 9); c.alignment = aln('center'); }
@@ -219,23 +244,27 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
       ws.mergeCells(rn, 1, rn, 4);
       const stc = ws.getCell(rn, 1);
       stc.value = `  Subtotal — ${st.state_name}  (${st.rows.length} invoices)`;
-      stc.fill = fill(LGOLD); stc.font = font(true, NAVY, 9); stc.alignment = aln('right');
+      stc.font = font(true, NAVY, 9); stc.alignment = aln('right');
+      stc.border = { top: thin(STEEL) };
       [[5, st.subtotal_taxable],[6, st.subtotal_vat],[7, st.subtotal_total]].forEach(([col, val]) => {
         const c = ws.getCell(rn, col);
-        c.value = val; c.numFmt = '#,##0.00'; c.fill = fill(LGOLD);
+        c.value = val; c.numFmt = '#,##0.00';
         c.font = font(true, NAVY, 9); c.alignment = aln('right');
+        c.border = { top: thin(STEEL) };
       });
       ws.getRow(rn).height = 18; rn++;
     }
 
     ws.mergeCells(rn, 1, rn, 4);
     const ntc = ws.getCell(rn, 1);
-    ntc.value = `  TOTAL — ${nation.nat_ind}`; ntc.fill = fill(STEEL);
-    ntc.font = font(true, 'FFFFFF', 10); ntc.alignment = aln('right');
+    ntc.value = `  TOTAL — ${nation.nat_ind}`;
+    ntc.font = font(true, NAVY, 10); ntc.alignment = aln('right');
+    ntc.border = { top: med(STEEL), bottom: thin(STEEL) };
     [[5, nation.nat_taxable],[6, nation.nat_vat],[7, nation.nat_total]].forEach(([col, val]) => {
       const c = ws.getCell(rn, col);
-      c.value = val; c.numFmt = '#,##0.00'; c.fill = fill(STEEL);
-      c.font = font(true, GOLD, 10); c.alignment = aln('right');
+      c.value = val; c.numFmt = '#,##0.00';
+      c.font = font(true, NAVY, 10); c.alignment = aln('right');
+      c.border = { top: med(STEEL), bottom: thin(STEEL) };
     });
     ws.getRow(rn).height = 20; rn++; rn++;
   }
@@ -243,18 +272,34 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
   ws.mergeCells(rn, 1, rn, 4);
   const gtc = ws.getCell(rn, 1);
   gtc.value = `  GRAND TOTAL  (${report.count} Invoices)`;
-  gtc.fill = fill(NAVY); gtc.font = font(true, GOLD, 12); gtc.alignment = aln('right');
+  gtc.font = font(true, NAVY, 12); gtc.alignment = aln('right');
+  gtc.border = { top: med(NAVY), bottom: dbl(NAVY) };
   [[5, report.grand_taxable],[6, report.grand_vat],[7, report.grand_total]].forEach(([col, val]) => {
     const c = ws.getCell(rn, col);
-    c.value = val; c.numFmt = '#,##0.00'; c.fill = fill(NAVY);
-    c.font = font(true, GOLD, 12); c.alignment = aln('right');
+    c.value = val; c.numFmt = '#,##0.00';
+    c.font = font(true, NAVY, 12); c.alignment = aln('right');
+    c.border = { top: med(NAVY), bottom: dbl(NAVY) };
   });
-  ws.getRow(rn).height = 24;
+  ws.getRow(rn).height = 24; rn++;
+
+  // zero-rating note
+  const exportNation = report.nations.find(n => n.nat_ind !== 'UAE');
+  if (exportNation) {
+    rn++;
+    ws.mergeCells(rn, 1, rn, 9);
+    const nt = ws.getCell(rn, 1);
+    nt.value = 'Export / international sales are zero-rated: taxable value is reported, output VAT is nil.';
+    nt.font = { name: 'Calibri', size: 9, italic: true, color: { argb: GREY } };
+    nt.alignment = aln('left');
+  }
+
   return wb;
 }
 
 // ─── PDF Builder ──────────────────────────────────────────────────────────────
-// Uses save()/restore() + clip rect per cell so text NEVER bleeds into adjacent columns.
+// Uses save()/restore() + clip rect per cell so text NEVER bleeds into adjacent
+// columns. Print-friendly: rules and bold text instead of filled bands; the
+// column header row is the only shaded area.
 
 function buildPdf(report, { dt1, dt2, sloc }) {
   const doc = new PDFDocument({
@@ -264,77 +309,66 @@ function buildPdf(report, { dt1, dt2, sloc }) {
   });
 
   const PW      = doc.page.width;   // 841.89 pt landscape
-  const MARGIN  = 18;   // tighter margin = more usable width
-  const CW      = PW - MARGIN * 2;  // usable content width ≈ 797 pt
+  const MARGIN  = 18;
+  const CW      = PW - MARGIN * 2;
 
   // ── colours ──────────────────────────────────────────────────────────────
-  const NAVY  = '#0D1B2A', GOLD  = '#C9A84C', LGOLD = '#F5E6C8',
-        STEEL = '#1B3A5C', STBG  = '#E8F0F7', ALT   = '#F4F8FC',
-        WHITE = '#FFFFFF', GREY  = '#6B7280';
+  const NAVY  = '#0D1B2A', LBLUE = '#DCE7F3',
+        STEEL = '#1B3A5C', GREY  = '#6B7280', RULE = '#94A3B8';
 
   // ── column layout (must sum to exactly 1.0) ───────────────────────────────
-  //  InvNo  Date   CCode  CustName  Taxable  VAT    Total   Loc   Ctry
-  //           InvNo  Date  CCode CustName  Tax    VAT   Total  Loc  Ctry
   const PCT = [0.13, 0.09, 0.09, 0.25, 0.11, 0.11, 0.11, 0.055, 0.055];
   const CWS = PCT.map(p => Math.floor(p * CW));
-  // fix rounding: add remainder to customer name column
   const rem = CW - CWS.reduce((a,b)=>a+b,0);
   CWS[3] += rem;
 
   const COL_HDRS = ['Invoice No.','Date','Cust Code','Customer Name',
-                    'Taxable (AED)','VAT 5% (AED)','Total (AED)','Loc','Ctry'];
+                    'Taxable (AED)','VAT (AED)','Total (AED)','Loc','Ctry'];
   const ROW_H  = 15;
   const HEAD_H = 19;
   let y = MARGIN;
 
   // ── core drawing helpers ──────────────────────────────────────────────────
 
-  /** Fill a rectangle with a solid colour */
   const fillR = (x, ry, w, h, col) => doc.save().rect(x, ry, w, h).fill(col).restore();
 
-  /** Draw text clipped strictly inside [cx, cy, cw, ch].
-   *  align: 'left' | 'center' | 'right'
-   *  PDFKit's doc.text() is called with lineBreak:false so it never wraps.
-   *  We clip to the cell so overflow is invisible. */
+  const rule = (ry, col = RULE, w = 0.8) =>
+    doc.save().moveTo(MARGIN, ry).lineTo(MARGIN + CW, ry).lineWidth(w).stroke(col).restore();
+
   const cell = (text, cx, cy, cw, ch,
                 { align='left', color='#111', fontSize=7, bold=false, padH=3 } = {}) => {
     if (text === null || text === undefined || text === '') return;
     const str = String(text);
     doc.save();
-    // Clip strictly to this cell — nothing bleeds into adjacent columns
     doc.rect(cx + 0.5, cy + 0.5, cw - 1, ch - 1).clip();
     doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
        .fontSize(fontSize)
        .fillColor(color);
     const vertY = cy + (ch - fontSize) / 2;
-    // Always anchor at cx+padH with full inner width; pass align to PDFKit.
-    // This is the ONLY correct way to right-align in PDFKit — never shift tx.
     doc.text(str, cx + padH, vertY, {
       lineBreak: false,
       width: cw - padH * 2,
-      align,                   // 'left' | 'center' | 'right' — PDFKit handles it
+      align,
     });
     doc.restore();
   };
 
-  /** Draw a full-width row of 9 cells */
-  const drawDataRow = (vals, ry, bg, opts) => {
+  /** Draw a full-width row of 9 cells (no background fill) */
+  const drawDataRow = (vals, ry, opts) => {
     let cx = MARGIN;
-    fillR(MARGIN, ry, CW, ROW_H, bg);
     vals.forEach((v, i) => {
-      // light grid line
       doc.save().rect(cx, ry, CWS[i], ROW_H).stroke('#D8DCE4').restore();
       cell(v, cx, ry, CWS[i], ROW_H, opts[i]);
       cx += CWS[i];
     });
   };
 
-  /** Column-header row (repeated on each page) */
+  /** Column-header row (repeated on each page) — the only shaded band */
   const drawColHeaders = () => {
     let cx = MARGIN;
-    fillR(MARGIN, y, CW, HEAD_H, LGOLD);
+    fillR(MARGIN, y, CW, HEAD_H, LBLUE);
     COL_HDRS.forEach((h, i) => {
-      doc.save().rect(cx, y, CWS[i], HEAD_H).stroke(GOLD).restore();
+      doc.save().rect(cx, y, CWS[i], HEAD_H).stroke(STEEL).restore();
       cell(h, cx, y, CWS[i], HEAD_H, { align:'center', color:NAVY, fontSize:6.5, bold:true });
       cx += CWS[i];
     });
@@ -349,32 +383,30 @@ function buildPdf(report, { dt1, dt2, sloc }) {
     }
   };
 
-  // ── page header ───────────────────────────────────────────────────────────
-  fillR(MARGIN, y, CW, 24, NAVY);
-  cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 24,
-    { align:'center', color:GOLD, fontSize:12, bold:true }); y += 24;
+  // ── page header : plain text, no filled bands ─────────────────────────────
+  cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 20,
+    { align:'center', color:NAVY, fontSize:12, bold:true }); y += 20;
 
-  fillR(MARGIN, y, CW, 14, NAVY);
-  cell('SHARJAH, U.A.E.', MARGIN, y, CW, 14,
-    { align:'center', color:GOLD, fontSize:8.5 }); y += 14;
+  cell('SHARJAH, U.A.E.', MARGIN, y, CW, 12,
+    { align:'center', color:GREY, fontSize:8.5 }); y += 12;
 
-  fillR(MARGIN, y, CW, 14, STEEL);
   cell(`SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1} to ${dt2}  |  Location: ${sloc || 'ALL LOCATIONS'}  |  Printed: ${new Date().toLocaleDateString('en-AE')}`,
-    MARGIN, y, CW, 14, { align:'center', color:LGOLD, fontSize:7 }); y += 14 + 5;
+    MARGIN, y, CW, 12, { align:'center', color:STEEL, fontSize:7 }); y += 13;
+
+  rule(y, STEEL, 1); y += 5;
 
   drawColHeaders();
 
   // ── data ──────────────────────────────────────────────────────────────────
   for (const nation of report.nations) {
     checkPage(HEAD_H);
-    fillR(MARGIN, y, CW, HEAD_H, STEEL);
-    const natLabel = nation.nat_ind === 'UAE' ? 'UNITED ARAB EMIRATES' : `EXPORT — ${nation.nat_ind}`;
-    cell(`  ${natLabel}`, MARGIN, y, CW, HEAD_H,
-      { color: WHITE, fontSize: 9, bold: true }); y += HEAD_H;
+    cell(`  ${natLabelOf(nation)}`, MARGIN, y, CW, HEAD_H,
+      { color: NAVY, fontSize: 9, bold: true });
+    rule(y + HEAD_H - 1, STEEL, 0.8);
+    y += HEAD_H;
 
     for (const st of nation.states) {
       checkPage(HEAD_H);
-      fillR(MARGIN, y, CW, HEAD_H - 3, STBG);
       const stLabel = st.state_name !== st.state
         ? `${st.state_name}  (${st.state})` : st.state_name;
       cell(`    ${stLabel}`, MARGIN, y, CW, HEAD_H - 3,
@@ -382,14 +414,13 @@ function buildPdf(report, { dt1, dt2, sloc }) {
       y += HEAD_H - 3;
 
       // invoice rows
-      st.rows.forEach((r, idx) => {
+      st.rows.forEach(r => {
         checkPage(ROW_H);
-        const bg = idx % 2 === 0 ? WHITE : ALT;
         drawDataRow(
           [r.inv_no, r.inv_date, r.cust_code, r.cust_name,
            fmtNum(r.taxable), fmtNum(r.vat), fmtNum(r.total),
            r.sloc || '', r.nation_code],
-          y, bg,
+          y,
           [
             { align:'center', color:'#1B3A5C', fontSize:7, bold:true },
             { align:'center', color:'#374151', fontSize:7 },
@@ -408,7 +439,7 @@ function buildPdf(report, { dt1, dt2, sloc }) {
       // state subtotal
       checkPage(HEAD_H);
       const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
-      fillR(MARGIN, y, CW, HEAD_H - 3, LGOLD);
+      rule(y, STEEL, 0.8);
       cell(`Subtotal — ${st.state_name}  (${st.rows.length} invoices)`,
         MARGIN, y, SPAN, HEAD_H - 3, { align:'right', color:NAVY, fontSize:7.5, bold:true });
       let cx = MARGIN + SPAN;
@@ -417,39 +448,46 @@ function buildPdf(report, { dt1, dt2, sloc }) {
           { align:'right', color:NAVY, fontSize:7.5, bold:true, padH:2 });
         cx += CWS[4+i];
       });
-      doc.save().moveTo(MARGIN, y+HEAD_H-3)
-         .lineTo(MARGIN+CW, y+HEAD_H-3).lineWidth(1).stroke(GOLD).restore();
+      rule(y + HEAD_H - 3, STEEL, 1);
       y += HEAD_H - 3;
     }
 
     // nation total
     checkPage(HEAD_H);
     const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
-    fillR(MARGIN, y, CW, HEAD_H, STEEL);
+    rule(y, STEEL, 1);
     cell(`  TOTAL — ${nation.nat_ind}`, MARGIN, y, SPAN, HEAD_H,
-      { align:'right', color:WHITE, fontSize:9, bold:true });
+      { align:'right', color:NAVY, fontSize:9, bold:true });
     let cx = MARGIN + SPAN;
     [nation.nat_taxable, nation.nat_vat, nation.nat_total].forEach((v, i) => {
       cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H,
-        { align:'right', color:GOLD, fontSize:9, bold:true, padH:2 });
+        { align:'right', color:NAVY, fontSize:9, bold:true, padH:2 });
       cx += CWS[4+i];
     });
+    rule(y + HEAD_H, STEEL, 1);
     y += HEAD_H + 5;
   }
 
   // grand total
-  checkPage(HEAD_H + 8);
-  doc.save().moveTo(MARGIN, y).lineTo(MARGIN+CW, y).lineWidth(2).stroke(GOLD).restore(); y += 2;
+  checkPage(HEAD_H + 14);
+  rule(y, NAVY, 1.4); y += 2.5;
   const SPAN = CWS[0]+CWS[1]+CWS[2]+CWS[3];
-  fillR(MARGIN, y, CW, HEAD_H+8, NAVY);
-  cell(`  GRAND TOTAL  (${report.count} Invoices)`, MARGIN, y, SPAN, HEAD_H+8,
-    { align:'right', color:GOLD, fontSize:11, bold:true });
+  cell(`  GRAND TOTAL  (${report.count} Invoices)`, MARGIN, y, SPAN, HEAD_H + 6,
+    { align:'right', color:NAVY, fontSize:11, bold:true });
   let cx = MARGIN + SPAN;
   [report.grand_taxable, report.grand_vat, report.grand_total].forEach((v, i) => {
-    cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H+8,
-      { align:'right', color:'#E8C96D', fontSize:11, bold:true, padH:2 });
+    cell(fmtNum(v), cx, y, CWS[4+i], HEAD_H + 6,
+      { align:'right', color:NAVY, fontSize:11, bold:true, padH:2 });
     cx += CWS[4+i];
   });
+  y += HEAD_H + 6;
+  rule(y, NAVY, 1.4); y += 1.6;
+  rule(y, NAVY, 0.7); y += 8;
+
+  if (report.nations.some(n => n.nat_ind !== 'UAE')) {
+    cell('Export / international sales are zero-rated: taxable value is reported, output VAT is nil.',
+      MARGIN, y, CW, 10, { align:'left', color:GREY, fontSize:6.5 });
+  }
 
   doc.end();
   return doc;
