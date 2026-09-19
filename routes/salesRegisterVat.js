@@ -545,6 +545,7 @@ module.exports = function (connection) {
       console.error('[sales-register-vat/pdf]', err.message);
       res.status(500).json({ error: err.message });
     }
+    
   });
 
   return router;
