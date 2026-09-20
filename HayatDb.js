@@ -182,6 +182,9 @@ app.post("/api/register", authMiddleware, authMiddleware.requireAdmin, async (re
 const voiceRoutes = require("./routes/voiceRoutes");
 app.use("/voicepair", voiceRoutes.pairing());
 
+const scanPairApi = require("./routes/scanPairApi");
+app.use("/api", scanPairApi(connection));
+
 /* Protect everything below */
 app.use("/api", authMiddleware);
 app.get('/api/column-metadata/:tableId', (req, res) => {
