@@ -68,7 +68,8 @@ module.exports = function (connection) {
   router.post("/scan/session", async (req, res) => {
     try {
       const code = newCode();
-      const url = `${APP_URL}/scan/${code}`;
+      // const url = `${APP_URL}/scan/${code}`;
+      const url = `${APP_URL}/m/scan/${code}`;
       const qr = await QRCode.toDataURL(url, { margin: 1, width: 460 });
 
       sessions.set(code, {
