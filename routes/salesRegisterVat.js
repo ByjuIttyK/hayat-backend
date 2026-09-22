@@ -57,14 +57,22 @@ const SQL = `
     DATE_FORMAT(a.inv_date, '%Y-%m-%d')        AS inv_date,
     a.cust_code,
     b.cust_name,
-    (a.net_amt * IFNULL(a.convert_rate, 1))    AS amt,
+    -- Taxable is built from the item lines, not from net_amt (which already
+    -- includes VAT). DIS_COUNT is stored as a percentage on fab_inv_dtl, so the
+    -- line discount is already taken off here and header discount is 0.
+    (d.taxable * IFNULL(a.convert_rate, 1))    AS amt,
     b.cn_code                                   AS sloc,
     IFNULL(s.sloc_name, b.cn_code)             AS sloc_name,
     a.convert_rate                              AS exchg_rate,
-    IFNULL(a.discount, 0)                       AS discount,
+    0                                           AS discount,
     IF(b.nation_code = 'UAE', 'UAE', 'ZZZ')    AS nat_ind,
     b.nation_code
   FROM   fab_inv_hdr  a
+  JOIN   (SELECT inv_no,
+                 SUM(IFNULL(inv_qty, 0) * IFNULL(inv_rate, 0)
+                     * (1 - IFNULL(dis_count, 0) / 100))   AS taxable
+            FROM fab_inv_dtl
+           GROUP BY inv_no)       d ON d.inv_no     = a.inv_no
   JOIN   cus_mst      b ON a.cust_code  = b.cust_code
   LEFT JOIN sal_loc_mst s ON s.sloc_code = b.cn_code
   WHERE  IFNULL(b.cn_code, 'X') LIKE ?

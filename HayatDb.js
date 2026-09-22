@@ -9672,3 +9672,6 @@ app.use("/api", vatPurchaseReport(connection));
    //app.use("/api", require("./routes/sinvSave")(connection));
    // final  invoice route
       app.use("/api", require("./routes/sinvRoutes")(connection));
+      //
+        const salesOrderApi = require("./routes/salesOrderApi");
+       app.use("/api", salesOrderApi(connection));
