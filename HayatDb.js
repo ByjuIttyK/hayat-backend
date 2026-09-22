@@ -9548,7 +9548,8 @@ app.use("/api", srvNsRoutes);
 const accMstRoutes = require("./routes/acc_mst_routes")(connection);
 app.use("/api", accMstRoutes);
 //
-const salesRegisterVat = require('./routes/SalesRegisterVat')(connection);
+//const salesRegisterVat = require('./routes/SalesRegisterVat')(connection);
+ const salesRegisterVat = require('./routes/salesRegisterVat')(connection);
 app.use('/api', salesRegisterVat);
 //
 const despatchNote = require('./routes/despatchNoteRoutes');
