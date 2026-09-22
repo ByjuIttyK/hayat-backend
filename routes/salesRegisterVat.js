@@ -58,8 +58,8 @@ const SQL = `
     a.cust_code,
     b.cust_name,
     -- Taxable is built from the item lines, not from net_amt (which already
-    -- includes VAT). DIS_COUNT is stored as a percentage on fab_inv_dtl, so the
-    -- line discount is already taken off here and header discount is 0.
+    -- includes VAT). DIS_COUNT on fab_inv_dtl is a line discount AMOUNT, so it
+    -- is subtracted from qty * rate here and header discount is 0.
     (d.taxable * IFNULL(a.convert_rate, 1))    AS amt,
     b.cn_code                                   AS sloc,
     IFNULL(s.sloc_name, b.cn_code)             AS sloc_name,
@@ -70,7 +70,7 @@ const SQL = `
   FROM   fab_inv_hdr  a
   JOIN   (SELECT inv_no,
                  SUM(IFNULL(inv_qty, 0) * IFNULL(inv_rate, 0)
-                     * (1 - IFNULL(dis_count, 0) / 100))   AS taxable
+                     - IFNULL(dis_count, 0))                AS taxable
             FROM fab_inv_dtl
            GROUP BY inv_no)       d ON d.inv_no     = a.inv_no
   JOIN   cus_mst      b ON a.cust_code  = b.cust_code
