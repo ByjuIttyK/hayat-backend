@@ -312,7 +312,10 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
 function buildPdf(report, { dt1, dt2, sloc }) {
   const doc = new PDFDocument({
     size: 'A4', layout: 'landscape',
-    margins: { top: 24, bottom: 24, left: 22, right: 22 },
+    // bottom margin 0: page breaks are handled only by checkPage(). With a
+    // non-zero bottom margin PDFKit auto-adds a page for every cell whose
+    // text crosses it, producing runs of near-blank pages (one cell each).
+    margins: { top: 24, bottom: 0, left: 22, right: 22 },
     autoFirstPage: true,
   });
 
@@ -344,7 +347,7 @@ function buildPdf(report, { dt1, dt2, sloc }) {
     doc.save().moveTo(MARGIN, ry).lineTo(MARGIN + CW, ry).lineWidth(w).stroke(col).restore();
 
   const cell = (text, cx, cy, cw, ch,
-                { align='left', color='#111', fontSize=7, bold=false, padH=3 } = {}) => {
+                { align='left', color='#111', fontSize=7, bold=false, padH=3, wrap=false } = {}) => {
     if (text === null || text === undefined || text === '') return;
     const str = String(text);
     doc.save();
@@ -352,21 +355,24 @@ function buildPdf(report, { dt1, dt2, sloc }) {
     doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
        .fontSize(fontSize)
        .fillColor(color);
-    const vertY = cy + (ch - fontSize) / 2;
+    const w = cw - padH * 2;
+    // wrapped text is centred on its measured height; single-line on font size
+    const textH = wrap ? doc.heightOfString(str, { width: w }) : fontSize;
+    const vertY = cy + (ch - textH) / 2;
     doc.text(str, cx + padH, vertY, {
-      lineBreak: false,
-      width: cw - padH * 2,
+      lineBreak: wrap,
+      width: w,
       align,
     });
     doc.restore();
   };
 
   /** Draw a full-width row of 9 cells (no background fill) */
-  const drawDataRow = (vals, ry, opts) => {
+  const drawDataRow = (vals, ry, opts, rh = ROW_H) => {
     let cx = MARGIN;
     vals.forEach((v, i) => {
-      doc.save().rect(cx, ry, CWS[i], ROW_H).stroke('#D8DCE4').restore();
-      cell(v, cx, ry, CWS[i], ROW_H, opts[i]);
+      doc.save().rect(cx, ry, CWS[i], rh).stroke('#D8DCE4').restore();
+      cell(v, cx, ry, CWS[i], rh, opts[i]);
       cx += CWS[i];
     });
   };
@@ -423,7 +429,11 @@ function buildPdf(report, { dt1, dt2, sloc }) {
 
       // invoice rows
       st.rows.forEach(r => {
-        checkPage(ROW_H);
+        // row grows to fit a wrapped customer name; break BEFORE drawing it
+        doc.font('Helvetica').fontSize(7);
+        const nameH = doc.heightOfString(String(r.cust_name || ''), { width: CWS[3] - 6 });
+        const rowH  = Math.max(ROW_H, Math.ceil(nameH) + 6);
+        checkPage(rowH);
         drawDataRow(
           [r.inv_no, r.inv_date, r.cust_code, r.cust_name,
            fmtNum(r.taxable), fmtNum(r.vat), fmtNum(r.total),
@@ -433,15 +443,16 @@ function buildPdf(report, { dt1, dt2, sloc }) {
             { align:'center', color:'#1B3A5C', fontSize:7, bold:true },
             { align:'center', color:'#374151', fontSize:7 },
             { align:'center', color:'#374151', fontSize:7 },
-            { align:'left',   color:'#111',    fontSize:7 },
+            { align:'left',   color:'#111',    fontSize:7, wrap:true },
             { align:'right',  color:STEEL,     fontSize:7 },
             { align:'right',  color:'#9A6F00', fontSize:7 },
             { align:'right',  color:STEEL,     fontSize:7, bold:true },
             { align:'center', color:GREY,      fontSize:7 },
             { align:'center', color:GREY,      fontSize:7 },
-          ]
+          ],
+          rowH
         );
-        y += ROW_H;
+        y += rowH;
       });
 
       // state subtotal

@@ -6779,7 +6779,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
 
 app.get("/api/ngpnet/:vch", function (req, res) {
   connection.query(
-    "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
+    "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%Y-%m-%d') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.DISCOUNT,a.LPO_NO,a.INV_NO, a.INV_DATE,a.NARRATION  " +
     " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  " +
     " ORDER BY a.PRCH_NO DESC",
