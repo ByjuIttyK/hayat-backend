@@ -7458,27 +7458,6 @@ app.get("/api/nextdo", function (req, res) {
 });
 
 
-app.get("/api/trdgDolist", function (req, res) {
- // const cust = req.params;
-  connection.query(
-    "select a.DO_NO, DATE_FORMAT(a.DO_DATE,'%d/%m/%Y') DO_DATE ,a.LPO_NO "+
-    " from do_hdr a LEFT OUTER JOIN cus_mst b  ON (a.CUST_CODE = b.CUST_CODE) " +
-    " where  a.CUST_CODE = ?  " +
-    "  ORDER BY a.DO_NO DESC",
-    [req.params.cust],
-
-    function (err, results, fields) {
-      if (err) {
-        throw err;
-      } else {
-        //    console.log("Oracle DO LST", result.rows);
-        res.json(results);
-
-      }
-    }
-  );
-});
-
 app.get("/api/dolist/:dys", function (req, res) {
   connection.query(
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
@@ -8774,7 +8753,7 @@ app.get("/api/vchrlst/:tranId", function (req, res) {
       "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
       "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
       "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT,chq.CHQ_COUNT, " +
-      "v.AMOUNT, v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
+      "v.AMOUNT, v.BANK_NAME AS NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
       "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
       "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
       "FROM vouchers AS v " +
@@ -9676,3 +9655,6 @@ app.use("/api", vatPurchaseReport(connection));
       //
         const salesOrderApi = require("./routes/salesOrderApi");
        app.use("/api", salesOrderApi(connection));
+//
+ const trdDo = require('./routes/trddo')(connection);
+  app.use('/api', trdDo)

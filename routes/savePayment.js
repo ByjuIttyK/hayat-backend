@@ -55,6 +55,13 @@ module.exports = function (connection) {
 
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+  // vouchers.BANK_NAME / NARRATION2 are 30 wide. Trimmed here as well as in
+  // the hook — the route is the last word on what reaches the table.
+  const cut30 = (v) => {
+    const t = String(v ?? "").trim().substring(0, 30);
+    return t || null;
+  };
+
   /* ---- GET /api/lpo-settlements/:tranType/:vchrNo -------------------------
    * The LPO panel's rows on EDIT. Ordered by MAIN_SR_NO so they come back in
    * the order they were keyed — that is what the save assigns it for.
@@ -261,6 +268,8 @@ module.exports = function (connection) {
     }
 
     /* ---- header ---- */
+    // BANK_NAME / NARRATION2 need no separate EDIT handling: EDIT deletes the
+    // row above and comes through this same INSERT.
     // Plain INSERT on ADD: a duplicate must raise, not overwrite. EDIT has
     // just deleted the row, so it inserts cleanly too — no upsert needed
     // either way, which is what let a collision pass unnoticed before.
@@ -272,9 +281,9 @@ module.exports = function (connection) {
       `INSERT INTO vouchers
          (TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE,
           ACC_CODE2, AMOUNT2,
-          CUR_CODE, CONV_RATE, NARRATION1, PAID_TO, AMOUNT_FRGN,
-          AMOUNT, VCHR_TYPE)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          CUR_CODE, CONV_RATE, NARRATION1, PAID_TO, BANK_NAME, NARRATION2,
+          AMOUNT_FRGN, AMOUNT, VCHR_TYPE)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         vchrData.TranType,
         vchrNo,
@@ -287,6 +296,8 @@ module.exports = function (connection) {
         vchrData.ConvRt,
         vchrData.Particulars,
         vchrData.PaidTo,
+        cut30(vchrData.BankName),     // BANK_NAME  ← Credit A/c head (Bank / PDC)
+        cut30(vchrData.Narration2),   // NARRATION2 ← 1st grid line's narration
         vchrData.FrgnAmt,
         vchrData.Amount,
         vchrData.VchrType,
