@@ -5891,10 +5891,10 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
 
   connection.query(
     "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_AMOUNT, " +
+    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_PERC, " +
     "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
     " a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO " +
+    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,b.NATION_CODE " +
     " from fab_inv_hdr a    " +
     " left outer join cus_mst b on b.cust_code = a.cust_code " +
     " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  ORDER BY a.INV_NO DESC",
@@ -5936,30 +5936,31 @@ app.get("/api/fabinvjob/:job", function (req, res) {
 }
 );
 
-
 app.get("/api/fabinvhdr/:inv", function (req, res) {
   console.log('FAB INV HDR== param ', req.params.inv);
   connection.query(
-    "select a.INV_NO,a.INV_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  INV_CANCELLED ,PROJECT_DETAIL," +
-    "a.LPO_NO,DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,a.QUOT_NO ,a.CURR_CODE, a.CONVERT_RATE ,a.CR_DAYS ,a.BANK_CODE, " +
-    " a.DO_DATE ,a.PAYMENT_TERMS" +
-    " from fab_inv_hdr a left outer join cus_mst b ON  a.CUST_CODE = b.CUST_CODE where  a.INV_NO =?  ",
+    "select a.INV_NO, a.INV_DATE, a.CUST_CODE," +
+    " b.CUST_NAME, a.CASH_CUST_NAME, a.JOB_NO, a.DO_NO, a.INV_CANCELLED, a.PROJECT_DETAIL," +
+    " a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') LPO_DATE, a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
+    " a.CONTRACT_AMT_PERCENT, a.INV_ACK, a.QUOT_NO, a.CURR_CODE, a.CONVERT_RATE," +
+    " a.CR_DAYS, a.CR_DAYS CR_LIMIT_DAYS," +          // ChgFld reads CR_LIMIT_DAYS
+    " a.BANK_CODE, a.DO_DATE, a.PAYMENT_TERMS," +
+    " a.RCP_TYPE, a.COMMI_AMT," +                     // ChgFld sets both; were never selected
+    " a.VAT_PERC, a.VAT_AMOUNT, a.DISCOUNT" +         // Totals band
+    " from fab_inv_hdr a left outer join cus_mst b ON a.CUST_CODE = b.CUST_CODE where a.INV_NO = ?",
     [req.params.inv],
-
     function (err, result) {
       if (err) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-        console.log("FABINVHDR =", result)
+        console.log("FABINVHDR =", result);
         res.json(result);
       }
-
     });
-}
-);
+});
+
+
 //  " (a.INV_QTY *a.INV_RATE) * a.DIS_COUNT/100  AS DISC_AMT , " +
 app.get("/api/fabinvitems/:vchr", function (req, res) {
   console.log('Fab_INv_dtl.', req.params.vchr);

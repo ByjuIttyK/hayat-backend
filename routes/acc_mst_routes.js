@@ -61,45 +61,50 @@ module.exports = function (connection) {
 
   // ── 2) Next ACC_CODE for a given (REPORT_LN, GL_CODE, SUB_LEDGER) ─────
   //
-  // ACC_CODE format is {REPORT_LN}-{GL_CODE}-{SUB_LEDGER}-{SrNo(3)}, e.g.
+  // ACC_CODE format is {REPORT_LN}-{GL_CODE}-{SubGroup}-{SrNo(3)}, e.g.
   //   111-011-0-003
   //
-  // Rule from Byju:
-  //   Next SrNo = MAX(last segment) + 1
-  //   WHERE REPORT_LN = ? AND GL_CODE = ? AND SUB_LEDGER = ?
+  // Rule from Byju: next SrNo = MAX(SrNo) + 1 of the LEFT PART of the code.
   //
-  // SUBSTRING_INDEX(ACC_CODE, '-', -1) pulls "003" out of "111-011-0-003".
-  // CAST to UNSIGNED handles the numeric bump; anything non-numeric (a
-  // legacy row like 1206003-000000) gets clamped to 0 by CAST, which is
-  // fine because we're only computing MAX+1 for future SrNos.
+  // The MAX is taken from ACC_CODE itself (ACC_CODE LIKE '111-011-0-%'),
+  // not from the REPORT_LN / GL_CODE / SUB_LEDGER columns. AccBrow fills
+  // SUB_LEDGER but AccMst fills SUB_CAT_CODE, so a column filter would
+  // miss accounts created on the other screen and hand out a duplicate
+  // number. The code prefix is the same whichever screen wrote it.
   //
-  // The response is the FULLY-FORMATTED code — the client doesn't have
-  // to assemble it. Width stays 3 to match the sample data.
+  // Only tails that are purely digits are counted, so a code that merely
+  // starts with the same text (e.g. 111-011-0-OLD) can't disturb the count.
+  // The third URL segment is the sub group, whatever the screen calls it.
   router.get('/nextAccCode/:reportLn/:glCode/:subLedger', (req, res) => {
-    const { reportLn, glCode, subLedger } = req.params;
+    const reportLn  = String(req.params.reportLn  || '').trim();
+    const glCode    = String(req.params.glCode    || '').trim();
+    const subLedger = String(req.params.subLedger || '').trim();
     if (!reportLn)  return res.status(400).json({ error: 'reportLn is required' });
     if (!glCode)    return res.status(400).json({ error: 'glCode is required' });
     if (!subLedger) return res.status(400).json({ error: 'subLedger is required' });
 
+    const prefix  = `${reportLn}-${glCode}-${subLedger}-`;
+    // escape LIKE wildcards in case a code part ever contains % or _
+    const likePat = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
+    const tailPos = prefix.length + 1;          // SUBSTRING is 1-based
+
     connection.query(
       `SELECT COALESCE(
-                MAX(CAST(SUBSTRING_INDEX(ACC_CODE, '-', -1) AS UNSIGNED)),
+                MAX(CAST(SUBSTRING(ACC_CODE, ?) AS UNSIGNED)),
                 0
               ) + 1 AS NEXT_NO
          FROM acc_mst
-        WHERE REPORT_LN = ?
-          AND GL_CODE   = ?
-          AND SUB_LEDGER = ?`,
-      [reportLn, glCode, subLedger],
+        WHERE ACC_CODE LIKE ?
+          AND SUBSTRING(ACC_CODE, ?) REGEXP '^[0-9]+$'`,
+      [tailPos, likePat, tailPos],
       (err, rows) => {
         if (err) {
           console.error('/nextAccCode error:', err);
           return res.status(500).json({ error: 'Failed to compute next account code' });
         }
-        const nextNo = (rows && rows[0] && rows[0].NEXT_NO) || 1;
+        const nextNo = Number(rows && rows[0] && rows[0].NEXT_NO) || 1;
         const srNo = String(nextNo).padStart(3, '0');
-        const nextCode = `${reportLn}-${glCode}-${subLedger}-${srNo}`;
-        res.json({ NEXT_CODE: nextCode, NEXT_NO: nextNo });
+        res.json({ NEXT_CODE: prefix + srNo, NEXT_NO: nextNo });
       }
     );
   });
