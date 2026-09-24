@@ -35,7 +35,7 @@ const SQL = `
     a.inv_no,
     DATE_FORMAT(a.inv_date, '%Y-%m-%d')        AS inv_date,
     a.cust_code,
-    b.cust_name,
+    LEFT(TRIM(b.cust_name), 50)                AS cust_name,
     (a.amount * IFNULL(a.exchg_rate, 1))       AS amt,
     b.cn_code                                   AS sloc,
     IFNULL(s.sloc_name, b.cn_code)             AS sloc_name,
@@ -56,10 +56,13 @@ const SQL = `
     a.inv_no,
     DATE_FORMAT(a.inv_date, '%Y-%m-%d')        AS inv_date,
     a.cust_code,
-    b.cust_name,
-    -- Taxable is built from the item lines, not from net_amt (which already
-    -- includes VAT). DIS_COUNT on fab_inv_dtl is a line discount AMOUNT, so it
-    -- is subtracted from qty * rate here and header discount is 0.
+    LEFT(TRIM(b.cust_name), 50)                AS cust_name,
+    -- Taxable is built from the item lines (fab_inv_stl), not from net_amt
+    -- (which already includes VAT). Project invoices bill only the contract
+    -- percentage of the gross (fab_inv_hdr.CONTRACT_AMT_PERCENT, e.g. 60.00),
+    -- then the line discount AMOUNT (DIS_COUNT) is deducted:
+    --   taxable = inv_qty * inv_rate * pct / 100 - dis_count
+    -- A NULL or 0 percentage is treated as 100 (full value).
     (d.taxable * IFNULL(a.convert_rate, 1))    AS amt,
     b.cn_code                                   AS sloc,
     IFNULL(s.sloc_name, b.cn_code)             AS sloc_name,
@@ -68,11 +71,14 @@ const SQL = `
     IF(b.nation_code = 'UAE', 'UAE', 'ZZZ')    AS nat_ind,
     b.nation_code
   FROM   fab_inv_hdr  a
-  JOIN   (SELECT inv_no,
-                 SUM(IFNULL(inv_qty, 0) * IFNULL(inv_rate, 0)
-                     - IFNULL(dis_count, 0))                AS taxable
-            FROM fab_inv_dtl
-           GROUP BY inv_no)       d ON d.inv_no     = a.inv_no
+  JOIN   (SELECT t.inv_no,
+                 SUM(IFNULL(t.inv_qty, 0) * IFNULL(t.inv_rate, 0)
+                     * IFNULL(NULLIF(h.contract_amt_percent, 0), 100) / 100
+                     - IFNULL(t.dis_count, 0))               AS taxable
+            FROM fab_inv_stl t
+            JOIN fab_inv_hdr h ON h.inv_no = t.inv_no
+           WHERE h.inv_date BETWEEN ? AND ?
+           GROUP BY t.inv_no)     d ON d.inv_no     = a.inv_no
   JOIN   cus_mst      b ON a.cust_code  = b.cust_code
   LEFT JOIN sal_loc_mst s ON s.sloc_code = b.cn_code
   WHERE  IFNULL(b.cn_code, 'X') LIKE ?
@@ -88,7 +94,9 @@ const SQL = `
 function fetchRows(connection, { dt1, dt2, sloc }) {
   return new Promise((resolve, reject) => {
     const slocFilter = sloc && sloc.toUpperCase() !== 'ALL' ? sloc : '%';
-    const params = [slocFilter, dt1, dt2, slocFilter, dt1, dt2];
+    // order follows the placeholders: net_sales WHERE, fab subquery dates,
+    // fab WHERE
+    const params = [slocFilter, dt1, dt2, dt1, dt2, slocFilter, dt1, dt2];
     connection.getConnection((err, conn) => {
       if (err) return reject(err);
       conn.query(SQL, params, (qErr, results) => {
@@ -178,7 +186,9 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
   });
 
   ws.columns = [
-    { width: 17 }, { width: 13 }, { width: 13 }, { width: 40 },
+    // Inv No / Date / Cust Code kept tight; Customer Name widened to hold the
+    // 50-character trimmed name on one line.
+    { width: 12 }, { width: 11 }, { width: 10 }, { width: 52 },
     { width: 18 }, { width: 18 }, { width: 18 }, { width: 8  }, { width: 8 },
   ];
 
@@ -328,7 +338,8 @@ function buildPdf(report, { dt1, dt2, sloc }) {
         STEEL = '#1B3A5C', GREY  = '#6B7280', RULE = '#94A3B8';
 
   // ── column layout (must sum to exactly 1.0) ───────────────────────────────
-  const PCT = [0.13, 0.09, 0.09, 0.25, 0.11, 0.11, 0.11, 0.055, 0.055];
+  // Inv No / Date / Cust Code tightened; Customer Name widened (50-char names)
+  const PCT = [0.085, 0.075, 0.07, 0.33, 0.11, 0.11, 0.11, 0.055, 0.055];
   const CWS = PCT.map(p => Math.floor(p * CW));
   const rem = CW - CWS.reduce((a,b)=>a+b,0);
   CWS[3] += rem;
@@ -440,9 +451,9 @@ function buildPdf(report, { dt1, dt2, sloc }) {
            r.sloc || '', r.nation_code],
           y,
           [
-            { align:'center', color:'#1B3A5C', fontSize:7, bold:true },
-            { align:'center', color:'#374151', fontSize:7 },
-            { align:'center', color:'#374151', fontSize:7 },
+            { align:'center', color:'#1B3A5C', fontSize:7, bold:true, padH:1.5 },
+            { align:'center', color:'#374151', fontSize:7, padH:1.5 },
+            { align:'center', color:'#374151', fontSize:7, padH:1.5 },
             { align:'left',   color:'#111',    fontSize:7, wrap:true },
             { align:'right',  color:STEEL,     fontSize:7 },
             { align:'right',  color:'#9A6F00', fontSize:7 },
