@@ -7148,27 +7148,26 @@ app.get("/api/nextQuotNo", function (req, res) {
 });
 
 
-
 app.get("/api/nextPjvNo", function (req, res) {
+  // Prefix from frontend: SP, NS, NG, FP ... ; defaults to "00" if not passed
+  let prefix = String(req.query.prefix || "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{2}$/.test(prefix)) prefix = "00";
+
   connection.query(
-    "select (Max(a.PJV_NO)+1) AS NextPjv " +
-    " from V_PURCHASE_FULL a ",
-    function (err, results, fields) {
+    "SELECT COALESCE(MAX(CAST(SUBSTR(a.PJV_NO, 3, 8) AS UNSIGNED)), 0) + 1 AS NextPjv " +
+    "  FROM V_PURCHASE_FULL a ",
+    function (err, results) {
       if (err) {
-        throw err;
-      } else {
-        console.log("Next  PJV No.", results[0].NextPjv)
-        const strPjv = String(results[0].NextPjv).trim();
-        console.log('Str PJV =>', strPjv.padStart(10, 0));
-
-        //padStart(10, '0'));
-        //.padStart(10, '0')
-        res.json(strPjv.padStart(10, 0));
-
+        console.error("nextPjvNo error:", err);
+        return res.status(500).json({ error: "Could not generate next PJV No." });
       }
+      const nextNo = prefix + String(results[0].NextPjv).padStart(8, "0");
+      console.log("Next PJV No. =>", nextNo);
+      res.json(nextNo);
     }
   );
 });
+
 app.get("/api/nextdo", function (req, res) {
   connection.query(
     "select (Max(a.INV_NO)+1) AS NextDo " +
