@@ -57,7 +57,7 @@ const SQL = `
     DATE_FORMAT(a.inv_date, '%Y-%m-%d')        AS inv_date,
     a.cust_code,
     LEFT(TRIM(b.cust_name), 50)                AS cust_name,
-    -- Taxable is built from the item lines (fab_inv_stl), not from net_amt
+    -- Taxable is built from the item lines (fab_inv_dtl), not from net_amt
     -- (which already includes VAT). Project invoices bill only the contract
     -- percentage of the gross (fab_inv_hdr.CONTRACT_AMT_PERCENT, e.g. 60.00),
     -- then the line discount AMOUNT (DIS_COUNT) is deducted:
@@ -75,7 +75,7 @@ const SQL = `
                  SUM(IFNULL(t.inv_qty, 0) * IFNULL(t.inv_rate, 0)
                      * IFNULL(NULLIF(h.contract_amt_percent, 0), 100) / 100
                      - IFNULL(t.dis_count, 0))               AS taxable
-            FROM fab_inv_stl t
+            FROM fab_inv_dtl t
             JOIN fab_inv_hdr h ON h.inv_no = t.inv_no
            WHERE h.inv_date BETWEEN ? AND ?
            GROUP BY t.inv_no)     d ON d.inv_no     = a.inv_no
