@@ -2909,7 +2909,7 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
     "      ELSE '' " +
     " END AS DUE_DATE " +
     " FROM v_cust_outstanding_bill a Left Outer join fab_inv_hdr b on (a.vchr_no = b.Inv_no)    " +
-    "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE < ? ";
+    "   left outer join tran_type t on a.tran_type = t.tran_type WHERE a.DATTE <= ? ";
   let params = [as_on_date];
 
   // ✅ Only add ACC_CODE filter if p_cus is provided
@@ -2939,7 +2939,7 @@ app.get("/api/supst/:p_cus/:as_on_date", function (req, res) {
   let sql = "SELECT ACC_CODE, TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%y') AS DATTE," +
     "  DR_AMT, CR_AMT, BALANCE, NAR" +
     " FROM v_sup_outstanding_bill" +
-    " WHERE DATTE < ?";
+    " WHERE DATTE <= ?";
   let params = [as_on_date];
 
   // ✅ Only add ACC_CODE filter if p_cus is provided
