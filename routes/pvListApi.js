@@ -44,7 +44,7 @@ module.exports = function (connection) {
         "dr.DR_CODE, dra.AC_HEAD AS DR_HEAD, dr.DR_COUNT " +
         "FROM vouchers AS v " +
         "LEFT OUTER JOIN ac_list " +
-        "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +
+        "  ON ac_list.AC_CODE =  v.CUST_CODE " +
         "LEFT OUTER JOIN (" +
         "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, " +
         "         COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
