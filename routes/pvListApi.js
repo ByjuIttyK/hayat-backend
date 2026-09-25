@@ -36,7 +36,7 @@ module.exports = function (connection) {
     } else if (tranId === "04") {
       connection.query(
         "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
-        "COALESCE( v.CUST_CODE,v.ACC_CODE) AS ACC_CODE, v.CUST_CODE, " +
+        "v.ACC_CODE, v.CUST_CODE, " +
         "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT, chq.CHQ_COUNT, " +
         "v.AMOUNT, v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
         "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
