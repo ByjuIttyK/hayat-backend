@@ -42,7 +42,9 @@ const SQL = `
     a.exchg_rate,
     0                                           AS discount,
     IF(b.nation_code = 'UAE', 'UAE', 'ZZZ')    AS nat_ind,
-    b.nation_code
+    b.nation_code,
+    'SINV'                                      AS src,    -- source doc, used by sales-vat-recon
+    0                                           AS zero_net
   FROM   net_sales   a
   JOIN   cus_mst     b ON a.cust_code  = b.cust_code
   LEFT JOIN sal_loc_mst s ON s.sloc_code = b.cn_code
@@ -69,7 +71,9 @@ const SQL = `
     a.convert_rate                              AS exchg_rate,
     0                                           AS discount,
     IF(b.nation_code = 'UAE', 'UAE', 'ZZZ')    AS nat_ind,
-    b.nation_code
+    b.nation_code,
+    'FAB'                                       AS src,    -- source doc, used by sales-vat-recon
+    (IFNULL(a.net_amt, 0) = 0)                  AS zero_net
   FROM   fab_inv_hdr  a
   JOIN   (SELECT t.inv_no,
                  SUM(IFNULL(t.inv_qty, 0) * IFNULL(t.inv_rate, 0)
@@ -84,19 +88,21 @@ const SQL = `
   WHERE  IFNULL(b.cn_code, 'X') LIKE ?
     AND  a.inv_date BETWEEN ? AND ?
     AND  IFNULL(a.inv_cancelled, 'N') <> 'Y'
-    AND  IFNULL(a.net_amt, 0) <> 0
+    -- Zero-value invoices are left out of the register, but the VAT recon
+    -- asks for them (includeZero) so a nil header with real lines shows up.
+    AND  (? = 1 OR IFNULL(a.net_amt, 0) <> 0)
 
   ORDER BY inv_date
 `;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fetchRows(connection, { dt1, dt2, sloc }) {
+function fetchRows(connection, { dt1, dt2, sloc, includeZero = false }) {
   return new Promise((resolve, reject) => {
     const slocFilter = sloc && sloc.toUpperCase() !== 'ALL' ? sloc : '%';
     // order follows the placeholders: net_sales WHERE, fab subquery dates,
-    // fab WHERE
-    const params = [slocFilter, dt1, dt2, dt1, dt2, slocFilter, dt1, dt2];
+    // fab WHERE, zero-value switch
+    const params = [slocFilter, dt1, dt2, dt1, dt2, slocFilter, dt1, dt2, includeZero ? 1 : 0];
     connection.getConnection((err, conn) => {
       if (err) return reject(err);
       conn.query(SQL, params, (qErr, results) => {
@@ -580,3 +586,10 @@ module.exports = function (connection) {
 
   return router;
 };
+
+// ─── Shared with other reports ────────────────────────────────────────────────
+// salesVatRecon.js builds its rows from these, so the register SQL and the
+// taxable / VAT rules live in ONE place and both reports always agree.
+module.exports.fetchRows    = fetchRows;
+module.exports.decorateRows = decorateRows;
+module.exports.round2       = round2;

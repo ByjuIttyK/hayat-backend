@@ -9162,3 +9162,6 @@ app.use('/api', saveRcpRoutes(connection, { allocateVchrNo }));
 //
 const saveFabInv = require('./routes/saveFabInv');
 app.use('/api', saveFabInv(connection));
+//
+const salesVatRecon = require("./routes/salesVatRecon");
+app.use("/api", salesVatRecon(connection));
