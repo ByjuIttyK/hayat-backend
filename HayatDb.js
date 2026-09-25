@@ -9165,3 +9165,7 @@ app.use('/api', saveFabInv(connection));
 //
 const salesVatRecon = require("./routes/salesVatRecon");
 app.use("/api", salesVatRecon(connection));
+//
+app.use("/api", require("./routes/navAssistApi")(connection));
+//
+ app.use("/api", require("./routes/customerCodeApi")(connection));
