@@ -5,11 +5,15 @@
 //     const purchNsJvRoutes = require("./routes/purchNsJvRoutes")(connection);
 //     app.use("/api", purchNsJvRoutes);
 //
-// GET /api/purch-ns/jv/:pjvNo
-//   Returns the GL journal entries posted to tran_acc for a Non-Stock Purchase
-//   voucher. tran_type for Purchase Non-Stock is '07'.
-//   Account names are resolved from the Ac_lsi view, which covers GL codes,
+// GET /api/purch-ns/jv/:pjvNo[?tranType=07]
+//   Returns the GL journal entries posted to tran_acc for a purchase voucher —
+//   Purchase Non-Stock and Non-Goods Purchase both post under tran_type '07'
+//   (the default when tranType isn't sent).
+//   Account names are resolved from the ac_list view, which covers GL codes,
 //   suppliers, and customers in one place (unlike acc_mst which holds GL only).
+//
+//   Table names must stay lowercase: the VPS runs MySQL on Linux, where table
+//   names are case-sensitive. "Ac_list" worked on Windows but failed on the VPS.
 // ============================================================================
 
 module.exports = function (connection) {
@@ -17,7 +21,7 @@ module.exports = function (connection) {
   const router  = express.Router();
   const db      = connection.promise();
 
-  // Transaction type for Purchase Non-Stock vouchers.
+  // Transaction type for Purchase Non-Stock / Non-Goods Purchase vouchers.
   const TRAN_TYPE_PURCH_NS = '07';
 
   const pick = (row, names, dflt = null) => {
@@ -30,22 +34,24 @@ module.exports = function (connection) {
 
   router.get('/purch-ns/jv/:pjvNo', async (req, res) => {
     const pjvNo = (req.params.pjvNo || '').trim();
+    const qType = String(req.query.tranType || '').trim();
+    const tranType = /^[0-9A-Za-z]{1,4}$/.test(qType) ? qType : TRAN_TYPE_PURCH_NS;
     if (!pjvNo) {
       return res.status(400).json({ message: 'Voucher number is required' });
     }
 
     try {
-      // Ac_lsi view covers GL accounts, suppliers, and customers —
+      // ac_list view covers GL accounts, suppliers, and customers —
       // join on ACC_CODE / TRIM so space-padded CHAR columns match cleanly.
       const sql = `
         SELECT t.*, a.AC_HEAD AS ACC_HEAD
         FROM   tran_acc t
-        LEFT   JOIN Ac_list a ON TRIM(a.AC_CODE) = TRIM(t.ACC_CODE)
+        LEFT   JOIN ac_list a ON TRIM(a.AC_CODE) = TRIM(t.ACC_CODE)
         WHERE  TRIM(t.TRAN_TYPE) = ?
           AND  TRIM(t.VCHR_NO)   = ?
         ORDER  BY t.SR_NO
       `;
-      const [rows] = await db.query(sql, [TRAN_TYPE_PURCH_NS, pjvNo]);
+      const [rows] = await db.query(sql, [tranType, pjvNo]);
 
       const lines = rows.map((r, i) => {
         const dbCr = String(pick(r, ['DB_CR'], '')).trim().toUpperCase();
@@ -76,7 +82,7 @@ module.exports = function (connection) {
 
       res.json({
         pjvNo,
-        tranType:    TRAN_TYPE_PURCH_NS,
+        tranType,
         vchrDate:    lines[0]?.VCHR_DATE ?? null,
         lines,
         totalDebit:  Math.round(totalDebit  * 100) / 100,

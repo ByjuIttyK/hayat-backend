@@ -6280,8 +6280,7 @@ app.get("/api/ngpnet/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%Y-%m-%d') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.DISCOUNT,a.LPO_NO,a.INV_NO, a.INV_DATE,a.NARRATION  " +
-    " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  " +
-    " ORDER BY a.PRCH_NO DESC",
+    " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  ", 
     [req.params.vch],
 
     function (err, result) {
@@ -8233,104 +8232,6 @@ app.get("/api/pdc-rcd/:custCode", function (req, res) {
     }
   );
 });
-//SELECT TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, BANK_NAME, PAID_TO, CASE WHEN CAN_CEL = 'Y' THEN 'Yes' WHEN CAN_CEL = 'N' THEN 'No' ELSE 'Unknown' END AS CAN_CEL, ACC_CODE2, AMOUNT2, JOB_NO, VCHR_TYPE, CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers;
-
-//"SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, " +
-//     "CASE WHEN ACC_CODE IS NULL THEN CUST_CODE ELSE ACC_CODE END AS ACC_CODE,CUST_CODE,  CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, AC_HEAD AS ACC_HEAD," +
-//     " BANK_NAME, PAID_TO, CAN_CEL," +
-//    " ACC_CODE2, AMOUNT2, JOB_NO,  CUR_CODE, CONV_RATE, AMOUNT_FRGN FROM vouchers  " +
-//    " LEFT OUTER JOIN ac_list ON ac_list.ac_code = CASE WHEN vouchers.ACC_CODE IS NULL THEN vouchers.CUST_CODE ELSE vouchers.ACC_CODE END " +
-//    "    WHERE TRAN_TYPE=? order by VCHR_NO desc",
-app.get("/api/vchrlst/:tranId", function (req, res) {
-
-  const tranId = String(req.params.tranId || "");
-  const pdcTable = ["02", "04"].includes(tranId) ? "pdc_isu" : "pdc_rcd";
-
-  if (tranId !== "05" && tranId !== '02') {
-    connection.query(
-      "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
-      "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
-      "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT,chq.CHQ_COUNT, " +
-      "v.AMOUNT, v.BANK_NAME AS NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
-      "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
-      "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
-      "FROM vouchers AS v " +
-      "LEFT OUTER JOIN ac_list " +
-      "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +
-      "LEFT OUTER JOIN (" +
-      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
-      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ, CHQ_DATE FROM " + pdcTable + " WHERE TRAN_TYPE = ? " +
-      "    UNION ALL " +
-      "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ ,CHQ_DATE FROM current_chq WHERE TRAN_TYPE = ? " +
-      "  ) u GROUP BY TRAN_TYPE, VCHR_NO) chq " +
-      "  ON chq.TRAN_TYPE = v.TRAN_TYPE AND chq.VCHR_NO = v.VCHR_NO " +
-      "WHERE v.TRAN_TYPE = ? " +
-      "ORDER BY v.VCHR_NO DESC",
-
-      [tranId, tranId, tranId],
-
-      function (error, result) {
-        if (error) {
-          throw error;
-        } else {
-          //  console.log("Vchr list", result);
-          res.json(result);
-
-        }
-      }
-
-    );
-  } else if (tranId == "05") {
-    connection.query(
-      "SELECT TRAN_TYPE, VCHR_NO, DATE_FORMAT(DATTE,'%d/%m/%Y') DATTE, '' as CUST_CODE, " +
-      "  ac_list.AC_HEAD AS ACC_HEAD," +
-      " ACC_CODE, '' AS CHEQUE_NO, AMOUNT, NARRATION1, NARRATION2, " +
-      "DB_CR " +
-      "  from tran_acc  " +
-      "LEFT OUTER JOIN ac_list " +
-      "  ON ac_list.AC_CODE = tran_acc.ACC_CODE " +
-      " WHERE TRAN_TYPE=? " +
-      " order by vchr_no desc",
-      [req.params.tranId],
-      function (error, result) {
-        if (error) {
-          throw error;
-        } else {
-          //  console.log("Vchr list", result);
-          res.json(result);
-
-        }
-      });
-  }
-  else if (tranId == "02") {
-    connection.query(
-      "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
-      "       c.AC_HEAD AS ACC_HEAD, " +
-      "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, b.PAID_TO, a.NARRATION1, a.NARRATION2, " +
-      "       a.DB_CR " +
-      "  FROM tran_acc a " +
-      "  LEFT OUTER JOIN ac_list AS c " +
-      "    ON c.AC_CODE = a.ACC_CODE " +
-      "  LEFT OUTER JOIN vouchers AS b " +
-      "    ON b.TRAN_TYPE = a.TRAN_TYPE AND b.VCHR_NO = a.VCHR_NO " +
-      " WHERE a.TRAN_TYPE = ? " +
-      " ORDER BY a.VCHR_NO DESC, a.SR_NO",
-      [req.params.tranId],
-
-      function (error, result) {
-        if (error) {
-          throw error;
-        } else {
-          console.log("Jv LIst", result);
-          res.json(result);
-
-        }
-      }
-
-    );
-
-  };
-});
 //app.get('/LedOp/:acode/:stdt', function (req, res) {
 app.get('/api/ledBal/:acode/:stdt', function (req, res) {
   const acCode = req.params.acode;
@@ -9169,3 +9070,8 @@ app.use("/api", salesVatRecon(connection));
 app.use("/api", require("./routes/navAssistApi")(connection));
 //
  app.use("/api", require("./routes/customerCodeApi")(connection));
+
+ //
+ app.use("/api", require("./routes/pvListApi")(connection));
+app.use("/api", require("./routes/rvListApi")(connection));
+app.use("/api", require("./routes/jvListApi")(connection));
