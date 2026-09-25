@@ -2481,7 +2481,7 @@ app.post("/api/save-do", async (req, res) => {
 //
 app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
   connection.query(
-    "select v.STLD_DOC, v.STLD_TYPE, DATE_FORMAT(v.STLD_DATE,'%d/%m/%y') as STLD_DATE, " +
+    "select v.STLD_DOC, v.STLD_TYPE, DATE_FORMAT(v.STLD_DATE,'%d/%m/%Y') as STLD_DATE, " +
     " v.STLD_AMT, v.STLD_DBCR, v.ACC_CODE,h.JOB_NO" +
     " from adj_dtl v  LEFT JOIN fab_inv_hdr h " +
     " ON h.INV_NO = v.STLD_DOC where v.source_type = ? and v.source_doc = ?",
@@ -2538,7 +2538,7 @@ const allocateVchrNo = (conn, tranType) =>
 app.get("/api/adjdtl/:tp/:vchr", (req, res) => {
   const sql =
     "SELECT SOURCE_TYPE, SOURCE_DOC, DATE_FORMAT(SOURCE_DATE,'%d/%m/%y') as SOURCE_DATE, ACC_CODE, " +
-    "       STLD_TYPE, STLD_DOC, DATE_FORMAT(STLD_DATE,'%d/%m/%y') as STLD_DATE, STLD_AMT, MAIN_SR_NO " +
+    "       STLD_TYPE, STLD_DOC, DATE_FORMAT(STLD_DATE,'%d/%m/%Y') as STLD_DATE, STLD_AMT, MAIN_SR_NO " +
     "FROM adj_dtl WHERE SOURCE_TYPE = ? AND SOURCE_DOC = ? " +
     "ORDER BY MAIN_SR_NO";
   connection.query(sql, [req.params.tp, req.params.vchr], (err, rows) => {
