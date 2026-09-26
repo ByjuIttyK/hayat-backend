@@ -9075,3 +9075,5 @@ app.use("/api", require("./routes/navAssistApi")(connection));
  app.use("/api", require("./routes/pvListApi")(connection));
 app.use("/api", require("./routes/rvListApi")(connection));
 app.use("/api", require("./routes/jvListApi")(connection));
+//
+ app.use("/api", require("./routes/purVatRecon")(connection));
