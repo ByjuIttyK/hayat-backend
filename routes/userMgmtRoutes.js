@@ -92,13 +92,17 @@ module.exports = function (connection) {
   });
 
   // ── PUT /api/users/:id/role — update role ────────────────────────────────────
-  router.put('/users/:id/role', adminOnly, async (req, res) => {
+   router.put('/users/:id/role', adminOnly, async (req, res) => {
     const { id } = req.params;
-    const { role } = req.body;
-    if (!role || !['admin','user','viewer'].includes(role)) {
-      return res.status(400).json({ message: 'Invalid role. Must be admin, user or viewer.' });
+    const role = String(req.body.role || '').trim();
+    if (!role) {
+      return res.status(400).json({ message: 'Role is required.' });
     }
     try {
+      const r = await q('SELECT 1 FROM roles WHERE role_name = ?', [role]);
+      if (!r.length) {
+        return res.status(400).json({ message: `Unknown role "${role}".` });
+      }
       await q('UPDATE users SET role = ? WHERE id = ?', [role, id]);
       res.json({ message: `Role updated to "${role}".` });
     } catch (err) {
@@ -106,7 +110,6 @@ module.exports = function (connection) {
       res.status(500).json({ message: err.message });
     }
   });
-
   // ── PUT /api/users/:id/reset-password ───────────────────────────────────────
   router.put('/users/:id/reset-password', adminOnly, async (req, res) => {
     const { id } = req.params;

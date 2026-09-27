@@ -187,6 +187,9 @@ app.use("/api", scanPairApi(connection));
 
 /* Protect everything below */
 app.use("/api", authMiddleware);
+authMiddleware.init(connection);
+app.use("/api", require("./routes/accessRightsRoutes")(connection));
+
 app.get('/api/column-metadata/:tableId', (req, res) => {
   //  console.log("Fetching column metadata");
   const { tableId } = req.params;
