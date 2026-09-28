@@ -88,7 +88,7 @@ async function buildWorkbook(jobNo, panels, items) {
   const DATA_ROWS = 100;
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "HayatERP";
+  wb.creator = "Telltron ERP";
   wb.created = new Date();
 
   // ════════════════════════════════════════════════════════════════

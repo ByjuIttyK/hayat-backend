@@ -1,0 +1,4 @@
+db\connection.js:16   database: 'hayat',
+HayatDb.js:6684   database: "hayat",
+routes\ledgerAiRoutes.js:165   if (qc.length >= 4 && nc.startsWith(qc)) score = Math.max(score, 0.9);  // "ALHAYAT" vs "AL HAYAT ELECT"
+routes\voiceGemini.js:18   return `Transcribe this spoken accounting instruction from a UAE switchgear manufacturer.

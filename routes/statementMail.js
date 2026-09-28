@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 // E:\hayatApi\routes\statementMail.js
 // Sends one statement PDF. Nothing else — the run's status is recorded
 // through the existing PATCH /stmt-run/:runId/status endpoint, so this
@@ -49,7 +50,7 @@ module.exports = function (connection) {
 <div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2733;line-height:1.6">
   <p>Dear Sir / Madam,</p>
   <p>Please find attached your statement of account with
-     <strong>Al Hayat Elect. Switchgear Ind. LLC</strong>
+     <strong>${COMPANY.NAME_TITLE}</strong>
      as on <strong>${ddmmyyyy(asOnDate)}</strong>.</p>
   ${
     outstanding !== null && outstanding !== undefined && outstanding !== ""
@@ -60,7 +61,7 @@ module.exports = function (connection) {
      If any entry does not agree with your records, write back to this address
      and we will reconcile it with you.</p>
   <p style="margin-top:18px">Regards,<br/>Accounts Department<br/>
-     <span style="color:#1f3f6e;font-weight:bold">Al Hayat Elect. Switchgear Ind. LLC</span></p>
+     <span style="color:#1f3f6e;font-weight:bold">${COMPANY.NAME_TITLE}</span></p>
 </div>`.trim();
 
   // ---- POST /api/statement/send ------------------------------------

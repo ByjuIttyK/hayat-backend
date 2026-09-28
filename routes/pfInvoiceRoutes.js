@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 // routes/pfInvoiceRoutes.js
 //
 // Factory-pattern route module (matches HayatDb.js convention). Mount at root
@@ -513,7 +514,7 @@ module.exports = function (connection) {
       //   number stays here. Add one to `company` and read it if you would
       //   rather it were data too.
       VAT_REG_NO: '100590144000003',
-      LOGO: '/HayatLogo.jpg',
+      LOGO: COMPANY.LOGO,
     };
   }
 

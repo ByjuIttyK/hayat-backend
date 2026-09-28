@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 /**
  * Despatch Note PDF Route
  * File: E:\hayatApi\routes\despatchNoteRoutes.js
@@ -230,14 +231,14 @@ function drawDespatchNote(doc, job, panel, x, y, w, h, theme = 'white') {
   doc.save().moveTo(x, cy).lineTo(x + w, cy).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
 
   doc.font('Helvetica-Bold').fontSize(17).fillColor(NAVY);
-  doc.text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x, hdrY + 14, { width: w, align: 'center' });
+  doc.text(COMPANY.NAME, x, hdrY + 14, { width: w, align: 'center' });
 
   const acX = x + w * 0.12, acW = w * 0.76;
   doc.save().moveTo(acX, hdrY + hdrH * 0.43).lineTo(acX + acW, hdrY + hdrH * 0.43)
      .lineWidth(1.2).strokeColor(RULE_COL).stroke().restore();
 
   doc.font('Helvetica').fontSize(9).fillColor('#555');
-  doc.text('SHARJAH, U.A.E     Tel: +971 6 553 5805     www.alhayatswitchgear.com',
+  doc.text(`${COMPANY.CITY_UPPER}     Tel: ${COMPANY.TEL}     ${COMPANY.WEB}`,
     x, hdrY + hdrH * 0.47, { width: w, align: 'center' });
 
   doc.save().moveTo(acX, hdrY + hdrH * 0.66).lineTo(acX + acW, hdrY + hdrH * 0.66)
@@ -260,7 +261,7 @@ function drawDespatchNote(doc, job, panel, x, y, w, h, theme = 'white') {
   const fMY = fromY + (fromH - 10) / 2;
   doc.font('Helvetica-Bold').fontSize(10).fillColor(LABEL_FG).text('FROM', x + PAD, fMY, { width: fLW - PAD });
   doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY)
-     .text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
+     .text(COMPANY.NAME, x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
 
   // ── 3. JOB DETAILS (3 equal-height rows) ─────────────────────────────────
   const detY = cy; cy += detailH;

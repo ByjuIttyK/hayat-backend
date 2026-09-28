@@ -1,0 +1,57 @@
+CHANGE  boqTemplateRoute.js:91
+   - wb.creator = "HayatERP";
+   + wb.creator = "Telltron ERP";
+CHANGE  build_pv_excel.js:124
+   - wb.creator = "HayatERP";
+   + wb.creator = "Telltron ERP";
+CHANGE  build_rv_excel.js:124
+   - wb.creator = "HayatERP";
+   + wb.creator = "Telltron ERP";
+CHANGE  gl_suggest_api.js:561
+   - const prompt = `You are an ERP accounting assistant for a UAE manufacturing company (Al Hayat Switchgear).
+   + const prompt = `You are an ERP accounting assistant for a UAE manufacturing company (${COMPANY.SHORT}).
+IMPORT  gl_suggest_api.js: const COMPANY = require("./config/company");
+CHANGE  routes\despatchNoteRoutes.js:233
+   - doc.text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x, hdrY + 14, { width: w, align: 'center' });
+   + doc.text(COMPANY.NAME, x, hdrY + 14, { width: w, align: 'center' });
+CHANGE  routes\despatchNoteRoutes.js:240
+   - doc.text('SHARJAH, U.A.E     Tel: +971 6 553 5805     www.alhayatswitchgear.com',
+   + doc.text(`${COMPANY.CITY_UPPER}     Tel: ${COMPANY.TEL}     ${COMPANY.WEB}`,
+CHANGE  routes\despatchNoteRoutes.js:263
+   - .text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
+   + .text(COMPANY.NAME, x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
+IMPORT  routes\despatchNoteRoutes.js: const COMPANY = require("../config/company");
+CHANGE  routes\fa_asset_transfer_api.js:102
+   - FROM hayat.job_card
+   + FROM job_card
+CHANGE  routes\pfInvoiceRoutes.js:516
+   - LOGO: '/HayatLogo.jpg',
+   + LOGO: COMPANY.LOGO,
+IMPORT  routes\pfInvoiceRoutes.js: const COMPANY = require("../config/company");
+CHANGE  routes\purVatRecon.js:181
+   - ws.addRow(["Al Hayat Elect. Switchgear Ind. LLC"]).font = { bold: true, size: 14 };
+   + ws.addRow([COMPANY.NAME_TITLE]).font = { bold: true, size: 14 };
+IMPORT  routes\purVatRecon.js: const COMPANY = require("../config/company");
+CHANGE  routes\salesRegisterVat.js:223
+   - mergeRow('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', NAVY, 14);
+   + mergeRow(COMPANY.NAME, NAVY, 14);
+CHANGE  routes\salesRegisterVat.js:418
+   - cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 20,
+   + cell(COMPANY.NAME, MARGIN, y, CW, 20,
+IMPORT  routes\salesRegisterVat.js: const COMPANY = require("../config/company");
+CHANGE  routes\salesVatRecon.js:144
+   - ws.mergeCells('A1:J1'); ws.getCell('A1').value = 'AL HAYAT ELECT. SWITCHGEAR IND. LLC';
+   + ws.mergeCells('A1:J1'); ws.getCell('A1').value = COMPANY.NAME;
+IMPORT  routes\salesVatRecon.js: const COMPANY = require("../config/company");
+CHANGE  routes\statementMail.js:52
+   - <strong>Al Hayat Elect. Switchgear Ind. LLC</strong>
+   + <strong>${COMPANY.NAME_TITLE}</strong>
+CHANGE  routes\statementMail.js:63
+   - <span style="color:#1f3f6e;font-weight:bold">Al Hayat Elect. Switchgear Ind. LLC</span></p>
+   + <span style="color:#1f3f6e;font-weight:bold">${COMPANY.NAME_TITLE}</span></p>
+IMPORT  routes\statementMail.js: const COMPANY = require("../config/company");
+
+CREATE  config\company.js
+
+15 line(s) in 11 file(s) would change (dry run — add --apply to write).
+4 line(s) still mention the company — listed in brand_review.txt for a look.

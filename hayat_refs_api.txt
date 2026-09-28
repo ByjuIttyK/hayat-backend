@@ -1,0 +1,210 @@
+bank1_lov_api.js:4://  Mount in HayatDb.js:
+bankRecoRoutes.js:6: * Mount in HayatDb.js:
+boqRoutes.js:4: * Mount in HayatDb.js:
+boqTemplateRoute.js:6: * Install:  npm install exceljs   (once, in E:\hayatApi)
+boqTemplateRoute.js:7: * Mount in HayatDb.js:
+boqTemplateRoute.js:91:  wb.creator = "HayatERP";
+boqTemplateRoute.js:253:  await ws.protect("hayat", {
+boqTemplateRoute.js:341:    { text:"9. Sheet is protected. Only white cells (B, E, F, I, J, L) are editable. Password: hayat", bold:false, sz:10, bg:"FFFDE7", fg:"92400E" },
+boqTemplateRoute.js:355:// Usage in HayatDb.js:
+build_pv_excel.js:7: * Run:  npm install exceljs   (once, in hayatApi folder)
+build_pv_excel.js:8: * Mount in HayatDb.js:
+build_pv_excel.js:124:  wb.creator = "HayatERP";
+build_pv_excel.js:409:    { text:"7. Sheet password (if needed by accountant): hayat", bold:false,sz:9,bg:"F0F5FF",fg:"FF"+C.LBL_FG },
+build_pv_excel.js:423:  // Password = "hayat" — required to remove protection.
+build_pv_excel.js:424:  await ws.protect("hayat", {
+build_rv_excel.js:7: * Run:  npm install exceljs   (once, in hayatApi folder)
+build_rv_excel.js:8: * Mount in HayatDb.js:
+build_rv_excel.js:124:  wb.creator = "HayatERP";
+build_rv_excel.js:409:    { text:"7. Sheet password (if needed by accountant): hayat", bold:false,sz:9,bg:"F0F5FF",fg:"FF"+C.LBL_FG },
+build_rv_excel.js:423:  // Password = "hayat" — required to remove protection.
+build_rv_excel.js:424:  await ws.protect("hayat", {
+ChequeScanRoutes.js:3://  Mount in HayatDb.js:  app.use("/ai", authMiddleware, require("./ChequeScanRoutes"));
+ChequeScanRoutesANTROPIC.js:3://  Mount in HayatDb.js:   app.use("/ai", require("./routes/ChequeScanRoutes"));
+CustomerMatchRoutes.js:3://  Mount in HayatDb.js:  app.use("/api", authMiddleware, require("./CustomerMatchRoutes"));
+CustomerMatchRoutes.js:10:const connection = require("./db");   // adjust to however HayatDb shares the pool
+db\connection.js:3:// Extracted from HayatDb.js
+db\connection.js:16:  database: 'hayat',
+docAttachRoute.js:7: * Mount in HayatDb.js:
+docAttachRoute.js:11: * Files stored at:  E:\hayatApi\uploads\<MODULE>\<REF_NO>\<uuid.ext>
+FabInvSuggestRoutes.js:15:// Register once in HayatDb.js:
+gl_suggest_api.js:3://  Mount in HayatDb.js:
+gl_suggest_api.js:561:      const prompt = `You are an ERP accounting assistant for a UAE manufacturing company (Al Hayat Switchgear).
+HayatDb.js:360:// /api/save-lpo — replaces the existing route in HayatDb.js.
+HayatDb.js:6391://  ItemMst.tsx supporting routes — add these to HayatDb.js alongside the
+HayatDb.js:6684:        database: "hayat",
+HayatDb.js:8726:// Paste into HayatDb.js. JOB_NO lives on the header, so this joins.
+HayatDb.js:8819:// HayatDb.js — one line to add:
+HayatDb.js:8850:startAuditArchiver(connection);   // auto cron inside same HayatDb process
+JvExcelEntryRoutes.js:4://  Mount in HayatDb.js: app.use('/api/jv', require('./middleware/JvExcelEntryRoutes'))
+LedgerDrillRoutes.js:5:// Register in HayatDb.js:
+pay_chq_batch_api.js:5://  Mount in HayatDb.js:
+pinv_ns_api.js:3:// Mount in HayatDb.js:
+pinv_ns_scan_api.js:7://  Mount in HayatDb.js:
+pv_excel_api.js:5://   Mount in HayatDb.js:
+rcp_chq_batch_api.js:5://  Mount in HayatDb.js:
+routes\accessRightsRoutes.js:3: * File: E:\hayatApi\routes\accessRightsRoutes.js
+routes\accessRightsRoutes.js:26: * Registration in HayatDb.js, just after  app.use("/api", authMiddleware);
+routes\ac_period_api.js:2:// Mount in HayatDb.js:  app.use('/api/ac-period', require('./routes/ac_period_api')(connection));
+routes\ageingLov.js:11:// Register in HayatDb.js:
+routes\agentRoutes.js:3:// Al Hayat ERP  |  AI Agent — Intent Parser + Task Router
+routes\agentRoutes.js:5:// Mount in HayatDb.js:
+routes\analyticsRoutes.js:2: * analyticsRoutes.js  — v2 (corrected for hayat schema)
+routes\analyticsRoutes.js:3: * Al Hayat ERP — Analytics & Intelligence API
+routes\analyticsRoutes.js:22: * Register in HayatDb.js (add these 2 lines near other route registrations):
+routes\audit_api.js:2:// Place at: E:\hayatApi\routes\audit_api.js
+routes\audit_api.js:3:// Register in HayatDb.js:
+routes\BalanceSheetRoutes.js:9:// Register in HayatDb.js:
+routes\columnMetadataUtilRoutes.js:13:// Register in HayatDb.js:
+routes\crnote.js:3:// Register in HayatDb.js:   app.use("/api", require("./routes/crnote")(connection));
+routes\CurrentChqRoutes.js:1:// E:\hayatApi\routes\CurrentChqRoutes.js
+routes\CurrentChqRoutes.js:7:// Register in HayatDb.js:
+routes\customerCodeApi.js:4:// Register in HayatDb.js:
+routes\despatchNoteRoutes.js:3: * File: E:\hayatApi\routes\despatchNoteRoutes.js
+routes\despatchNoteRoutes.js:19: * Registration in HayatDb.js:
+routes\despatchNoteRoutes.js:233:  doc.text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x, hdrY + 14, { width: w, align: 'center' });
+routes\despatchNoteRoutes.js:240:  doc.text('SHARJAH, U.A.E     Tel: +971 6 553 5805     www.alhayatswitchgear.com',
+routes\despatchNoteRoutes.js:263:     .text('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
+routes\drawingRegisterRoutes.js:3:// Factory-pattern route module (matches HayatDb.js convention). Either mount
+routes\drawingRegisterRoutes.js:31:  // don't. This keeps the module working whichever HayatDb.js creates.
+routes\drawingRegisterRoutes.js:363:  // them under BOTH / and /api, so HayatDb.js works either way:
+routes\drnote.js:3:// Register in HayatDb.js:   app.use("/api", require("./routes/drnote")(connection));
+routes\fabInvDoRoutes.js:13:// Register in HayatDb.js:
+routes\fabInvForSret.js:6://  Register in HayatDb.js:
+routes\fabInvJvRoutes.js:3:// Mount in HayatDb.js (matches the convention used by every other route file
+routes\fabInvPrint_route.js:2:// File: routes/fabInvPrint.js  (add to HayatDb.js router)
+routes\fa_asset_transfer_api.js:4:// Mount in HayatDb.js:
+routes\fa_asset_transfer_api.js:8:// Table: hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:36:         FROM hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:63:           FROM hayat_fa.fa_asset_mst a
+routes\fa_asset_transfer_api.js:81:             SELECT LOCATION            FROM hayat_fa.fa_asset_mst      WHERE LOCATION IS NOT NULL
+routes\fa_asset_transfer_api.js:82:             UNION SELECT FROM_LOCATION FROM hayat_fa.fa_asset_transfer WHERE FROM_LOCATION IS NOT NULL
+routes\fa_asset_transfer_api.js:83:             UNION SELECT TO_LOCATION   FROM hayat_fa.fa_asset_transfer WHERE TO_LOCATION IS NOT NULL
+routes\fa_asset_transfer_api.js:102:           FROM hayat.job_card
+routes\fa_asset_transfer_api.js:134:           FROM hayat_fa.fa_asset_transfer t
+routes\fa_asset_transfer_api.js:135:           LEFT JOIN hayat_fa.fa_asset_mst a ON a.ASSET_CODE = t.ASSET_CODE
+routes\fa_asset_transfer_api.js:171:           FROM hayat_fa.fa_asset_transfer t
+routes\fa_asset_transfer_api.js:172:           LEFT JOIN hayat_fa.fa_asset_mst   a ON a.ASSET_CODE = t.ASSET_CODE
+routes\fa_asset_transfer_api.js:173:           LEFT JOIN hayat_fa.fa_category_mst c ON c.CAT_CODE  = a.CAT_CODE
+routes\fa_asset_transfer_api.js:197:           FROM hayat_fa.fa_asset_transfer t
+routes\fa_asset_transfer_api.js:205:           FROM hayat_fa.fa_asset_mst
+routes\fa_asset_transfer_api.js:228:           FROM hayat_fa.fa_asset_transfer t
+routes\fa_asset_transfer_api.js:229:           LEFT JOIN hayat_fa.fa_asset_mst a ON a.ASSET_CODE = t.ASSET_CODE
+routes\fa_asset_transfer_api.js:277:              `INSERT INTO hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:293:          `UPDATE hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:305:        `SELECT TRF_NO FROM hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:313:          `UPDATE hayat_fa.fa_asset_mst
+routes\fa_asset_transfer_api.js:339:        `SELECT * FROM hayat_fa.fa_asset_transfer WHERE TRF_NO = ? FOR UPDATE`,
+routes\fa_asset_transfer_api.js:345:        `SELECT TRF_NO FROM hayat_fa.fa_asset_transfer
+routes\fa_asset_transfer_api.js:356:        `DELETE FROM hayat_fa.fa_asset_transfer WHERE TRF_NO = ?`,
+routes\fa_asset_transfer_api.js:362:        `UPDATE hayat_fa.fa_asset_mst
+routes\fa_dep_run_api.js:4://  Mount in HayatDb.js exactly like the other FA routes:
+routes\fa_dep_run_api.js:8://  Tables:  hayat_fa.fa_dep_run_hdr / fa_dep_run_dtl / fa_asset_mst /
+routes\fa_dep_run_api.js:9://           fa_category_mst   +   hayat.vouchers / hayat.tran_acc
+routes\fa_dep_run_api.js:73:           FROM hayat_fa.fa_dep_run_hdr
+routes\fa_dep_run_api.js:82:             FROM hayat_fa.fa_dep_run_dtl d
+routes\fa_dep_run_api.js:83:             JOIN hayat_fa.fa_asset_mst    a ON a.ASSET_CODE = d.ASSET_CODE
+routes\fa_dep_run_api.js:84:        LEFT JOIN hayat_fa.fa_category_mst c ON c.CAT_CODE   = a.CAT_CODE
+routes\fa_dep_run_api.js:97:           FROM hayat_fa.fa_asset_mst a
+routes\fa_dep_run_api.js:98:      LEFT JOIN hayat_fa.fa_category_mst c ON c.CAT_CODE = a.CAT_CODE
+routes\fa_dep_run_api.js:151:        `INSERT INTO hayat_fa.fa_dep_run_hdr
+routes\fa_dep_run_api.js:163:          `INSERT INTO hayat_fa.fa_dep_run_dtl
+routes\fa_dep_run_api.js:171:          `UPDATE hayat_fa.fa_asset_mst
+routes\fa_dep_run_api.js:211:        `SELECT * FROM hayat_fa.fa_dep_run_hdr WHERE RUN_NO = ? FOR UPDATE`,
+routes\fa_dep_run_api.js:225:           FROM hayat_fa.fa_dep_run_dtl d
+routes\fa_dep_run_api.js:226:           JOIN hayat_fa.fa_asset_mst    a ON a.ASSET_CODE = d.ASSET_CODE
+routes\fa_dep_run_api.js:227:           JOIN hayat_fa.fa_category_mst c ON c.CAT_CODE   = a.CAT_CODE
+routes\fa_dep_run_api.js:297:        `UPDATE hayat_fa.fa_dep_run_hdr
+routes\fa_dep_run_api.js:325:           FROM hayat_fa.fa_dep_run_hdr
+routes\fa_dep_run_api.js:337:        `SELECT * FROM hayat_fa.fa_dep_run_hdr WHERE RUN_NO = ?`,
+routes\fa_dep_run_api.js:342:           FROM hayat_fa.fa_dep_run_dtl d
+routes\fa_dep_run_api.js:343:           JOIN hayat_fa.fa_asset_mst a ON a.ASSET_CODE = d.ASSET_CODE
+routes\fa_disposal_api.js:47:           FROM hayat_fa.fa_asset_mst a
+routes\fa_disposal_api.js:74:         FROM hayat_fa.fa_asset_disposal
+routes\fa_disposal_api.js:95:           FROM hayat_fa.fa_asset_disposal d
+routes\fa_disposal_api.js:96:           LEFT JOIN hayat_fa.fa_asset_mst a ON a.ASSET_CODE = d.ASSET_CODE
+routes\fa_disposal_api.js:111:           FROM hayat_fa.fa_asset_disposal d
+routes\fa_disposal_api.js:112:           LEFT JOIN hayat_fa.fa_asset_mst a ON a.ASSET_CODE = d.ASSET_CODE
+routes\fa_disposal_api.js:218:           FROM hayat_fa.fa_asset_mst
+routes\fa_disposal_api.js:229:           FROM hayat_fa.fa_category_mst
+routes\fa_disposal_api.js:261:        `INSERT INTO hayat_fa.fa_asset_disposal
+routes\fa_disposal_api.js:272:        `UPDATE hayat_fa.fa_asset_mst
+routes\fa_disposal_api.js:295:        `SELECT * FROM hayat_fa.fa_asset_disposal WHERE DSP_NO = ? FOR UPDATE`,
+routes\fa_disposal_api.js:313:        `DELETE FROM hayat_fa.fa_asset_disposal WHERE DSP_NO = ?`,
+routes\fa_disposal_api.js:319:        `UPDATE hayat_fa.fa_asset_mst
+routes\fa_routes.js:9:      "select CAT_CODE, CAT_NAME, ASSET_GL_ACC, ACCUM_DEP_GL_ACC, DEP_EXP_GL_ACC, DEP_METHOD, USEFUL_LIFE_YEARS, DEP_RATE_PCT, ACTIVE_FLAG from hayat_fa.fa_category_mst order by CAT_CODE",
+routes\fa_routes.js:21:      "SELECT ASSET_CODE, ASSET_NAME, CAT_CODE, LOCATION, JOB_NO, SUP_CODE, ACQ_DATE, ACQ_COST, ACQ_VCHR_TYPE, ACQ_VCHR_NO, DEP_METHOD, STATUS FROM  hayat_fa.fa_asset_mst order by asset_code",
+routes\fa_routes.js:33:      "select LPAD(COALESCE(MAX(CAT_CODE), 0) + 1, 3, '0') as MaxCatCode from hayat_fa.fa_category_mst",
+routes\fa_routes.js:49:      "select LPAD(COALESCE(MAX(ASSET_CODE), 0) + 1, 3, '0') as MaxAssetCode from hayat_fa.fa_asset_mst",
+routes\fa_routes.js:89:                "UPDATE hayat_fa.fa_category_mst SET ?, UPDATED_AT = NOW() WHERE CAT_CODE = ?",
+routes\fa_routes.js:103:                    "INSERT INTO hayat_fa.fa_category_mst SET CAT_CODE = ?, ?",
+routes\fa_routes.js:111:                    "select LPAD(COALESCE(MAX(CAT_CODE), 0) + 1, 3, '0') as MaxCatCode from hayat_fa.fa_category_mst"
+routes\fa_routes.js:141:        "SELECT USEFUL_LIFE_YEARS, DEP_RATE_PCT FROM hayat_fa.fa_category_mst WHERE CAT_CODE = ?",
+routes\fa_routes.js:165:          "UPDATE hayat_fa.fa_asset_mst SET ?, NBV = ACQ_COST - ACCUM_DEP WHERE ASSET_CODE = ?",
+routes\fa_routes.js:184:            "INSERT INTO hayat_fa.fa_asset_mst SET ASSET_CODE = ?, ?, NBV = ?",
+routes\fa_routes.js:192:            "select LPAD(COALESCE(MAX(ASSET_CODE), 0) + 1, 3, '0') as MaxAssetCode from hayat_fa.fa_asset_mst"
+routes\fa_routes.js:207:      "SELECT * FROM hayat_fa.fa_asset_mst WHERE ASSET_CODE = ?",
+routes\glAuditRoutes.js:8: * Register in HayatDb.js:
+routes\invSettle.js:7:// Register in HayatDb.js:
+routes\itemHistoryRoutes.js:22:// Mount in hayatdb.js alongside your other route modules, e.g.:
+routes\jobExpLinkRoutes.js:6:// Register in HayatDb.js:
+routes\jobpanel-routes.js:4:// Paste into HayatDb.js alongside /api/joblist.
+routes\jobPanelLovRoutes.js:4:// Mount in HayatDb.js:
+routes\jvListApi.js:3:// Mounted in HayatDb.js as: app.use("/api", require("./routes/jvListApi")(connection));
+routes\ledger-row-settlements.js:24:// Wire up in HayatDb.js:
+routes\ledgerAiRoutes.js:20:// Register in HayatDb.js (after the /api auth middleware):
+routes\ledgerAiRoutes.js:165:  if (qc.length >= 4 && nc.startsWith(qc)) score = Math.max(score, 0.9);  // "ALHAYAT" vs "AL HAYAT ELECT"
+routes\ledgerEntryLines.js:11://  Register in HayatDb.js with the usual factory pattern:
+routes\navAssistApi.js:5:// Register in HayatDb.js:
+routes\nlDispatchRoutes.js:3:// Al Hayat ERP  |  Replace nlDispatchRoutes.js in HayatDb.js
+routes\pfInvoiceRoutes.js:3:// Factory-pattern route module (matches HayatDb.js convention). Mount at root
+routes\pfInvoiceRoutes.js:516:      LOGO: '/HayatLogo.jpg',
+routes\ProfitLossRoutes.js:7:// Register in HayatDb.js:
+routes\purchNsJvRoutes.js:4:// Mount in HayatDb.js:
+routes\purVatRecon.js:9: * Register in HayatDb.js:
+routes\purVatRecon.js:181:      ws.addRow(["Al Hayat Elect. Switchgear Ind. LLC"]).font = { bold: true, size: 14 };
+routes\pvListApi.js:3:// Mounted in HayatDb.js as: app.use("/api", require("./routes/pvListApi")(connection));
+routes\pvPrintRoutes.js:13:// Register in HayatDb.js:
+routes\quotRevisionRoutes.js:3: * File: E:\hayatApi\routes\quotRevisionRoutes.js
+routes\quotRevisionRoutes.js:11: * Registration in HayatDb.js:
+routes\rvListApi.js:3:// Mounted in HayatDb.js as: app.use("/api", require("./routes/rvListApi")(connection));
+routes\salesBankDtlRoutes.js:4:// Register in HayatDb.js alongside the others:
+routes\salesOrderApi.js:3:   Register in HayatDb.js:
+routes\salesRegisterVat.js:15: * Registration in HayatDb.js:
+routes\salesRegisterVat.js:223:  mergeRow('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', NAVY, 14);
+routes\salesRegisterVat.js:418:  cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 20,
+routes\salesVatRecon.js:10: * Registration in HayatDb.js:
+routes\salesVatRecon.js:144:  ws.mergeCells('A1:J1'); ws.getCell('A1').value = 'AL HAYAT ELECT. SWITCHGEAR IND. LLC';
+routes\save-jv.js:6://  Usage in HayatDb.js:
+routes\save-jv.js:39: * while sharing the single pool created in HayatDb.js.
+routes\save-jv.js:41: * @param {import("mysql").Pool} connection  — the pool from HayatDb.js
+routes\saveFabInv.js:14: * Registration in HayatDb.js:
+routes\savePayment.js:1:// routes/savePayment.js  (or paste over the handler in HayatDb.js)
+routes\savePayment.js:22:   * Next voucher number for a type. Named apart from HayatDb.js's own
+routes\saveRcpRoutes.js:15: * Registration in HayatDb.js (remove the old inline app.post("/api/save-rcp")):
+routes\saveRcpRoutes.js:19: * allocateVchrNo(conn, tranType) is the existing HayatDb.js function that
+routes\saveRcpRoutes.js:40:    throw new Error('saveRcpRoutes: allocateVchrNo must be passed in from HayatDb.js');
+routes\scanPairApi.js:27:const APP_URL = process.env.SCAN_APP_URL || process.env.PUBLIC_APP_URL || "https://hayaterp.cloud";
+routes\sinqLovRoutes.js:151:// MOUNTING — in HayatDb.js:
+routes\sinvRoutes.js:12:   Register once in HayatDb.js:
+routes\statementMail.js:1:// E:\hayatApi\routes\statementMail.js
+routes\statementMail.js:52:     <strong>Al Hayat Elect. Switchgear Ind. LLC</strong>
+routes\statementMail.js:63:     <span style="color:#1f3f6e;font-weight:bold">Al Hayat Elect. Switchgear Ind. LLC</span></p>
+routes\stkAdjRoutes.js:4: * ── Register in HayatDb.js ────────────────────────────────────────────────
+routes\stkAdjRoutes.js:9: *   HayatDb.js, delete it.  Express runs the FIRST matching handler, so an
+routes\stmtRun.js:5:// Register in HayatDb.js:
+routes\tbAudit.js:22://  Register in HayatDb.js with the usual factory pattern:
+routes\trddo.js:3: * Mount in HayatDb.js (file name is all lowercase — keep the require the same):
+routes\TrialBalanceRoutes.js:5:// Register in HayatDb.js:
+routes\trn-vouchers.js:5:// Register in HayatDb.js:
+routes\userMgmtRoutes.js:3: * File: E:\hayatApi\routes\userMgmtRoutes.js
+routes\userMgmtRoutes.js:13: * Registration in HayatDb.js (after JWT middleware is set up):
+routes\voiceRoutes.js:36:const PUBLIC_BASE = process.env.VOICE_PUBLIC_BASE || "https://hayaterp.cloud";
+routes\voucherChequeRoutes.js:5:// Register in HayatDb.js:
+routes\voucherDelete.js:1:// hayatApi/routes/voucherDelete.js
+rv_build_route.js:12://  Place build_rv_template.py in the same directory as HayatDb.js (E:\hayatApi\)
+rv_build_route.js:22:// Path to the Python script — same folder as HayatDb.js
+services\glPostingService.js:97:// ✅ Crucial Fix: Export the function so HayatDb.js can import it
+utils\auditArchiver.js:2:// Place at: E:\hayatApi\utils\auditArchiver.js
+utils\auditArchiver.js:16:// Windows dev : E:\hayatApi\audit_logs\  and  E:\hayatApi\audit_archives\
+utils\auditArchiver.js:17:// VPS (Linux) : /home/hayat/audit_logs\  and  /home/hayat/audit_archives\

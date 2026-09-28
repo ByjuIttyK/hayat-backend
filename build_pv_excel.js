@@ -121,7 +121,7 @@ async function buildWorkbook(header, invoices) {
   const iv = invoices || [];
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = "HayatERP";
+  wb.creator = "Telltron ERP";
   wb.created = new Date();
 
   const ws = wb.addWorksheet("PV Entry", {

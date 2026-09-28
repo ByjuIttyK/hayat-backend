@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 /**
  * Sales VAT Register vs G/L — reconciliation
  *   GET /api/sales-vat-recon?dt1=YYYY-MM-DD&dt2=YYYY-MM-DD         — JSON for the grid
@@ -141,7 +142,7 @@ async function buildExcel(rep, dt1, dt2) {
   const thin = { style: 'thin', color: { argb: RULE } };
   const dmy  = (s) => s.split('-').reverse().join('/');
 
-  ws.mergeCells('A1:J1'); ws.getCell('A1').value = 'AL HAYAT ELECT. SWITCHGEAR IND. LLC';
+  ws.mergeCells('A1:J1'); ws.getCell('A1').value = COMPANY.NAME;
   ws.getCell('A1').font = font(true, NAVY, 14);
   ws.mergeCells('A2:J2'); ws.getCell('A2').value = `Sales VAT Register vs G/L — ${rep.vatAc.acc_code} ${rep.vatAc.acc_head}`;
   ws.getCell('A2').font = font(true, STEEL, 11);

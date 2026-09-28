@@ -185,6 +185,15 @@ app.use("/voicepair", voiceRoutes.pairing());
 const scanPairApi = require("./routes/scanPairApi");
 app.use("/api", scanPairApi(connection));
 
+
+// ── Company details from the company table (public — used by the login page) ──
+const COMPANY = require("./config/company");
+COMPANY.load(connection);
+app.get("/api/company-info", async (req, res) => {
+  if (!COMPANY.NAME) await COMPANY.load(connection);
+  res.json(COMPANY);
+});
+
 /* Protect everything below */
 app.use("/api", authMiddleware);
 authMiddleware.init(connection);
@@ -2833,7 +2842,8 @@ app.get("/api/paymentlov", function (req, res) {
 app.get("/api/cmpdetails", function (req, res) {
   // const tableName= "COMPANY";
   connection.query(
-    "select NAME, PLACE, ADDRESS1,ADDRESS2 , PHONE,EMAIL " + " FROM company",
+    "SELECT NAME, PLACE, ADDRESS1, ADDRESS2, PHONE, FAX, EMAIL, " +
+    "LOGO_FILENAME, INV_LOGO_FILENAME FROM company",
 
     function (err, results, fields) {
       if (err) {
@@ -9080,3 +9090,5 @@ app.use("/api", require("./routes/rvListApi")(connection));
 app.use("/api", require("./routes/jvListApi")(connection));
 //
  app.use("/api", require("./routes/purVatRecon")(connection));
+ //
+ app.use("/api", authMiddleware, require("./routes/cusAgeingExtra")(connection));

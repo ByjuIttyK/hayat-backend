@@ -1,3 +1,4 @@
+const COMPANY = require("./config/company");
 // ─────────────────────────────────────────────────────────────────────────────
 //  gl_suggest_api.js — Smart GL Suggestion via Google Gemini (free tier)
 //  Mount in HayatDb.js:
@@ -558,7 +559,7 @@ Return ONLY this JSON:
       const bestSupMatch  = resolveBestMatch(narration, mergedSup);
 
       // ── 2. Build prompt ───────────────────────────────────────────────────
-      const prompt = `You are an ERP accounting assistant for a UAE manufacturing company (Al Hayat Switchgear).
+      const prompt = `You are an ERP accounting assistant for a UAE manufacturing company (${COMPANY.SHORT}).
 Analyse the Journal Voucher narration below and return ONLY a JSON object — no markdown, no explanation.
 
 NARRATION: "${narration.trim()}"

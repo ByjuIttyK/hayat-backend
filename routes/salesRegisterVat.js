@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 /**
  * Sales Register VAT Route — UAE VAT Submission
  * Route: /api/sales-register-vat
@@ -220,7 +221,7 @@ async function buildExcel(report, { dt1, dt2, sloc }) {
     ws.getRow(rn).height = sz + 10; rn++;
   };
 
-  mergeRow('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', NAVY, 14);
+  mergeRow(COMPANY.NAME, NAVY, 14);
   mergeRow('SHARJAH, U.A.E.', GREY, 10, false);
   mergeRow(
     `SALES REGISTER — UAE VAT SUBMISSION  |  Period: ${dt1}  to  ${dt2}  |  Location: ${sloc || 'ALL'}`,
@@ -415,7 +416,7 @@ function buildPdf(report, { dt1, dt2, sloc }) {
   };
 
   // ── page header : plain text, no filled bands ─────────────────────────────
-  cell('AL HAYAT ELECT. SWITCHGEAR IND. LLC.', MARGIN, y, CW, 20,
+  cell(COMPANY.NAME, MARGIN, y, CW, 20,
     { align:'center', color:NAVY, fontSize:12, bold:true }); y += 20;
 
   cell('SHARJAH, U.A.E.', MARGIN, y, CW, 12,

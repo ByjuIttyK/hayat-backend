@@ -1,3 +1,4 @@
+const COMPANY = require("../config/company");
 /**
  * routes/purVatRecon.js — Purchase VAT Register vs G/L (VAT ON PURCHASE 142-004-0-002)
  * Register side = same sources as Purchase Register (PUR_REG):
@@ -178,7 +179,7 @@ module.exports = function (connection) {
       ];
 
       // Title lines — bold text, no fill
-      ws.addRow(["Al Hayat Elect. Switchgear Ind. LLC"]).font = { bold: true, size: 14 };
+      ws.addRow([COMPANY.NAME_TITLE]).font = { bold: true, size: 14 };
       ws.addRow([`Purchase VAT Reconciliation — Register vs G/L (${VAT_AC} ${data.vatAc.acc_head})`]).font = { bold: true, size: 12 };
       ws.addRow([`Period: ${isoToDmy(d.from)} to ${isoToDmy(d.to)}`]).font = { italic: true };
       ws.addRow([]);

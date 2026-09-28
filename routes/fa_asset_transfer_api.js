@@ -99,7 +99,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await db.query(
         `SELECT JOB_NO, PROJ_NAME AS JOB_DESC
-           FROM hayat.job_card
+           FROM job_card
           ORDER BY JOB_NO DESC`
       );
       res.json(rows);
