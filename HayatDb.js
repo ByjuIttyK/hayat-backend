@@ -9092,3 +9092,9 @@ app.use("/api", require("./routes/jvListApi")(connection));
  app.use("/api", require("./routes/purVatRecon")(connection));
  //
  app.use("/api", authMiddleware, require("./routes/cusAgeingExtra")(connection));
+ //
+  const cusVarTraceRoutes = require("./routes/cusVarTrace");
+  app.use("/api", authMiddleware, cusVarTraceRoutes(connection));
+  //
+     app.use("/api", require("./routes/partySnapshotRoutes")(connection));
+     

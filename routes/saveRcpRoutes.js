@@ -8,6 +8,8 @@
  *   current_chq  — current-dated cheques (ChqDt <= VchrDt)  + AMOUNT_FC
  *   tran_acc     — G/L lines                                 + AMOUNT_FC
  *   adj_dtl      — invoice settlements (always AED)
+ *   rcp_on_acc   — On A/c Credit: customer credit not matched to invoices
+ *                  (DOC_NO = RV no, DOC_TYPE = tran type, DB_CR 'C')
  *
  * AMOUNT_FC is the foreign-currency figure of the line/cheque. It is NULL
  * for an AED voucher (the screen sends AmountFc: null).
@@ -22,6 +24,7 @@
  */
 
 const express = require('express');
+const { saveRcpOnAcc } = require('./rcpOnAcc');
 
 /** conn.query wrapped in a promise — keeps every statement on the one
  *  transaction connection. */
@@ -48,6 +51,7 @@ module.exports = function (connection, { allocateVchrNo } = {}) {
       currentChqData = [],
       tranaccData = [],
       InvStlData = [],
+      rcpOnAcc = null,
     } = req.body || {};
 
     if (!vchrData || !vchrData.TranType) {
@@ -188,6 +192,23 @@ module.exports = function (connection, { allocateVchrNo } = {}) {
                 STLD_AMT    = VALUES(STLD_AMT)`,
               [stl.TranType, vchrNo, stl.SourceDate, stl.AccCode,
                stl.StldType, stl.StldDoc, stl.StldDate, stl.Amount]);
+          }
+
+          // ── rcp_on_acc (On A/c Credit) ──
+          // Credit to the customer beyond what was settled against invoices.
+          // Uses vchrNo (allocated on ADD) so the row sits under the real RV.
+          // An amount of 0 removes any earlier row for this voucher; a row
+          // already partly settled can't be reduced below STLD_AMT (throws →
+          // the whole voucher rolls back).
+          if (rcpOnAcc) {
+            await saveRcpOnAcc((sql, params) => q(conn, sql, params), {
+              vchrNo,
+              tranType: tt,
+              vchrDate: vchrData.VchrDate,
+              custCode: rcpOnAcc.CustCd || vchrData.CustCd,
+              amount:   Number(rcpOnAcc.Amount) || 0,
+              mainSrNo: rcpOnAcc.MainSrNo ?? null,
+            });
           }
 
           conn.commit((err) => {
