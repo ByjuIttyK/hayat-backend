@@ -3631,7 +3631,7 @@ app.get("/api/invadj/:tp/:vchr", function (req, res) {
   var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     conn.execute(
-      "select SOURCE_TYPE,SOURCE_DOC,DATE_FORMAT(SOURCE_DATE,'%d/%m/%y') AS SOURCE_DATE , ACC_CODE,STLD_DOC ,STLD_TYPE, STLD_AMT " +
+      "select SOURCE_TYPE,SOURCE_DOC,DATE_FORMAT(SOURCE_DATE,'%d/%m/%Y') AS SOURCE_DATE , ACC_CODE,STLD_DOC ,STLD_TYPE, STLD_AMT " +
       "FROM adj_dtl WHERE SOURCE_TYPE = :1 AND SOURCE_DOC =:2 ",
       [req.params.tp, req.params.vchr],
       {
@@ -5477,7 +5477,7 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
 app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
-    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') SRV_DATE, a.SUP_CODE," +
+    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%Y') SRV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, a.INV_NO, a.INV_DATE" +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
