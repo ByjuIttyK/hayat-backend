@@ -9097,4 +9097,6 @@ app.use("/api", require("./routes/jvListApi")(connection));
   app.use("/api", authMiddleware, cusVarTraceRoutes(connection));
   //
      app.use("/api", require("./routes/partySnapshotRoutes")(connection));
-     
+//
+   const roleMgmtApi = require("./routes/roleMgmtApi");
+  app.use("/api", roleMgmtApi(connection)); 
