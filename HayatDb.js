@@ -5455,8 +5455,8 @@ app.get("/api/fpoitems/:fpoNo", function (req, res) {
 });
 app.get("/api/pinvfrgnlst/:dys", function (req, res) {
   connection.query(
-    "SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m%Y') PJV_DATE, " +
-    "a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m%Y') INV_DATE, a.SUP_CODE,b.SUP_NAME,  " +
+    "SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, " +
+    "a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE, a.SUP_CODE,b.SUP_NAME,  " +
     "a.DISCOUNT, a.RND_OFF, a.VAT_AMOUNT, a.INV_AMOUNT_FRGN , a.CURR_CODE, a.CONV_RATE " +
     " FROM pur_frgn_hdr a left outer join sup_mst b ON a.SUP_CODE = b.SUP_CODE " +
     "WHERE a.PJV_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.PJV_NO DESC",
@@ -5580,24 +5580,28 @@ app.get("/api/sivhdr/:siv", function (req, res) {
   );
 });
 
-app.get("/api/sivitems/:siv", function (req, res) {
-
-  console.log('SIV Items. ');
-
+app.get("/api/sivitems/:siv", (req, res) => {
   connection.execute(
-    "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m%y') SIV_DATE, a.LOC_CODE," +
-    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST " +
-    " from siv_items a Left outer join item_mst b on ( a.ITEM_CODE =b.ITEM_CODE) where   a.SIV_NO= ? ORDER by lpad(a.Sr_no ,3,'0')",
+    `SELECT a.SIV_NO,
+            DATE_FORMAT(h.SIV_DATE, '%d/%m/%Y')              AS SIV_DATE,
+            a.LOC_CODE,
+            a.ITEM_CODE,
+            i.ITEM_NAME1,
+            a.QTY,
+            a.SR_NO,
+            IFNULL(AVGCOST('01', a.ITEM_CODE, h.SIV_DATE), 0) AS STD_COST
+       FROM siv_items a
+       JOIN siv_hdr   h ON h.SIV_NO    = a.SIV_NO
+  LEFT JOIN item_mst  i ON i.ITEM_CODE = a.ITEM_CODE
+      WHERE a.SIV_NO = ?
+   ORDER BY CAST(a.SR_NO AS UNSIGNED)`,
     [req.params.siv],
-
-    function (err, result) {
+    (err, result) => {
       if (err) {
-        throw err;
-      } else {
-        console.log("Oracle SIVItems", result);
-        res.json(result);
-
+        console.error("sivitems error:", err);
+        return res.status(500).json({ error: err.sqlMessage || err.message });
       }
+      res.json(result);
     }
   );
 });
@@ -6087,7 +6091,7 @@ app.get("/api/salretreg", function (req, res) {
 app.get("/api/crntlst/:dys", function (req, res) {
 
   connection.query(
-    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " COALESCE(b.CUST_NAME,'Invalid Customer') AS CUST_NAME, a.NARRATION, a.DEBIT_AC,a.VAT_AMT,  a.AMOUNT" +
     " from crnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY  " +
@@ -6110,7 +6114,7 @@ app.get("/api/crntlst/:dys", function (req, res) {
 app.get("/api/crnotereg", function (req, res) {
 
   connection.query(
-    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.DEBIT_AC,a.VAT_AMT,  a.AMOUNT" +
     " from crnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE between ? and ? " +
@@ -6221,7 +6225,7 @@ app.get("/api/getDrawReg/:id", function (req, res) {
 app.get("/api/drntlst/:dys", function (req, res) {
 
   connection.query(
-    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.CREDIT_AC,  a.AMOUNT" +
     " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY  " +
@@ -6244,7 +6248,7 @@ app.get("/api/drntlst/:dys", function (req, res) {
 app.get("/api/drnotereg", function (req, res) {
 
   connection.query(
-    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE, a.CUST_CODE," +
+    "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.CREDIT_AC,  a.AMOUNT" +
     " from drnote_hdr a left outer join cus_mst b ON b.CUST_CODE = a.CUST_CODE" +
     " WHERE  a.VCHR_DATE between ? and ? " +
@@ -6293,7 +6297,7 @@ app.get("/api/ngpnet/:vch", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%Y-%m-%d') PRCH_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.AMOUNT, a.DISCOUNT,a.LPO_NO,a.INV_NO, a.INV_DATE,a.NARRATION  " +
-    " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  ", 
+    " from ngp_net a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PRCH_NO =?  ",
     [req.params.vch],
 
     function (err, result) {
@@ -6887,8 +6891,8 @@ app.get("/api/pretlst/:dys", function (req, res) {
 
 
   connection.query(
-    "select a.VCHR_NO, DATE_FORMAT(a.VCHR_DATE,'%d/%m%Y') VCHR_DATE," +
-    "a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m%Y') PJV_DATE, a.SUP_CODE," +
+    "select a.VCHR_NO, DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE," +
+    "a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_AMOUNT,  VAT_PERC,NARRATION ,DISCOUNT" +
     " from pret_hdr a left outer join sup_mst b ON  a.SUP_CODE = b.SUP_CODE " +
     " where  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY " +
@@ -7791,19 +7795,22 @@ app.get("/api/stkval/:reptp", async function (req, res) {
     res.status(500).json({ error: error.message });
   }
 });
+app.get("/api/stkledOp/:id/:stdt", (req, res) => {
+  const { id, stdt } = req.params;
 
-app.get("/api/stkledOp/:id/:stdt", function (req, res) {
-  console.log('stkledOp===>', req.params.id)
   connection.query(
-    "select  sum(qty) as OPBAL  " +
-    " FROM stock_trans WHERE ITEM_CODE= ? and  DOC_DATE < ?",
-    [req.params.id, req.params.stdt],
-
-    function (error, results) {
-      if (error) throw error;
-      res.json(results);
-
-      console.log(results);
+    `SELECT IFNULL(SUM(qty), 0)        AS OPBAL,
+            IFNULL(AVGCOST('01', ?, ?), 0) AS AVGCOST
+       FROM stock_trans
+      WHERE ITEM_CODE = ?
+        AND DOC_DATE  < ?`,
+    [id, stdt, id, stdt],
+    (error, results) => {
+      if (error) {
+        console.error("stkledOp error:", error);
+        return res.status(500).json({ error: error.sqlMessage || error.message });
+      }
+      res.json(results[0]);   // { OPBAL, AVGCOST }
     }
   );
 });
@@ -9082,21 +9089,24 @@ app.use("/api", salesVatRecon(connection));
 //
 app.use("/api", require("./routes/navAssistApi")(connection));
 //
- app.use("/api", require("./routes/customerCodeApi")(connection));
+app.use("/api", require("./routes/customerCodeApi")(connection));
 
- //
- app.use("/api", require("./routes/pvListApi")(connection));
+//
+app.use("/api", require("./routes/pvListApi")(connection));
 app.use("/api", require("./routes/rvListApi")(connection));
 app.use("/api", require("./routes/jvListApi")(connection));
 //
- app.use("/api", require("./routes/purVatRecon")(connection));
- //
- app.use("/api", authMiddleware, require("./routes/cusAgeingExtra")(connection));
- //
-  const cusVarTraceRoutes = require("./routes/cusVarTrace");
-  app.use("/api", authMiddleware, cusVarTraceRoutes(connection));
-  //
-     app.use("/api", require("./routes/partySnapshotRoutes")(connection));
+app.use("/api", require("./routes/purVatRecon")(connection));
 //
-   const roleMgmtApi = require("./routes/roleMgmtApi");
-  app.use("/api", roleMgmtApi(connection)); 
+app.use("/api", authMiddleware, require("./routes/cusAgeingExtra")(connection));
+//
+const cusVarTraceRoutes = require("./routes/cusVarTrace");
+app.use("/api", authMiddleware, cusVarTraceRoutes(connection));
+//
+app.use("/api", require("./routes/partySnapshotRoutes")(connection));
+//
+const roleMgmtApi = require("./routes/roleMgmtApi");
+app.use("/api", roleMgmtApi(connection));
+
+const sivStock = require("./routes/sivStock");
+app.use("/api", sivStock(connection));
