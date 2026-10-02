@@ -17,7 +17,7 @@ const express = require("express");
 const MODEL = process.env.NAV_ASSIST_MODEL || "gemini-3.8-flash";
 // Optional second model with its own quota, tried when the main one is busy
 // (e.g. a flash-lite model). Leave unset to skip.
-const FALLBACK_MODEL = process.env.NAV_ASSIST_FALLBACK_MODEL || "";
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "";
 const MAX_ITEMS = 800;
 const MAX_MATCHES = 5;
 const TIMEOUT_MS = 10000;   // per attempt

@@ -9110,3 +9110,5 @@ app.use("/api", roleMgmtApi(connection));
 
 const sivStock = require("./routes/sivStock");
 app.use("/api", sivStock(connection));
+
+ app.use("/api", require("./routes/pvScanApi")(connection));
