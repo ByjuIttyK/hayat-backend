@@ -1953,15 +1953,16 @@ app.post("/api/save-siv", async (req, res) => {
           // so netData.Amount is deliberately not written anywhere.
           const netQuery = `
   INSERT INTO siv_hdr
-    (SIV_NO, SIV_DATE, JOB_NO, PANEL_NO, CUST_CODE, NARRATION, SIV_TYPE)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+    (SIV_NO, SIV_DATE, JOB_NO, PANEL_NO, CUST_CODE, NARRATION, SIV_TYPE,TOTAL_COST)
+  VALUES (?, ?, ?, ?, ?, ?, ?,?)
   ON DUPLICATE KEY UPDATE
     SIV_DATE  = VALUES(SIV_DATE),
     JOB_NO    = VALUES(JOB_NO),
     PANEL_NO  = VALUES(PANEL_NO),
     CUST_CODE = VALUES(CUST_CODE),
     NARRATION = VALUES(NARRATION),
-    SIV_TYPE  = VALUES(SIV_TYPE)`;
+    SIV_TYPE  = VALUES(SIV_TYPE),
+    TOTAL_COST = VALUES(TOTAL_COST)`;
 
           // siv_hdr.SIV_TYPE is varchar(1): 'M' = Materials (panel-charged),
           // 'C' = Consumables (job-level, PANEL_NO null). Clamped to one char
@@ -1987,7 +1988,7 @@ app.post("/api/save-siv", async (req, res) => {
               netQuery,
               [
                 sivNo, netData.SivDt, netData.JobNo, panelNo,
-                custCode, netData.Narration, sivType
+                custCode, netData.Narration, sivType,netData.Amount
               ],
               (err, result) => {
                 if (err) return reject(err);
@@ -2104,22 +2105,23 @@ app.post("/api/save-srv", async (req, res) => {
         try {
           // ✅ Step 1: Insert/Update srv_hdr table
           const netQuery = `INSERT INTO srv_hdr (
-          SRV_NO,SRV_DATE,PO_NO,SUP_CODE,NARRATION,INV_NO,INV_DATE )
-                            VALUES ( ?, ?, ?, ?, ?, ?, ? )
+          SRV_NO,SRV_DATE,PO_NO,SUP_CODE,NARRATION,INV_NO,INV_DATE,INV_AMOUNT )
+                            VALUES ( ?, ?, ?, ?, ?, ?, ?,?)
           ON DUPLICATE KEY UPDATE
           SRV_DATE = VALUES(SRV_DATE),
           PO_NO = VALUES(PO_NO),
           SUP_CODE = VALUES(SUP_CODE),
           NARRATION = VALUES(NARRATION),
           INV_NO = VALUES(INV_NO),
-          INV_DATE = VALUES(INV_DATE)
+          INV_DATE = VALUES(INV_DATE),
+          INV_AMOUNT = VALUES(INV_AMOUNT)
         `;
           await new Promise((resolve, reject) => {
             conn.query(
               netQuery,
               [
                 netData.SrvNo, netData.SrvDt, netData.LpoNo, netData.SupCd,
-                netData.Narration, netData.SupInvNo, netData.InvDt
+                netData.Narration, netData.SupInvNo, netData.InvDt,netData.Amount
               ],
               (err, result) => {
                 if (err) {
@@ -5478,7 +5480,7 @@ app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%Y') SRV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, a.INV_NO, a.INV_DATE" +
+    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, a.INV_NO, a.INV_DATE, a.INV_AMOUNT " +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.SRV_NO DESC",
@@ -5543,8 +5545,10 @@ app.get("/api/sivlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y')  as SIV_DATE, a.COST_CODE," +
-    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO " +
-    " from siv_hdr a left outer join cus_mst b  ON (a.CUST_CODE = b.CUST_CODE) " +
+    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO ,a.TOTAL_COST" +
+    " from siv_hdr a "+
+    " left outer join job_card j on (a.job_no = j.job_no) "+
+   " left outer join cus_mst b  ON (j.CUST_CODE = b.CUST_CODE) " +
     " where   a.SIV_DATE  >= CURDATE() - INTERVAL ? DAY " +
     "  ORDER BY a.SIV_NO DESC",
     [req.params.dys],

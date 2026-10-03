@@ -9,12 +9,15 @@
 //
 // Endpoints
 //   GET  /api/pv-scan/next-run        -> { next_run }
+//   GET  /api/pv-scan/last-book       -> { book_no }  book no. of the last saved voucher ("" if none)
+//   GET  /api/pv-scan/books           -> one line per book: { book_no, n, amount, from_date, to_date, first_vchr, last_vchr }
 //   POST /api/pv-scan/read            body = image bytes (Content-Type: image/jpeg)
 //                                     -> { vchr_no, vchr_date, paid_to, being, amount, conf, notes, img_file }
 //   GET  /api/pv-scan/image/:file     -> the stored photo
 //   POST /api/pv-scan/save            { rows: [...], allowDuplicates } -> { saved: [{ key, run_no }] }
-//                                     409 { duplicates: [{ vchr_no, run_no }] } when a voucher no. is already saved
+//                                     409 { duplicates: [{ book_no, vchr_no, run_no }] } when book + voucher no. is already saved
 //   GET  /api/pv-scan/list?limit=200  -> saved rows, newest first
+//   GET  /api/pv-scan/list?book_no=12 -> all saved rows of that book, in running number order
 //   PATCH  /api/pv-scan/:runNo        { cr_acc } -> change who paid on a saved voucher
 //   DELETE /api/pv-scan/:runNo        -> delete one saved voucher (and its photo)
 
@@ -28,6 +31,9 @@ const IMG_NAME = /^pv_\d+_[0-9a-f]{8}\.jpg$/;
 
 // Partners who pay the expenses (credit account). Codes stored in pv_scan.cr_acc.
 const PARTNERS = ["ARUN", "REENI"];
+
+// Book No: trimmed, upper case, at most 6 characters (pv_scan.book_no VARCHAR(6))
+const cleanBook = (v) => String(v ?? "").trim().toUpperCase().slice(0, 6);
 
 const PROMPT = `You are reading a photo of ONE handwritten payment voucher from a printed voucher book.
 Layout: a printed company header at the top (ignore it). Below it on the left, "No." followed by a PRINTED
@@ -139,6 +145,34 @@ module.exports = function (connection) {
     }
   });
 
+  // Book No of the last saved voucher, so the screen can start with it
+  router.get("/pv-scan/last-book", async (req, res) => {
+    try {
+      const [r] = await db.query("SELECT book_no FROM pv_scan WHERE book_no <> '' ORDER BY run_no DESC LIMIT 1");
+      res.json({ book_no: r.length ? r[0].book_no : "" });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // One line per voucher book, latest book first
+  router.get("/pv-scan/books", async (req, res) => {
+    try {
+      const [rows] = await db.query(
+        `SELECT book_no, COUNT(*) AS n, SUM(amount) AS amount,
+                DATE_FORMAT(MIN(vchr_date), '%d/%m/%Y') AS from_date,
+                DATE_FORMAT(MAX(vchr_date), '%d/%m/%Y') AS to_date,
+                MIN(vchr_no) AS first_vchr, MAX(vchr_no) AS last_vchr
+           FROM pv_scan
+          GROUP BY book_no
+          ORDER BY MAX(run_no) DESC`
+      );
+      res.json(rows.map((r) => ({ ...r, n: Number(r.n), amount: Number(r.amount) })));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Raw image body, so the global express.json() size limit does not apply.
   router.post("/pv-scan/read", express.raw({ type: ["image/*"], limit: "15mb" }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(400).json({ error: "No image received" });
@@ -173,6 +207,7 @@ module.exports = function (connection) {
     const clean = rows.map((r, i) => {
       const row = {
         key: r.key,
+        book_no: cleanBook(r.book_no),
         vchr_no: String(r.vchr_no || "").trim(),
         vchr_date: toDbDate(r.vchr_date),
         paid_to: String(r.paid_to || "").trim().slice(0, 200),
@@ -186,7 +221,7 @@ module.exports = function (connection) {
           .join(",")
           .slice(0, 200) || null,
       };
-      if (!row.vchr_no || !row.vchr_date || !row.paid_to || !row.amount || !PARTNERS.includes(row.cr_acc)) bad.push(i + 1);
+      if (!row.book_no || !row.vchr_no || !row.vchr_date || !row.paid_to || !row.amount || !PARTNERS.includes(row.cr_acc)) bad.push(i + 1);
       return row;
     });
     if (bad.length) return res.status(400).json({ error: `Row(s) ${bad.join(", ")} are incomplete` });
@@ -197,10 +232,11 @@ module.exports = function (connection) {
       conn = await db.getConnection();
       await conn.beginTransaction();
 
+      // Duplicate = same book and same voucher number already saved
       if (!req.body.allowDuplicates) {
         const [dups] = await conn.query(
-          "SELECT vchr_no, run_no FROM pv_scan WHERE vchr_no IN (?) ORDER BY run_no",
-          [clean.map((r) => r.vchr_no)]
+          "SELECT book_no, vchr_no, run_no FROM pv_scan WHERE (book_no, vchr_no) IN (?) ORDER BY run_no",
+          [clean.map((r) => [r.book_no, r.vchr_no])]
         );
         if (dups.length) {
           await conn.rollback();
@@ -214,9 +250,9 @@ module.exports = function (connection) {
       for (const r of clean) {
         run += 1;
         await conn.query(
-          `INSERT INTO pv_scan (run_no, vchr_no, vchr_date, paid_to, being, amount, cr_acc, img_file, ai_conf, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [run, r.vchr_no, r.vchr_date, r.paid_to, r.being, r.amount, r.cr_acc, r.img_file, r.ai_conf, user]
+          `INSERT INTO pv_scan (run_no, book_no, vchr_no, vchr_date, paid_to, being, amount, cr_acc, img_file, ai_conf, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [run, r.book_no, r.vchr_no, r.vchr_date, r.paid_to, r.being, r.amount, r.cr_acc, r.img_file, r.ai_conf, user]
         );
         saved.push({ key: r.key, run_no: run });
       }
@@ -259,15 +295,19 @@ module.exports = function (connection) {
     }
   });
 
+  // Saved rows: latest N of all books, or every row of one book (?book_no=)
   router.get("/pv-scan/list", async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-      const [rows] = await db.query(
-        `SELECT run_no, vchr_no, DATE_FORMAT(vchr_date, '%d/%m/%Y') AS vchr_date, paid_to, being,
-                amount, cr_acc, img_file, ai_conf, created_by
-           FROM pv_scan ORDER BY run_no DESC LIMIT ?`,
-        [limit]
-      );
+      const book = cleanBook(req.query.book_no);
+      const cols = `run_no, book_no, vchr_no, DATE_FORMAT(vchr_date, '%d/%m/%Y') AS vchr_date, paid_to, being,
+                    amount, cr_acc, img_file, ai_conf, created_by`;
+      let rows;
+      if (book) {
+        [rows] = await db.query(`SELECT ${cols} FROM pv_scan WHERE book_no = ? ORDER BY run_no LIMIT 5000`, [book]);
+      } else {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
+        [rows] = await db.query(`SELECT ${cols} FROM pv_scan ORDER BY run_no DESC LIMIT ?`, [limit]);
+      }
       res.json(rows);
     } catch (e) {
       res.status(500).json({ error: e.message });
