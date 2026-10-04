@@ -1988,7 +1988,7 @@ app.post("/api/save-siv", async (req, res) => {
               netQuery,
               [
                 sivNo, netData.SivDt, netData.JobNo, panelNo,
-                custCode, netData.Narration, sivType,netData.Amount
+                custCode, netData.Narration, sivType, netData.Amount
               ],
               (err, result) => {
                 if (err) return reject(err);
@@ -2121,7 +2121,7 @@ app.post("/api/save-srv", async (req, res) => {
               netQuery,
               [
                 netData.SrvNo, netData.SrvDt, netData.LpoNo, netData.SupCd,
-                netData.Narration, netData.SupInvNo, netData.InvDt,netData.Amount
+                netData.Narration, netData.SupInvNo, netData.InvDt, netData.Amount
               ],
               (err, result) => {
                 if (err) {
@@ -5546,9 +5546,9 @@ app.get("/api/sivlst/:dys", function (req, res) {
   connection.query(
     "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y')  as SIV_DATE, a.COST_CODE," +
     " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO ,a.TOTAL_COST" +
-    " from siv_hdr a "+
-    " left outer join job_card j on (a.job_no = j.job_no) "+
-   " left outer join cus_mst b  ON (j.CUST_CODE = b.CUST_CODE) " +
+    " from siv_hdr a " +
+    " left outer join job_card j on (a.job_no = j.job_no) " +
+    " left outer join cus_mst b  ON (j.CUST_CODE = b.CUST_CODE) " +
     " where   a.SIV_DATE  >= CURDATE() - INTERVAL ? DAY " +
     "  ORDER BY a.SIV_NO DESC",
     [req.params.dys],
@@ -9115,4 +9115,8 @@ app.use("/api", roleMgmtApi(connection));
 const sivStock = require("./routes/sivStock");
 app.use("/api", sivStock(connection));
 
- app.use("/api", require("./routes/pvScanApi")(connection));
+app.use("/api", require("./routes/pvScanApi")(connection));
+
+app.use("/api", authMiddleware, require("./routes/supPayAnalysis")(connection));
+//
+app.use("/api", authMiddleware, require("./routes/cusRcptAnalysis")(connection));
