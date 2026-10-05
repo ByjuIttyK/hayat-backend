@@ -9123,3 +9123,6 @@ app.use("/api", authMiddleware, require("./routes/cusRcptAnalysis")(connection))
 //
 const pcashApi = require("./routes/pcashApi");
 app.use("/api", pcashApi(connection));
+//
+const pdcRcdApi = require("./routes/pdcRcdApi");
+app.use("/api", pdcRcdApi(connection));
