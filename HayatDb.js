@@ -9128,4 +9128,7 @@ const pdcRcdApi = require("./routes/pdcRcdApi");
 app.use("/api", pdcRcdApi(connection));
 
 const pdcIsuApi = require("./routes/pdcIsuApi");
-  app.use("/api", pdcIsuApi(connection));
+app.use("/api", pdcIsuApi(connection));
+//
+const pdcIsuJvLinesRoutes = require("./routes/pdcIsuJvLinesRoutes");
+app.use("/api/pdc-isu-reversal", pdcIsuJvLinesRoutes(connection));

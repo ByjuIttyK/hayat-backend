@@ -4,16 +4,20 @@
    stamped on pdc_isu.BATCH_NO by the /save route in pdcIsuReversalRoutes.js.
 
    Shares the /api/pdc-isu-reversal prefix with that file; Express runs both
-   routers, so nothing there has to change. Register in HayatDb.js:
+   routers, so nothing there has to change. Register in HayatDb.js next to
+   pdcIsuReversalRoutes:
 
      const pdcIsuJvLinesRoutes = require("./routes/pdcIsuJvLinesRoutes");
-     app.use("/api", pdcIsuJvLinesRoutes(connection));
+     app.use("/api/pdc-isu-reversal", pdcIsuJvLinesRoutes(connection));
 
-   GET  /pdc-isu-reversal/jv-batches   ?from&to&batchNo
-   GET  /pdc-isu-reversal/jv-cheques   ?batchNo
-   GET  /pdc-isu-reversal/jv-lines     ?batchNo
-   GET  /pdc-isu-reversal/acc-name     ?code
-   PUT  /pdc-isu-reversal/jv-lines     { batchNo, lines: [...] }              */
+   GET  /api/pdc-isu-reversal/jv-batches   ?from&to&batchNo
+   GET  /api/pdc-isu-reversal/jv-cheques   ?batchNo
+   GET  /api/pdc-isu-reversal/jv-lines     ?batchNo
+   GET  /api/pdc-isu-reversal/acc-name     ?code
+   PUT  /api/pdc-isu-reversal/jv-lines     { batchNo, lines: [...] }
+
+   A JV date change is written to tran_acc, the vouchers header and the
+   pdc_isu row's JV_DATE_RLZ, so Batch Lookup and the register follow it.              */
 
 const express = require("express");
 
@@ -24,11 +28,15 @@ module.exports = function (connection) {
   // Callback pool → promise API (mysql2).
   const pool = typeof connection.promise === "function" ? connection.promise() : connection;
 
+  // Answer under either mount — app.use("/api/pdc-isu-reversal", …) like
+  // pdcIsuReversalRoutes.js, or app.use("/api", …).
+  const at = (name) => [`/${name}`, `/pdc-isu-reversal/${name}`];
+
   const isIso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s ?? ""));
   const cents = (n) => Math.round((Number(n) || 0) * 100);
 
   /* ── batches in a period ── */
-  router.get("/pdc-isu-reversal/jv-batches", async (req, res) => {
+  router.get(at("jv-batches"), async (req, res) => {
     try {
       const { from, to, batchNo } = req.query;
       const where = ["t.TRAN_TYPE = ?", "t.REF_NO LIKE 'PIR%'"];
@@ -63,28 +71,26 @@ module.exports = function (connection) {
   });
 
   /* ── the cheques behind a batch (pdc_isu) ── */
-  router.get("/pdc-isu-reversal/jv-cheques", async (req, res) => {
+  router.get(at("jv-cheques"), async (req, res) => {
     const batchNo = String(req.query.batchNo || "").trim();
     if (!batchNo) return res.status(400).json({ message: "batchNo is required" });
     try {
-      // ASSUMPTION: pdc_isu carries the supplier in SUP_CODE and the reversal
-      // JV in JV_NO_RLZ, like pdc_rcd does for the customer. Adjust the two
-      // column names here if pdc_isu names them differently.
+      // CHQ_BANK is an acc_mst code; the supplier is SUP_CODE → sup_mst.
       const [rows] = await pool.query(
         `SELECT p.VCHR_NO,
                 p.CHQ_NO,
                 DATE_FORMAT(p.CHQ_DATE, '%Y-%m-%d') AS CHQ_DATE,
                 p.CHQ_BANK,
                 b.AC_HEAD                           AS BANK_HEAD,
-                s.AC_HEAD                           AS PARTY,
+                s.SUP_NAME                          AS PARTY,
                 p.AMOUNT,
                 p.JV_NO_RLZ
            FROM pdc_isu p
            LEFT JOIN ac_list b ON b.AC_CODE = p.CHQ_BANK
-           LEFT JOIN ac_list s ON s.AC_CODE = p.SUP_CODE
-          WHERE p.BATCH_NO = ?
+           LEFT JOIN sup_mst s ON s.SUP_CODE = p.SUP_CODE
+          WHERE p.BATCH_NO = ? AND p.JV_TYPE = ?
           ORDER BY p.JV_NO_RLZ, p.CHQ_NO`,
-        [batchNo]
+        [batchNo, TRAN_TYPE]
       );
       res.json(rows);
     } catch (err) {
@@ -94,7 +100,7 @@ module.exports = function (connection) {
   });
 
   /* ── tran_acc lines of every JV in a batch ── */
-  router.get("/pdc-isu-reversal/jv-lines", async (req, res) => {
+  router.get(at("jv-lines"), async (req, res) => {
     const batchNo = String(req.query.batchNo || "").trim();
     if (!batchNo) return res.status(400).json({ message: "batchNo is required" });
     try {
@@ -124,7 +130,7 @@ module.exports = function (connection) {
   });
 
   /* ── account head for a typed / LOV-picked code ── */
-  router.get("/pdc-isu-reversal/acc-name", async (req, res) => {
+  router.get(at("acc-name"), async (req, res) => {
     const code = String(req.query.code || "").trim();
     if (!code) return res.status(400).json({ message: "code is required" });
     try {
@@ -146,7 +152,7 @@ module.exports = function (connection) {
        • each JV must balance, every amount > 0, Dr/Cr D or C, date valid
        • every A/c code must exist in ac_list
      All in one transaction — any failure leaves tran_acc untouched.        */
-  router.put("/pdc-isu-reversal/jv-lines", async (req, res) => {
+  router.put(at("jv-lines"), async (req, res) => {
     const batchNo = String(req.body?.batchNo || "").trim();
     const lines = Array.isArray(req.body?.lines) ? req.body.lines : [];
     if (!batchNo || !lines.length) {
@@ -236,6 +242,22 @@ module.exports = function (connection) {
           ]
         );
         updated += r.changedRows || 0;
+      }
+
+      // A JV's date also lives on its voucher header (Batch Lookup and the
+      // register read it from there) and on the pdc_isu row it closed.
+      for (const [v, e] of byJv) {
+        const d = [...e.dates][0];
+        await conn.query(
+          `UPDATE vouchers SET DATTE = ?
+            WHERE TRAN_TYPE = ? AND VCHR_NO = ? AND REF_NO = ?`,
+          [d, TRAN_TYPE, v, batchNo]
+        );
+        await conn.query(
+          `UPDATE pdc_isu SET JV_DATE_RLZ = ?
+            WHERE BATCH_NO = ? AND JV_TYPE = ? AND JV_NO_RLZ = ?`,
+          [d, batchNo, TRAN_TYPE, v]
+        );
       }
 
       await conn.commit();
