@@ -8578,7 +8578,7 @@ app.get("/api/pdcrcdlst/:dys", function (req, res) {
   connection.query(
     "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, CUST_CODE, " +
-    "CHQ_BANK, AMOUNT,  NARRATION " +
+    "CHQ_BANK, AMOUNT,  NARRATION ,JV_NO_RLZ,JV_DATE_RLZ, REALISED " +
     "FROM pdc_rcd  where  chq_date >= CURDATE() - INTERVAL ? DAY ORDER BY CHQ_DATE",
     [req.params.dys],
     function (err, result) {
@@ -8615,7 +8615,7 @@ app.get("/api/pdcisulst/:dys", function (req, res) {
   connection.query(
     "select TRAN_TYPE,VCHR_NO,DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, CHQ_NO, " +
     " DATE_FORMAT(CHQ_DATE,'%d/%m/%Y') CHQ_DATE, PDC_CODE, SUP_CODE, " +
-    "CHQ_BANK, AMOUNT,  NARRATION " +
+    "CHQ_BANK, AMOUNT,  NARRATION, JV_NO_RLZ,JV_DATE_RLZ, REALISED " +
     "FROM pdc_isu ORDER BY CHQ_DATE",
 
     function (err, result) {
@@ -9126,3 +9126,6 @@ app.use("/api", pcashApi(connection));
 //
 const pdcRcdApi = require("./routes/pdcRcdApi");
 app.use("/api", pdcRcdApi(connection));
+
+const pdcIsuApi = require("./routes/pdcIsuApi");
+  app.use("/api", pdcIsuApi(connection));
