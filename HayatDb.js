@@ -8539,7 +8539,7 @@ app.get('/api/JobLeddsp/:jobNo/:stdt/:enddt', function (req, res) {
 app.get("/api/pcashlst/:id", function (req, res) {
   console.log('Petty cash ');
   connection.query(
-    "SELECT VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, PAY_VCHR_NO, PAY_VCHR_DATE, " +
+    "SELECT VCHR_NO, DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, BATCH_NO, BATCH_SR, PAY_VCHR_NO, PAY_VCHR_DATE, " +
     "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION FROM pcashexp_hdr  order by vchr_no desc",
     function (error, result) {
       if (error) {
@@ -9120,3 +9120,6 @@ app.use("/api", require("./routes/pvScanApi")(connection));
 app.use("/api", authMiddleware, require("./routes/supPayAnalysis")(connection));
 //
 app.use("/api", authMiddleware, require("./routes/cusRcptAnalysis")(connection));
+//
+const pcashApi = require("./routes/pcashApi");
+app.use("/api", pcashApi(connection));
