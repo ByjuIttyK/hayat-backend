@@ -9132,3 +9132,6 @@ app.use("/api", pdcIsuApi(connection));
 //
 const pdcIsuJvLinesRoutes = require("./routes/pdcIsuJvLinesRoutes");
 app.use("/api/pdc-isu-reversal", pdcIsuJvLinesRoutes(connection));
+// 
+const accTxnAnalysis = require("./routes/accTxnAnalysis");
+app.use("/api", accTxnAnalysis(connection));
