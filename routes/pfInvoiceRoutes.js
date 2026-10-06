@@ -82,7 +82,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await db.query(
         `SELECT CUST_CODE, CUST_NAME, CONTACT_PR AS CONTACT_PER
-           FROM cus_mst ORDER BY CUST_NAME LIMIT 1000`
+           FROM cus_mst ORDER BY CUST_NAME `
       );
       res.json(rows);
     } catch (err) {
