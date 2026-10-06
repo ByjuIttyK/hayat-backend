@@ -7818,23 +7818,36 @@ app.get("/api/stkledOp/:id/:stdt", (req, res) => {
     }
   );
 });
-
 app.get("/api/stkled/:id/:stdt/:enddt", function (req, res) {
-
   connection.query(
-    "select  DOC_NO, DATE_FORMAT(DOC_DATE,'%d/%m/%Y') AS DOC_DATE,LOC_CODE, ITEM_CODE, " +
-    " JOB_NO, STD_COST,STOCK_TRAN_TYPE,SUP_CODE,NARRATION,SORT_ORD ," +
-    " CASE WHEN QTY>0 THEN QTY ELSE 0 END  AS QTY_IN ," +
-    " CASE WHEN QTY<=0 THEN QTY ELSE 0 END  AS QTY_OUT ," +
-    " CASE WHEN QTY<=0 THEN AVGCOST(LOC_CODE,ITEM_CODE,DOC_DATE)  ELSE STD_COST END  AS STD_COST " +
-    " FROM stock_trans WHERE ITEM_CODE= ? AND DOC_DATE BETWEEN ? AND ? ORDER BY date_format(DOC_DATE,'%Y/%m/%d') , SORT_ORD",
+    `SELECT s.DOC_NO,
+            DATE_FORMAT(s.DOC_DATE, '%d/%m/%Y') AS DOC_DATE,
+            s.LOC_CODE, s.ITEM_CODE, s.JOB_NO,
+            s.STOCK_TRAN_TYPE, s.SUP_CODE,
+            COALESCE(NULLIF(TRIM(s.SUP_CODE), ''), jc.CUST_CODE, '') AS PARTY_CODE,
+            COALESCE(sm.SUP_NAME, cm.CUST_NAME, jcm.CUST_NAME, '')   AS PARTY_NAME,
+            s.NARRATION, s.SORT_ORD,
+            CASE WHEN s.QTY >  0 THEN s.QTY ELSE 0 END AS QTY_IN,
+            CASE WHEN s.QTY <= 0 THEN s.QTY ELSE 0 END AS QTY_OUT,
+            CASE WHEN s.QTY <= 0 THEN AVGCOST(s.LOC_CODE, s.ITEM_CODE, s.DOC_DATE)
+                 ELSE s.STD_COST END AS STD_COST
+       FROM stock_trans s
+       LEFT JOIN sup_mst sm  ON sm.SUP_CODE   = s.SUP_CODE
+       LEFT JOIN cus_mst cm  ON cm.CUST_CODE  = s.SUP_CODE
+       -- Store issues: no party on the document, so take the job's customer
+       LEFT JOIN job_card jc ON jc.JOB_NO     = s.JOB_NO
+                            AND NULLIF(TRIM(s.SUP_CODE), '') IS NULL
+       LEFT JOIN cus_mst jcm ON jcm.CUST_CODE = jc.CUST_CODE
+      WHERE s.ITEM_CODE = ?
+        AND s.DOC_DATE BETWEEN ? AND ?
+      ORDER BY s.DOC_DATE, s.SORT_ORD`,
     [req.params.id, req.params.stdt, req.params.enddt],
-
     function (error, results) {
-      if (error) throw error;
+      if (error) {
+        console.error("stkled error:", error);
+        return res.status(500).json({ error: error.sqlMessage || error.message });
+      }
       res.json(results);
-
-      console.log(results);
     }
   );
 });
