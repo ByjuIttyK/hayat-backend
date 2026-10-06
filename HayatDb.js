@@ -8318,12 +8318,16 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   console.log('Leddsp', acCode, stDt, endDt);
 
   connection.query(
-    "SELECT a.SR_NO, a.TRAN_TYPE,t.TYPE_ABBR, a.VCHR_NO, " +
-    " DATE_FORMAT(a.DATTE,'%d/%m/%Y') DATTE, a.JOB_NO, a.NARRATION1, a.NARRATION2, " +
+    "SELECT a.SR_NO, a.TRAN_TYPE, t.TYPE_ABBR, a.VCHR_NO, " +
+    " DATE_FORMAT(a.DATTE,'%d/%m/%Y') DATTE, a.JOB_NO, jc.PROJ_NAME, " +
+    " a.NARRATION1, a.NARRATION2, " +
     " CASE WHEN a.db_cr='D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     " CASE WHEN a.db_cr='C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc a " +
     " LEFT JOIN tran_type t ON a.TRAN_TYPE = t.TRAN_TYPE " +
+    // LEFT JOIN: lines with no job (or a job not in job_card) must stay,
+    // otherwise the running balance would skip them.
+    " LEFT JOIN job_card jc ON jc.JOB_NO = a.JOB_NO " +
     " WHERE a.ACC_CODE = ? AND a.DATTE BETWEEN ? AND ? " +
     " ORDER BY DATE_FORMAT(a.DATTE,'%Y/%m/%d'), a.TRAN_TYPE, a.VCHR_NO ",
     [acCode, stDt, endDt],
@@ -8337,7 +8341,6 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
     }
   );
 });
-
 app.get('/api/Tbal/:dt', function (req, res) {
   console.log('Tbal query =', req.query); // Should log: { RegType: 'TBAL', endDate: '2025-06-13' }
 
@@ -9148,3 +9151,6 @@ app.use("/api/pdc-isu-reversal", pdcIsuJvLinesRoutes(connection));
 // 
 const accTxnAnalysis = require("./routes/accTxnAnalysis");
 app.use("/api", accTxnAnalysis(connection));
+//
+  const docModuleApi = require("./routes/docModuleApi");
+ app.use("/api", docModuleApi(connection));
