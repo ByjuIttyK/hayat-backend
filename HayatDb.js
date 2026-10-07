@@ -9154,3 +9154,6 @@ app.use("/api", accTxnAnalysis(connection));
 //
   const docModuleApi = require("./routes/docModuleApi");
  app.use("/api", docModuleApi(connection));
+ //
+    const jobFinance = require('./routes/jobFinance');
+  app.use('/api', jobFinance(connection));

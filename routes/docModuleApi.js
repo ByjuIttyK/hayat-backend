@@ -68,28 +68,29 @@ module.exports = function (connection) {
       res.status(500).json({ error: err.message });
     }
   });
-router.post('/docs/counts-by-ref', function (req, res) {
-  const moduleCode = String(req.body?.moduleCode || '').trim();
-  const refNos = Array.isArray(req.body?.refNos)
-    ? [...new Set(req.body.refNos.map((r) => String(r).trim()).filter(Boolean))]
-    : [];
-  if (!moduleCode || refNos.length === 0) return res.json([]);
 
-  connection.query(
-    "SELECT REF_NO, COUNT(*) AS CNT " +
-    "  FROM doc_attachments " +
-    " WHERE MODULE = ? AND REF_NO IN (?) " +
-    " GROUP BY REF_NO",
-    [moduleCode, refNos],
-    function (error, result) {
-      if (error) {
-        console.error('counts-by-ref error:', error);
-        return res.status(500).json({ error: error.message });
+    router.post('/docs/counts-by-ref', function (req, res) {
+    const moduleCode = String(req.body?.moduleCode || '').trim();
+    const refNos = Array.isArray(req.body?.refNos)
+      ? [...new Set(req.body.refNos.map((r) => String(r).trim()).filter(Boolean))]
+      : [];
+    if (!moduleCode || refNos.length === 0) return res.json([]);
+
+    connection.query(
+      "SELECT REF_NO, COUNT(*) AS CNT, MIN(ID) AS FIRST_ID, " +
+      "       SUBSTRING_INDEX(GROUP_CONCAT(FILE_NAME ORDER BY ID SEPARATOR '|'), '|', 10) AS FILES " +
+      "  FROM doc_attachments " +
+      " WHERE MODULE = ? AND REF_NO IN (?) " +
+      " GROUP BY REF_NO",
+      [moduleCode, refNos],
+      function (error, result) {
+        if (error) {
+          console.error('counts-by-ref error:', error);
+          return res.status(500).json({ error: error.message });
+        }
+        res.json(result);
       }
-      res.json(result);
-    }
-  );
-});
-
+    );
+  });
   return router;
 };
