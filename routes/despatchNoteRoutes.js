@@ -6,7 +6,8 @@ const COMPANY = require("../config/company");
  * Endpoint:
  *   GET /api/despatch-note/:jobNumber
  *
- * Generates an A4 PDF with 2 despatch note sections per page.
+ * Generates an A4 LANDSCAPE PDF — one despatch note per page, filling the
+ * full printable area (one page per panel).
  * Each section matches the Oracle report layout:
  *   - Company header
  *   - FROM field
@@ -85,71 +86,36 @@ module.exports = function (connection) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PDF BUILDER
-// A4 portrait: 595.28 × 841.89 pt
-// Two despatch note sections per page, stacked vertically.
-// Each section = half the page height minus a small gutter.
+// A4 landscape: 841.89 × 595.28 pt
+// One despatch note per page, stretched edge-to-edge inside equal margins.
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildDespatchPdf(job, panels, theme = 'white') {
-  const PAGE_W  = 595.28;
-  const PAGE_H  = 841.89;
-  const MARGIN  = 28;           // page margin (pt)
-  const GUTTER  = 14;           // gap between the two sections
-  const SECT_H  = (PAGE_H - MARGIN * 2 - GUTTER) / 2;  // height of one note
-  const SECT_W  = PAGE_W - MARGIN * 2;
+  const PAGE_W = 841.89;
+  const PAGE_H = 595.28;
+  const MARGIN = 24;
+  const SECT_W = PAGE_W - MARGIN * 2;
+  const SECT_H = PAGE_H - MARGIN * 2;
 
   const doc = new PDFDocument({
     size: 'A4',
-    layout: 'portrait',
-    margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
-    autoFirstPage: true,
+    layout: 'landscape',
+    margins: { top: 0, bottom: 0, left: 0, right: 0 },   // we position everything ourselves
+    autoFirstPage: false,
     info: { Title: `Despatch Note — Job ${job.job_no || job.JOB_NO || ''}` },
   });
 
-  // ── Draw two panels per page ──────────────────────────────────────────────
-  panels.forEach((panel, idx) => {
-    if (idx > 0 && idx % 2 === 0) {
-      doc.addPage();
-    }
-    const slotIndex = idx % 2;          // 0 = top half, 1 = bottom half
-    const originY   = MARGIN + slotIndex * (SECT_H + GUTTER);
-
-    drawDespatchNote(doc, job, panel, MARGIN, originY, SECT_W, SECT_H, theme);
-
-    // Dashed divider between the two sections on same page
-    if (slotIndex === 0 && idx + 1 < panels.length) {
-      const divY = MARGIN + SECT_H + GUTTER / 2;
-      doc.save()
-         .dash(4, { space: 4 })
-         .moveTo(MARGIN, divY)
-         .lineTo(MARGIN + SECT_W, divY)
-         .lineWidth(0.5)
-         .strokeColor('#AAAAAA')
-         .stroke()
-         .undash()
-         .restore();
-    }
+  panels.forEach((panel) => {
+    doc.addPage({ size: 'A4', layout: 'landscape', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
+    drawDespatchNote(doc, job, panel, MARGIN, MARGIN, SECT_W, SECT_H, theme);
   });
-
-  // Odd panel count — second slot on last page intentionally left blank (no frame)
 
   doc.end();
   return doc;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Draw one despatch note section
-//   x, y = top-left origin of the section
-//   w, h = width and height of the section
-// ─────────────────────────────────────────────────────────────────────────────
-
-
 // ─── Theme palettes ───────────────────────────────────────────────────────────
 const THEMES = {
-  white: {
-    ACCENT : '#000000', RULE   : '#000000', TITLE  : '#000000',
-    HDR_BG : '#FFFFFF', LABEL_BG: '#FFFFFF', PANEL_TINT: '#FFFFFF',
-  },
   white: {
     ACCENT : '#000000', RULE   : '#000000', TITLE  : '#000000',
     HDR_BG : '#FFFFFF', LABEL_BG: '#FFFFFF', PANEL_TINT: '#FFFFFF',
@@ -177,6 +143,11 @@ const THEMES = {
 };
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw one despatch note filling the box (x, y, w, h).
+// Everything is sized from w/h so the note is fully justified on the page.
+// ─────────────────────────────────────────────────────────────────────────────
 function drawDespatchNote(doc, job, panel, x, y, w, h, theme = 'white') {
   const g = (obj, ...keys) => {
     if (!obj) return '---';
@@ -192,137 +163,139 @@ function drawDespatchNote(doc, job, panel, x, y, w, h, theme = 'white') {
   const project  = g(job,   'PROJ_NAME','proj_name','PROJECT','project','PROJ_NO','proj_no');
   const panelRef = g(panel, 'PANEL_REF','panel_ref','PANEL_DESCRIPTION','panel_description','PANEL_TAG','panel_tag');
 
-  // ── Design tokens — resolved from chosen theme ────────────────────────────
-  const NAVY     = '#0D1B2A';              // outer border + text — always navy
-  const LABEL_FG = '#1B3A5C';             // label text — always dark blue
-  const BORDER   = 1.8;
-  const THIN     = 0.5;
-  const PAD      = 10;
-  const pal       = THEMES[theme] || THEMES['amber-red'];
-  const ACCENT    = pal.ACCENT;            // top stripe colour
-  const LABEL_BG  = pal.LABEL_BG;         // label column background
-  const HDR_BG    = pal.HDR_BG;           // header background
-  const RULE_COL  = pal.RULE;             // accent rule lines
-  const TITLE_COL = pal.TITLE;            // DESPATCH PARTICULARS text
-  const PANEL_TINT= pal.PANEL_TINT;       // PANEL REF value cell tint
+  // ── Design tokens ─────────────────────────────────────────────────────────
+  // All text, frame and arrows in pure black — printed on a B&W printer
+  const NAVY     = '#000000';
+  const LABEL_FG = '#000000';
+  const TEXT     = '#000000';
+  const LINE     = '#BBBBBB';
+  const BORDER   = 2;
+  const THIN     = 0.6;
+  const PAD      = 16;
+  const pal        = THEMES[theme] || THEMES.white;
+  const ACCENT     = pal.ACCENT;
+  const LABEL_BG   = pal.LABEL_BG;
+  const HDR_BG     = pal.HDR_BG;
+  const RULE_COL   = pal.RULE;
+  const TITLE_COL  = TEXT;          // was pal.TITLE — forced black for B&W printing
+  const PANEL_TINT = pal.PANEL_TINT;
 
-  // ── Integer section heights — keeps ALL horizontal lines pixel-sharp ───────
-  const hdrH     = Math.round(h * 0.285);
-  const fromH    = Math.round(h * 0.095);
-  const detLineH = Math.round(h * 0.095);  // each of 3 detail rows
-  const detailH  = detLineH * 3;
-  const careH    = h - hdrH - fromH - detailH;  // remainder — no rounding error
+  // Shrink a font until the single-line text fits the width
+  const fitSize = (text, font, size, maxW, min = 8) => {
+    doc.font(font);
+    let s = size;
+    while (s > min && doc.fontSize(s).widthOfString(text) > maxW) s -= 0.5;
+    return s;
+  };
+  // Text vertically centred in a row. Shrinks to fit one line; if it would
+  // drop below `minOne`, wraps onto two lines instead (long panel refs).
+  const cellText = (text, font, size, color, tx, rowY, rowH, tw, align = 'left', minOne = 8) => {
+    const s = fitSize(text, font, size, tw, minOne);
+    doc.font(font).fontSize(s).fillColor(color);
+    if (doc.widthOfString(text) <= tw) {
+      doc.text(text, tx, rowY + (rowH - s * 0.72) / 2, { width: tw, align, lineBreak: false });
+    } else {
+      const s2 = Math.min(s, (rowH - 8) / 2.3);
+      doc.fontSize(s2);
+      const th = doc.heightOfString(text, { width: tw, lineGap: 1 });
+      doc.text(text, tx, rowY + (rowH - th) / 2 + 1, { width: tw, align, lineGap: 1, height: rowH - 4, ellipsis: true });
+    }
+  };
 
-  // Outer border
-  doc.save().rect(x, y, w, h).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
+  // ── Section heights (integers keep lines crisp) ───────────────────────────
+  const hdrH  = Math.round(h * 0.22);
+  const rowH  = Math.round(h * 0.095);          // FROM, JOB NO, PROJECT, PANEL REF
+  const rowsH = rowH * 4;
+  const careH = h - hdrH - rowsH;               // remainder
+  const LBL_W = Math.round(w * 0.17);           // label column
 
-  let cy = Math.round(y);
 
   // ── 1. HEADER ─────────────────────────────────────────────────────────────
-  const hdrY = cy; cy += hdrH;
-
-  doc.save().rect(x, hdrY, w, hdrH).fill(HDR_BG).restore();
-  // Decorative stripes — skipped for pure white theme
+  const hdrY = Math.round(y);
+  // No background fill on the header (saves toner)
   if (theme !== 'white') {
-    doc.save().rect(x, hdrY, w, 4).fill(NAVY).restore();
-    doc.save().rect(x, hdrY + 4, w, 2.5).fill(ACCENT).restore();
+    doc.save().rect(x, hdrY, w, 5).fill(NAVY).restore();
+    doc.save().rect(x, hdrY + 5, w, 3).fill(ACCENT).restore();
   }
-  // Bottom border (exact integer y)
-  doc.save().moveTo(x, cy).lineTo(x + w, cy).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
+  // Company name — fills the full width
+  cellText(COMPANY.NAME, 'Helvetica-Bold', 28, NAVY, x + PAD, hdrY + hdrH * 0.06, hdrH * 0.34, w - PAD * 2, 'center');
 
-  doc.font('Helvetica-Bold').fontSize(17).fillColor(NAVY);
-  doc.text(COMPANY.NAME, x, hdrY + 14, { width: w, align: 'center' });
-
-  const acX = x + w * 0.12, acW = w * 0.76;
-  doc.save().moveTo(acX, hdrY + hdrH * 0.43).lineTo(acX + acW, hdrY + hdrH * 0.43)
+  const rX = x + PAD * 2, rW = w - PAD * 4;
+  doc.save().moveTo(rX, hdrY + hdrH * 0.44).lineTo(rX + rW, hdrY + hdrH * 0.44)
      .lineWidth(1.2).strokeColor(RULE_COL).stroke().restore();
-
-  doc.font('Helvetica').fontSize(9).fillColor('#555');
-  doc.text(`${COMPANY.CITY_UPPER}     Tel: ${COMPANY.TEL}     ${COMPANY.WEB}`,
-    x, hdrY + hdrH * 0.47, { width: w, align: 'center' });
-
-  doc.save().moveTo(acX, hdrY + hdrH * 0.66).lineTo(acX + acW, hdrY + hdrH * 0.66)
+  cellText(`${COMPANY.CITY_UPPER}        Tel: ${COMPANY.TEL}        ${COMPANY.WEB}`,
+    'Helvetica', 12, TEXT, x + PAD, hdrY + hdrH * 0.44, hdrH * 0.20, w - PAD * 2, 'center');
+  doc.save().moveTo(rX, hdrY + hdrH * 0.64).lineTo(rX + rW, hdrY + hdrH * 0.64)
      .lineWidth(0.8).strokeColor(RULE_COL).stroke().restore();
+  cellText('DESPATCH PARTICULARS', 'Helvetica-Bold', 20, TITLE_COL,
+    x + PAD, hdrY + hdrH * 0.66, hdrH * 0.32, w - PAD * 2, 'center');
 
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(TITLE_COL);
-  doc.text('DESPATCH PARTICULARS', x, hdrY + hdrH * 0.70, { width: w, align: 'center' });
-
-  // ── 2. FROM ROW ───────────────────────────────────────────────────────────
-  const fromY = cy; cy += fromH;
-
-  // Bottom of FROM row (exact integer)
-  doc.save().moveTo(x, cy).lineTo(x + w, cy).lineWidth(THIN).strokeColor('#BBBBBB').stroke().restore();
-
-  const fLW = 110;
-  doc.save().rect(x, fromY, fLW, fromH).fill(LABEL_BG).restore();
-  doc.save().moveTo(x + fLW, fromY).lineTo(x + fLW, fromY + fromH)
-     .lineWidth(THIN).strokeColor('#BBBBBB').stroke().restore();
-
-  const fMY = fromY + (fromH - 10) / 2;
-  doc.font('Helvetica-Bold').fontSize(10).fillColor(LABEL_FG).text('FROM', x + PAD, fMY, { width: fLW - PAD });
-  doc.font('Helvetica-Bold').fontSize(11).fillColor(NAVY)
-     .text(COMPANY.NAME, x + fLW + PAD, fMY, { width: w - fLW - PAD, lineBreak: false });
-
-  // ── 3. JOB DETAILS (3 equal-height rows) ─────────────────────────────────
-  const detY = cy; cy += detailH;
-
-  // Bottom border of details block
+  let cy = hdrY + hdrH;
   doc.save().moveTo(x, cy).lineTo(x + w, cy).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
 
-  const dLW = 110;
-  doc.save().rect(x, detY, dLW, detailH).fill(LABEL_BG).restore();
-  doc.save().moveTo(x + dLW, detY).lineTo(x + dLW, detY + detailH)
-     .lineWidth(THIN).strokeColor('#BBBBBB').stroke().restore();
+  // ── 2. DETAIL ROWS (FROM / JOB NO / PROJECT / PANEL REF) ─────────────────
+  const rowsY = cy;
+  doc.save().rect(x, rowsY, LBL_W, rowsH).fill(LABEL_BG).restore();
+  doc.save().moveTo(x + LBL_W, rowsY).lineTo(x + LBL_W, rowsY + rowsH)
+     .lineWidth(THIN).strokeColor(LINE).stroke().restore();
 
+  const valW = w - LBL_W - PAD * 2;
   [
-    ['JOB NO:',    jobNo,    false],
-    ['PROJECT:',   project,  false],
-    ['PANEL REF:', panelRef, true ],
-  ].forEach(([lbl, val, big], i) => {
-    const rowY = detY + i * detLineH;  // always integer — no drift
-
-    if (i > 0) {
-      doc.save().moveTo(x, rowY).lineTo(x + w, rowY)
-         .lineWidth(THIN).strokeColor('#CCCCCC').stroke().restore();
-    }
-    if (big) {
-      doc.save().rect(x + dLW, rowY, w - dLW, detLineH).fill(PANEL_TINT).restore();
-    }
-
-    const tY = rowY + (detLineH - (big ? 13 : 11)) / 2;
-    doc.font('Helvetica-Bold').fontSize(10).fillColor(LABEL_FG)
-       .text(lbl, x + PAD, tY + 1, { width: dLW - PAD });
-    doc.font('Helvetica-Bold').fontSize(big ? 13 : 12).fillColor(big ? NAVY : '#222')
-       .text(val, x + dLW + PAD, tY, { width: w - dLW - PAD * 2, lineBreak: false });
+    ['FROM',       COMPANY.NAME, 18, TEXT],
+    ['JOB NO:',    jobNo,        20, TEXT],
+    ['PROJECT:',   project,      20, TEXT],
+    ['PANEL REF:', panelRef,     24, NAVY],
+  ].forEach(([lbl, val, size, col], i) => {
+    const ry = rowsY + i * rowH;
+    if (i > 0) doc.save().moveTo(x, ry).lineTo(x + w, ry).lineWidth(THIN).strokeColor(LINE).stroke().restore();
+    cellText(lbl, 'Helvetica-Bold', 14, LABEL_FG, x + PAD, ry, rowH, LBL_W - PAD * 2);
+    cellText(val, 'Helvetica-Bold', size, col, x + LBL_W + PAD, ry, rowH, valW, 'left', 14);
   });
 
-  // ── 4. ARROWS + HANDLE WITH CARE ─────────────────────────────────────────
+  cy = rowsY + rowsH;
+  doc.save().moveTo(x, cy).lineTo(x + w, cy).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
+
+  // ── 3. ARROWS + HANDLE WITH CARE ─────────────────────────────────────────
   const careY  = cy;
-  const arrowW = Math.round(w * 0.42);
+  const arrowW = Math.round(w * 0.36);
   const careW  = w - arrowW;
-
   doc.save().moveTo(x + arrowW, careY).lineTo(x + arrowW, careY + careH)
-     .lineWidth(THIN).strokeColor('#BBBBBB').stroke().restore();
+     .lineWidth(THIN).strokeColor(LINE).stroke().restore();
 
-  // Two upward arrows
-  const aMX = x + arrowW / 2, aTop = careY + careH * 0.10, aBot = careY + careH * 0.72;
-  const aAH = aBot - aTop, hH = aAH * 0.26, sW = 7, hW = 20, sp = 30;
+  // Two upward arrows, sized from the section height
+  const aMX  = x + arrowW / 2;
+  const aTop = careY + careH * 0.08;
+  const aBot = careY + careH * 0.74;
+  const aAH  = aBot - aTop;
+  const hH   = aAH * 0.26;
+  const sW   = Math.max(8, careH * 0.045);
+  const hW   = sW * 3;
+  const sp   = hW * 1.6;
   [-sp / 2, sp / 2].forEach(off => {
     const ax = aMX + off;
-    doc.save().rect(ax - sW/2, aTop + hH, sW, aAH - hH).fill(NAVY).restore();
-    doc.save().moveTo(ax, aTop).lineTo(ax + hW/2, aTop + hH)
-       .lineTo(ax - hW/2, aTop + hH).closePath().fill(NAVY).restore();
+    doc.save().rect(ax - sW / 2, aTop + hH - 1, sW, aAH - hH + 1).fill(NAVY).restore();
+    doc.save().moveTo(ax, aTop).lineTo(ax + hW / 2, aTop + hH)
+       .lineTo(ax - hW / 2, aTop + hH).closePath().fill(NAVY).restore();
+  });
+  const lY = aBot + careH * 0.04;
+  doc.save().moveTo(x + PAD * 2, lY).lineTo(x + arrowW - PAD * 2, lY)
+     .lineWidth(1.2).strokeColor(NAVY).stroke().restore();
+  cellText('THIS SIDE UP', 'Helvetica-Bold', 13, NAVY, x, lY + careH * 0.03, careH * 0.10, arrowW, 'center');
+
+  // HANDLE WITH CARE — as large as the box allows, no fill (saves toner)
+  const words = ['HANDLE', 'WITH', 'CARE'];
+  const lineGap = careH * 0.04;
+  let fS = (careH - PAD * 2 - lineGap * 2) / 3 / 0.95;
+  doc.font('Helvetica-Bold');
+  while (fS > 12 && doc.fontSize(fS).widthOfString('HANDLE') > careW - PAD * 4) fS -= 1;
+  const blockH = fS * 0.72 * 3 + (fS * 0.28 + lineGap) * 2;
+  let ty = careY + (careH - blockH) / 2;
+  words.forEach(wd => {
+    doc.font('Helvetica-Bold').fontSize(fS).fillColor(NAVY)
+       .text(wd, x + arrowW, ty, { width: careW, align: 'center', lineBreak: false });
+    ty += fS * 0.72 + fS * 0.28 + lineGap;
   });
 
-  const lY = aBot + 8;
-  doc.save().moveTo(x + 20, lY).lineTo(x + arrowW - 20, lY)
-     .lineWidth(1).strokeColor(NAVY).stroke().restore();
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(NAVY)
-     .text('This side up', x, lY + 5, { width: arrowW, align: 'center' });
-
-  // HANDLE WITH CARE — no fill (saves toner)
-  const fS = 24, lG = 6, tH = fS * 3 + lG * 2, hwY = careY + (careH - tH) / 2;
-  doc.font('Helvetica-Bold').fontSize(fS).fillColor(NAVY);
-  doc.text('HANDLE\nWITH\nCARE', x + arrowW + PAD, hwY,
-    { width: careW - PAD * 2, align: 'center', lineGap: lG });
+  // Outer frame LAST so the header/label fills can't paint over its edges
+  doc.save().rect(x, y, w, h).lineWidth(BORDER).strokeColor(NAVY).stroke().restore();
 }

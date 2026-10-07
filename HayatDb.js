@@ -9152,8 +9152,11 @@ app.use("/api/pdc-isu-reversal", pdcIsuJvLinesRoutes(connection));
 const accTxnAnalysis = require("./routes/accTxnAnalysis");
 app.use("/api", accTxnAnalysis(connection));
 //
-  const docModuleApi = require("./routes/docModuleApi");
- app.use("/api", docModuleApi(connection));
- //
-    const jobFinance = require('./routes/jobFinance');
-  app.use('/api', jobFinance(connection));
+const docModuleApi = require("./routes/docModuleApi");
+app.use("/api", docModuleApi(connection));
+//
+const jobFinance = require('./routes/jobFinance');
+app.use('/api', jobFinance(connection));
+//
+const custOutBal = require('./routes/custOutBal');
+app.use('/api', custOutBal(connection));
