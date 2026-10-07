@@ -68,7 +68,7 @@ module.exports = function (connection) {
       res.status(500).json({ error: err.message });
     }
   });
-router.post('/api/docs/counts-by-ref', function (req, res) {
+router.post('/docs/counts-by-ref', function (req, res) {
   const moduleCode = String(req.body?.moduleCode || '').trim();
   const refNos = Array.isArray(req.body?.refNos)
     ? [...new Set(req.body.refNos.map((r) => String(r).trim()).filter(Boolean))]
