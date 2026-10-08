@@ -13,7 +13,7 @@ const COMPANY = require("../config/company");
 // ⚠ LOV endpoints below query customer / bank / job / panel / quotation
 //   sources. Table & column names are best guesses from context — adjust the
 //   marked queries to your actual schema.
-const { nextInvNo, nextInvNoAtomic, invYearSuffix } = require('../helpers/nextInvNo');
+const { nextInvNo, invYearSuffix } = require('../helpers/nextInvNo');
 
 const express = require('express');
 
@@ -44,9 +44,8 @@ module.exports = function (connection) {
   // file exposes every route under both '/' and '/api'. Declaring '/api/...'
   // here would resolve to '/api/api/...' and 404.
   //
-  // PREVIEW ONLY. Uses the MAX()-based nextInvNo, never nextInvNoAtomic —
-  // the atomic one would burn a sequence number every time a user tabs out of
-  // the date field, leaving gaps for invoices that were never saved.
+  // PREVIEW ONLY. The real number is cut again inside the save transaction
+  // (see savePfInvoice), so this one may be taken by the time the user saves.
   router.get('/pf-nextinvno/:invDate', async (req, res) => {
     try {
       const invDate = req.params.invDate;
@@ -395,41 +394,56 @@ module.exports = function (connection) {
     // here rather than something to default away.
     if (!header.INV_DATE) return res.status(400).json({ message: 'Invoice Date is required' });
 
-    try {
-      const out = await withTxn(async (conn) => {
-        const invDate = header.INV_DATE || null;
+    // Numbering — same pattern as save-fabinv / save-lpo / save-do (no counter
+    // table): the next NN/YY number is MAX()+1 for the invoice's fin-year, cut
+    // HERE inside the transaction (never taken from header.INV_NO, which is at
+    // best a stale preview). The header goes in with a plain INSERT; INV_NO is
+    // pfinv_net's key, so if two users save at the same instant the second
+    // INSERT fails with ER_DUP_ENTRY, its transaction rolls back, and the save
+    // is retried in a fresh transaction with a fresh MAX. Nothing is overwritten.
+    const MAX_ATTEMPTS = 5;
+    const saveOnce = () => withTxn(async (conn) => {
+      const invDate = header.INV_DATE || null;
+      const invNo = await nextInvNo(conn, invDate);
 
-        // Cut the number HERE, inside the transaction, from the invoice date —
-        // never from header.INV_NO, which at best holds a stale preview the
-        // browser fetched minutes ago. nextInvNoAtomic takes a row lock on
-        // pfinv_sequence that is held until COMMIT, so two users saving at the
-        // same instant queue up instead of both landing on the same number.
-        const invNo = await nextInvNoAtomic(conn, invDate);
+      await conn.query(
+        `INSERT INTO pfinv_net
+           (INV_NO, INV_DATE, CUST_CODE, AMOUNT, NARRATION, DISCOUNT, ROUND_OFF,
+            ATTN, CURR_ENCY, CANCELLED, FREIGHT_TERMS, JOB_NO, PAYMENT_TERMS,
+            LPO_NO, QUOT_NO, VAT_PERC, VAT_AMOUNT, BANK_CODE, CONTRACT_AMT_PERCENT)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          invNo, invDate, header.CUST_CODE, num(header.AMOUNT), header.NARRATION || null,
+          num(header.DISCOUNT), num(header.ROUND_OFF), header.ATTN || null,
+          header.CURR_ENCY || null, 'N', header.FREIGHT_TERMS || null, header.JOB_NO || null,
+          header.PAYMENT_TERMS || null, header.LPO_NO || null, header.QUOT_NO || null,
+          num(header.VAT_PERC), num(header.VAT_AMOUNT), header.BANK_CODE || null,
+          num(header.CONTRACT_AMT_PERCENT),
+        ]
+      );
 
-        await conn.query(
-          `INSERT INTO pfinv_net
-             (INV_NO, INV_DATE, CUST_CODE, AMOUNT, NARRATION, DISCOUNT, ROUND_OFF,
-              ATTN, CURR_ENCY, CANCELLED, FREIGHT_TERMS, JOB_NO, PAYMENT_TERMS,
-              LPO_NO, QUOT_NO, VAT_PERC, VAT_AMOUNT, BANK_CODE, CONTRACT_AMT_PERCENT)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-          [
-            invNo, invDate, header.CUST_CODE, num(header.AMOUNT), header.NARRATION || null,
-            num(header.DISCOUNT), num(header.ROUND_OFF), header.ATTN || null,
-            header.CURR_ENCY || null, 'N', header.FREIGHT_TERMS || null, header.JOB_NO || null,
-            header.PAYMENT_TERMS || null, header.LPO_NO || null, header.QUOT_NO || null,
-            num(header.VAT_PERC), num(header.VAT_AMOUNT), header.BANK_CODE || null,
-            num(header.CONTRACT_AMT_PERCENT),
-          ]
-        );
+      await insertItems(conn, invNo, invDate, header.CUST_CODE, items);
+      return { INV_NO: invNo };
+    });
 
-        await insertItems(conn, invNo, invDate, header.CUST_CODE, items);
-        return { INV_NO: invNo };
-      });
-
-      res.json({ message: 'Saved', ...out });
-    } catch (err) {
-      console.error('savePfInvoice error:', err);
-      res.status(500).json({ message: 'Server error', error: err.message });
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const out = await saveOnce();
+        return res.json({ message: 'Saved', ...out });
+      } catch (err) {
+        // Only a clash on pfinv_net's key is a number clash; a duplicate on
+        // pfinv_items is a real bug and is reported.
+        const numberClash = err.code === 'ER_DUP_ENTRY' && /'pfinv_net\./i.test(err.sqlMessage || '');
+        if (numberClash && attempt < MAX_ATTEMPTS) {
+          console.warn(`savePfInvoice: invoice number clash, retrying (attempt ${attempt})`);
+          continue;
+        }
+        if (err.status === 400) {
+          return res.status(400).json({ message: err.message });
+        }
+        console.error('savePfInvoice error:', err);
+        return res.status(500).json({ message: err.sqlMessage || 'Server error', error: err.message });
+      }
     }
   });
 

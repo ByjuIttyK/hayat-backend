@@ -217,44 +217,81 @@ module.exports = function (connection) {
 
   // -------------------------------------------------------------------------
   // POST /api/sales-inquiry  (ADD)
+  //
+  // Numbering (same pattern as save-fabinv / save-lpo / save-do — no counter
+  // table): the real INQ_NO is MAX+1 from sales_inquiry, taken INSIDE the
+  // transaction — body.INQ_NO is only the preview the screen fetched from
+  // /next-no. The header goes in with a plain INSERT; INQ_NO is the PK, so if
+  // two users save at the same instant the second INSERT fails with
+  // ER_DUP_ENTRY, its transaction rolls back, and the save is retried with a
+  // fresh MAX (up to 5 times). Nothing is ever overwritten. The response
+  // returns the saved INQ_NO, and `changed` when it differs from the preview.
   // -------------------------------------------------------------------------
+  const nextInqNo = async (conn) => {
+    const [rows] = await conn.query(
+      `SELECT (MAX(CAST(LEFT(INQ_NO, 10) AS UNSIGNED)) + 1) AS nextNo FROM sales_inquiry`
+    );
+    return String(rows[0].nextNo || 1).padStart(10, "0");
+  };
+
   router.post("/sales-inquiry", async (req, res) => {
     const body = req.body || {};
-    if (!body.INQ_NO) {
-      return res.status(400).json({ message: "INQ_NO is required" });
-    }
     if (!body.CUST_CODE) {
       return res.status(400).json({ message: "CUST_CODE is required" });
     }
+    const givenNo = String(body.INQ_NO ?? "").trim();
+    const MAX_ATTEMPTS = 5;
 
-    const conn = await db.getConnection();
-    try {
-      const [existing] = await conn.query(`SELECT INQ_NO FROM sales_inquiry WHERE INQ_NO = ?`, [body.INQ_NO]);
-      if (existing.length > 0) {
-        return res.status(409).json({ message: `Enquiry No "${body.INQ_NO}" already exists` });
+    const saveOnce = async () => {
+      const conn = await db.getConnection();
+      try {
+        await conn.beginTransaction(); // fresh transaction = fresh snapshot for MAX
+
+        const inqNo = await nextInqNo(conn);
+        const cols = FIELDS.join(", ");
+        const placeholders = FIELDS.map(() => "?").join(", ");
+        const values = FIELDS.map((f) => (f === "INQ_NO" ? inqNo : nullify(body[f])));
+
+        await conn.query(
+          `INSERT INTO sales_inquiry (${cols}) VALUES (${placeholders})`,
+          values
+        );
+
+        // FG_ITEM_CODE is rebuilt from the server-assigned inqNo here.
+        await replaceSinqItems(conn, inqNo, body.items);
+
+        await conn.commit();
+        return inqNo;
+      } catch (err) {
+        await conn.rollback().catch(() => {});
+        throw err;
+      } finally {
+        conn.release();
       }
+    };
 
-      await conn.beginTransaction();
-
-      const cols = FIELDS.join(", ");
-      const placeholders = FIELDS.map(() => "?").join(", ");
-      const values = FIELDS.map((f) => nullify(body[f]));
-
-      await conn.query(
-        `INSERT INTO sales_inquiry (${cols}) VALUES (${placeholders})`,
-        values
-      );
-
-      await replaceSinqItems(conn, body.INQ_NO, body.items);
-
-      await conn.commit();
-      res.status(201).json({ message: "Sales inquiry created", INQ_NO: body.INQ_NO });
-    } catch (err) {
-      await conn.rollback().catch(() => {});
-      console.error("[sales-inquiry] create failed:", err);
-      res.status(500).json({ message: "Failed to create sales inquiry" });
-    } finally {
-      conn.release();
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const inqNo = await saveOnce();
+        const changed = givenNo !== "" && inqNo !== givenNo;
+        return res.status(201).json({
+          message: changed
+            ? `Enquiry No ${givenNo} was already taken. Saved as ${inqNo}.`
+            : "Sales inquiry created",
+          INQ_NO: inqNo,
+          changed,
+        });
+      } catch (err) {
+        // Only a clash on sales_inquiry's key is a number clash; a duplicate
+        // on sinq_items is a real bug and is reported.
+        const numberClash = err.code === "ER_DUP_ENTRY" && /'sales_inquiry\./i.test(err.sqlMessage || "");
+        if (numberClash && attempt < MAX_ATTEMPTS) {
+          console.warn(`[sales-inquiry] number clash, retrying (attempt ${attempt})`);
+          continue;
+        }
+        console.error("[sales-inquiry] create failed:", err);
+        return res.status(500).json({ message: err.sqlMessage || "Failed to create sales inquiry" });
+      }
     }
   });
 

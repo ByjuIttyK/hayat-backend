@@ -811,109 +811,6 @@ app.get("/api/srv-dup-inv", (req, res) => {
   });
 });
 
-const { postToTranAcc } = require("./services/glPostingService");
-//
-app.post("/api/save-pret", async (req, res) => {
-  try {
-    const { netData, itemsData } = req.body; // Extract form data & grid rows from payload
-
-    if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid data format" });
-    }
-    console.log("PURCHASE RETURN=>**", netData);
-    // Start transaction
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
-          const netQuery = `
-            INSERT INTO pret_hdr (VCHR_NO, VCHR_DATE, SUP_CODE,NARRATION,INV_AMOUNT,VAT_PERC) 
-            VALUES (?, ?, ?, ?,?,?) 
-            ON DUPLICATE KEY UPDATE 
-            VCHR_DATE= VALUES(VCHR_DATE),
-            SUP_CODE = VALUES(SUP_CODE),
-            NARRATION = VALUES(NARRATION),
-            INV_AMOUNT = VALUES(INV_AMOUNT),
-            VAT_PERC = VALUES(VAT_PERC);
-           
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [netData.PjvNo, netData.PjvDt, netData.SupCd,
-              netData.Narration, netData.AMOUNT, netData.discAmt, netData.vatAmt],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("DO_HDR Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-            INSERT INTO pret_items (VCHR_NO, SR_NO, ITEM_CODE, QTY, COST)
-            VALUES ? 
-            ON DUPLICATE KEY UPDATE 
-            ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
-            QTY = COALESCE(VALUES(QTY), QTY), 
-            COST = COALESCE(VALUES(COST), COST);
-            `;
-
-          const values = itemsData.map(row => [
-            row.VCHR_NO, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("PUR_RET_ITEMS Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error("Server Error:", error);
-    res.status(500).json({ message: "Internal Server Error", error });
-  }
-});
-
 //// Quote saves
 app.post("/api/save-qtNotes", async (req, res) => {
   try {
@@ -1130,124 +1027,6 @@ app.post("/api/save-qtDoc", async (req, res) => {
     res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
   }
 });
-app.post("/api/save-quotation", async (req, res) => {
-  try {
-    const { qtHdr, lpoItems } = req.body;
-    console.log("Qt Hdr. ==>", qtHdr);
-    console.log("Qt Items. ==>", (lpoItems || []).length, "rows");
-
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        try {
-          if (err) {
-            console.error("Qt.Save.Transaction Error:", err);
-            conn.release();
-            return res.status(500).json({ message: "Transaction error", error: err });
-          }
-
-          const q = (sql, params) =>
-            new Promise((resolve, reject) =>
-              conn.query(sql, params, (e, r) => (e ? reject(e) : resolve(r)))
-            );
-
-          /* ── 1) header upsert (QUOT_HDR has QUOT_NO as PK, so ON
-                 DUPLICATE KEY UPDATE is correct here) ─────────────── */
-          // Added AMOUNT / DISCOUNT / ROUND_OFF / VAT_PERC / VAT_AMOUNT — the
-          // frontend's Discount/Taxable/VAT/Round Off/NET summary block was
-          // already sending these (as Amount/Discount/RoundOff/VatPerc/
-          // VatAmount), but this INSERT never included the columns, so they
-          // were silently dropped on every save.
-          const hdrQuery = `
-            INSERT INTO quot_hdr
-              (QUOT_NO, QUOT_DATE, CUST_CODE, PAYMENT_TERMS, ENGG_CODE, ATTN,
-               YOUR_REF, SUBJECT, PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO,
-               AMOUNT, DISCOUNT, ROUND_OFF, VAT_PERC, VAT_AMOUNT)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE
-              QUOT_DATE     = COALESCE(VALUES(QUOT_DATE), QUOT_DATE),
-              CUST_CODE     = VALUES(CUST_CODE),
-              PAYMENT_TERMS = VALUES(PAYMENT_TERMS),
-              ENGG_CODE     = VALUES(ENGG_CODE),
-              ATTN          = VALUES(ATTN),
-              YOUR_REF      = VALUES(YOUR_REF),
-              SUBJECT       = VALUES(SUBJECT),
-              PROJECT_NAME  = VALUES(PROJECT_NAME),
-              CURR_CODE     = VALUES(CURR_CODE),
-              REV_NO        = VALUES(REV_NO),
-              INQ_NO        = VALUES(INQ_NO),
-              TEL_NO        = VALUES(TEL_NO),
-              AMOUNT        = VALUES(AMOUNT),
-              DISCOUNT      = VALUES(DISCOUNT),
-              ROUND_OFF     = VALUES(ROUND_OFF),
-              VAT_PERC      = VALUES(VAT_PERC),
-              VAT_AMOUNT    = VALUES(VAT_AMOUNT)
-          `;
-          await q(hdrQuery, [
-            qtHdr.QtNo, qtHdr.QtDt || null, qtHdr.CustCd, qtHdr.PayTrm, qtHdr.EngCd,
-            qtHdr.Attn, qtHdr.YourRef, qtHdr.Subject, qtHdr.ProjName,
-            qtHdr.CurrCd, qtHdr.RevNo, qtHdr.inqNo, qtHdr.TelNo,
-            qtHdr.Amount || 0, qtHdr.Discount || 0, qtHdr.RoundOff || 0,
-            qtHdr.VatPerc || 0, qtHdr.VatAmount || 0,
-          ]);
-
-          /* ── 2) items: wipe this quotation's rows, then re-insert the
-                 grid exactly as it stands. Runs inside the transaction,
-                 so a failed insert rolls the delete back too. ───────── */
-          await q(`DELETE FROM quot_item WHERE QUOT_NO = ?`, [qtHdr.QtNo]);
-
-          // skip blank grid lines (no code and no description)
-          const rows = (Array.isArray(lpoItems) ? lpoItems : []).filter(
-            (r) =>
-              (r.ITEM_CODE && String(r.ITEM_CODE).trim()) ||
-              (r.ITEM_NAME && String(r.ITEM_NAME).trim())
-          );
-
-          if (rows.length > 0) {
-            const values = rows.map((row) => [
-              qtHdr.QtNo, row.SR_NO, row.LOC_CODE, row.ITEM_CODE,
-              row.ITEM_NAME, row.QTY, row.RATE,
-            ]);
-            const result = await q(
-              `INSERT INTO quot_item
-                 (QUOT_NO, SR_NO, LOC_CODE, ITEM_CODE, ITEM_NAME, QTY, RATE)
-               VALUES ?`,
-              [values]
-            );
-            console.log("quot_item inserted:", result.affectedRows, "rows");
-          }
-
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return conn.rollback(() => {
-                conn.release();
-                res.status(500).json({ message: "Commit error", error: err });
-              });
-            }
-            conn.release();
-            res.json({ message: "Quot saved successfully!" });
-          });
-        } catch (error) {
-          console.error("Quot.Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release();
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.log("QT save - internal error :", error);
-    res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
-  }
-});
-
-
 
 app.post("/api/save-qtTermsCond", async (req, res) => {
   try {
@@ -1773,154 +1552,6 @@ app.post("/api/save-sret", async (req, res) => {
   } catch (error) {
     console.log("Sales return save - internal error :", error)
     res.status(500).json({ message: "Internal Server Error (Project Invoice)", error });
-  }
-});
-
-//
-app.post("/api/save-do", async (req, res) => {
-  console.log('save-do, start ===>')
-  try {
-    const { DoHdr, itemsData } = req.body; // Extract form data & grid rows from payload
-
-    if (!DoHdr || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid data format" });
-    }
-    console.log("FAB DO HDR**", DoHdr);
-    // Start transaction
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // ✅ Step 1: Insert/Update fab_do_hdr table
-          console.log("DoNo, DoDt==>", DoHdr, DoHdr.DoNo, DoHdr.DoDt);
-          const netQuery = `
-            INSERT INTO fab_do_hdr ( INV_NO,INV_DATE, CUST_CODE, JOB_NO, 
-                                     LPO_NO, LPO_DATE, DO_NO, CONTACT_PERSON,DO_APPROVED,
-                                     PROJECT_DETAIL) 
-            VALUES (?,?,?,?, 
-                    ?,?,?,?,?,
-                    ?) 
-            ON DUPLICATE KEY UPDATE 
-            INV_NO =VALUES(INV_NO),
-            INV_DATE= VALUES(INV_DATE),
-            CUST_CODE = VALUES(CUST_CODE),
-            JOB_NO = VALUES(JOB_NO),
-            LPO_NO = VALUES(LPO_NO),
-            LPO_DATE = VALUES(LPO_DATE),
-            DO_NO = VALUES (DO_NO),
-            CONTACT_PERSON = VALUES(CONTACT_PERSON),
-            DO_APPROVED = VALUES(DO_APPROVED),
-            PROJECT_DETAIL = VALUES(PROJECT_DETAIL);
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [DoHdr.DoNo, DoHdr.DoDt, DoHdr.CustCd,
-              DoHdr.JobNo, DoHdr.LpoNo, DoHdr.LpoDt, DoHdr.InvNo, DoHdr.Attn, DoHdr.DoAprv,
-              DoHdr.ClientPrjRef],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("DO_HDR Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-          // ✅ Step 2: Insert/Update fab_do_dtl table
-          const itemsQuery = `
-            INSERT INTO fab_do_dtl (INV_NO, SR_NO, INV_DATE, ITEM_CODE,INV_ITEM_DESC, INV_QTY, INV_UNIT)
-            VALUES ?
-            ON DUPLICATE KEY UPDATE 
-            INV_NO = VALUES(INV_NO),
-            SR_NO = VALUES(SR_NO),
-            INV_DATE = VALUES(INV_DATE),
-            ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
-            INV_ITEM_DESC= VALUES(INV_ITEM_DESC),
-            INV_QTY = COALESCE(VALUES(INV_QTY), INV_QTY), 
-            INV_UNIT = COALESCE(VALUES(INV_UNIT), INV_UNIT);
-            `;
-
-          const values = itemsData.map(row => [
-            DoHdr.DoNo, row.SR_NO, DoHdr.DoDt, row.ITEM_CODE, row.ITEM_NAME, row.QTY, row.UNIT
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("DO_ITEMS Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-          // ✅ Step 3: Delete detail rows the user removed in the grid.
-          // The upsert above can only add or update — a line deleted on the
-          // client simply stops being sent, so without this it would survive
-          // in fab_do_dtl forever. TRIM() on both sides guards against
-          // space-padded CHAR values inherited from the Oracle migration.
-          const srNos = itemsData
-            .map(r => r.SR_NO)
-            .filter(v => v !== null && v !== undefined && String(v).trim() !== "")
-            .map(v => String(v).trim());
-
-          const deleteQuery = srNos.length
-            ? `DELETE FROM fab_do_dtl WHERE INV_NO = ? AND TRIM(SR_NO) NOT IN (?)`
-            : `DELETE FROM fab_do_dtl WHERE INV_NO = ?`;
-
-          const deleteParams = srNos.length
-            ? [DoHdr.DoNo, srNos]
-            : [DoHdr.DoNo];
-
-          await new Promise((resolve, reject) => {
-            conn.query(deleteQuery, deleteParams, (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("DO_ITEMS deleted rows:", result.affectedRows);
-              resolve(result);
-            });
-          });
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              // Roll back and release, otherwise this connection leaks from
-              // the pool on every commit failure.
-              return conn.rollback(() => {
-                conn.release();
-                res.status(500).json({ message: "Commit error", error: err });
-              });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error("Server Error:", error);
-    res.status(500).json({ message: "Internal Server Error", error });
   }
 });
 //
@@ -2642,33 +2273,6 @@ app.get("/api/customers/:id", (req, res) => {
     } else {
       res.status(404).json({ error: "Customer not found" });
     }
-  });
-});
-
-app.post("/api/save-customer", (req, res) => {
-  const data = req.body; // Receive data from frontend
-  // console.log("Save-Customer", expData);
-  if (!data || Object.keys(data).length === 0) {
-    return res.status(400).json({ error: "No data provided" });
-  }
-
-  // Extract keys and values from the request body
-  const columns = Object.keys(data).join(", ");
-  const values = Object.values(data);
-  const updateClause = Object.keys(data)
-    .map((key) => `${key} = VALUES(${key})`)
-    .join(", ");
-
-  // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO cus_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
-                 ON DUPLICATE KEY UPDATE ${updateClause}`;
-
-  connection.query(query, values, (err, result) => {
-    if (err) {
-      console.error("Error inserting/updating customer:", err);
-      return res.status(500).json({ error: "Database error" });
-    }
-    res.json({ message: "Customer inserted/updated successfully", result });
   });
 });
 
@@ -8477,4 +8081,17 @@ const purchaseLocalApi = require("./routes/purchaseLocalApi");
 app.use("/api", purchaseLocalApi(connection));
 //
 const ngpSaveApi = require("./routes/ngpSaveApi");
- app.use("/api", ngpSaveApi(connection));
+app.use("/api", ngpSaveApi(connection));
+//
+const pretSaveApi = require("./routes/pretSaveApi");
+app.use("/api", pretSaveApi(connection));
+//
+const fabDoSaveApi = require("./routes/fabDoSaveApi");
+app.use("/api", fabDoSaveApi(connection));
+//
+const quotSaveApi = require("./routes/quotSaveApi");
+app.use("/api", quotSaveApi(connection));
+//
+app.use(require("./routes/cusMstRoutes")(connection));
+//
+app.use(require("./routes/fabDoInvLov")(connection));

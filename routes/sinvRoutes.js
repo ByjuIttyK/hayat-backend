@@ -348,7 +348,9 @@ module.exports = function (connection) {
       { gross: 0, disc: 0, net: 0, vat: 0 }
     );
 
-  const upsertHeader = async (conn, invNo, body, lines) => {
+  // insertOnly (ADD): a plain INSERT, so a number another user has just taken
+  // fails with ER_DUP_ENTRY instead of overwriting their invoice.
+  const upsertHeader = async (conn, invNo, body, lines, insertOnly = false) => {
     const cols = present("net_sales", await colsOf(conn, "net_sales"), Object.keys(HDR_WRITERS));
     // A zero / absent rate means 1:1, never "worth nothing".
     const rate = num(body.ExchgRate) > 0 ? num(body.ExchgRate) : 1;
@@ -357,8 +359,9 @@ module.exports = function (connection) {
     const updates = cols.map((c) => `${c} = VALUES(${c})`).join(", ");
     await run(
       conn,
-      `INSERT INTO net_sales (INV_NO, ${cols.join(", ")}) VALUES (${values.map(() => "?").join(", ")})
-       ON DUPLICATE KEY UPDATE ${updates}`,
+      `INSERT INTO net_sales (INV_NO, ${cols.join(", ")}) VALUES (${values.map(() => "?").join(", ")})` +
+        (insertOnly ? "" : `
+       ON DUPLICATE KEY UPDATE ${updates}`),
       values
     );
   };
@@ -413,42 +416,111 @@ module.exports = function (connection) {
     return entries.length;
   };
 
+  /* ── Next invoice number: MAX(INV_NO)+1 from net_sales ─────────────────
+     Numeric max (CAST), so '10000' sorts above '9999' on the varchar key; the
+     new number keeps the width of the current highest one, so a zero-padded
+     series stays zero-padded. Called inside the save transaction. */
+  const nextSinvNo = async (conn) => {
+    const rows = await run(
+      conn,
+      `SELECT INV_NO
+         FROM net_sales
+        WHERE INV_NO REGEXP '^[0-9]+$'
+        ORDER BY CAST(INV_NO AS UNSIGNED) DESC
+        LIMIT 1`
+    );
+    if (!rows.length) return "1";
+    const last = String(rows[0].INV_NO);
+    return String(Number(last) + 1).padStart(last.length, "0");
+  };
+
   /* PUT /api/save-sinv — header, lines and G/L together or not at all.
-     ADD refuses an existing number (another user may have taken it);
-     the screen sends EDIT for every save after the first. */
+     Numbering (same pattern as save-fabinv / save-lpo / save-do — no counter
+     table):
+       ADD  → the real INV_NO is MAX+1 from net_sales, taken inside the
+              transaction, and the header goes in FIRST with a plain INSERT.
+              INV_NO is net_sales' PK, so if two users save at the same instant
+              the second INSERT fails with ER_DUP_ENTRY, its transaction rolls
+              back, and the save is retried with a fresh MAX — up to 5 times.
+              Nothing is ever overwritten.
+       EDIT → the invoice must exist (locked FOR UPDATE), then it is updated.
+     The screen sends EDIT for every save after the first. The response carries
+     the saved invNo; `changed` is true when it differs from the number the
+     screen was showing. */
+  const MAX_ATTEMPTS = 5;
+
   router.put("/save-sinv", async function (req, res) {
     const { mode, header, items } = req.body || {};
     if (mode !== "ADD" && mode !== "EDIT") return res.status(400).json({ ok: false, error: "Invalid mode" });
-    const invNo = String(header?.invNo ?? "").trim();
-    if (!invNo) return res.status(400).json({ ok: false, error: "Invoice number missing" });
+    const givenNo = String(header?.invNo ?? "").trim();
+    if (mode === "EDIT" && !givenNo) return res.status(400).json({ ok: false, error: "Invoice number missing" });
     if (!Array.isArray(items) || items.length === 0)
       return res.status(400).json({ ok: false, error: "No invoice lines" });
 
-    let conn;
-    try {
-      conn = await getConn();
-      await begin(conn);
+    const userName = req.user?.USER_NAME || req.user?.username || null; // from JWT middleware
+    const invDate = toDbDate(header.invDt);
+    // Same line filter saveLines uses — the header totals need it before the
+    // lines are written (ADD writes the header first).
+    const lines = items.filter((r) => r && String(r.SR_NO ?? "").trim() !== "");
 
-      const existing = await run(conn, "SELECT INV_NO FROM net_sales WHERE INV_NO = ? FOR UPDATE", [invNo]);
-      if (mode === "ADD" && existing.length > 0)
-        throw fail(`Invoice ${invNo} already exists — it may have been saved by another user`, 409);
-      if (mode === "EDIT" && existing.length === 0) throw fail(`Invoice ${invNo} not found`, 404);
+    const saveOnce = async () => {
+      const conn = await getConn();
+      try {
+        await begin(conn); // fresh transaction = fresh snapshot for MAX
 
-      const { lines, saved, deleted } = await saveLines(conn, invNo, toDbDate(header.invDt), header.CustCd, items);
-      const userName = req.user?.USER_NAME || req.user?.username || null; // from JWT middleware
-      await upsertHeader(conn, invNo, { ...header, userName }, lines);
-      const posted = await postSinvAcc(conn, invNo);
+        let invNo = givenNo;
+        if (mode === "ADD") {
+          invNo = await nextSinvNo(conn);
+          // Header first: this INSERT is the gate. A clash stops the save here,
+          // before any line or G/L entry is touched.
+          await upsertHeader(conn, invNo, { ...header, userName }, lines, true);
+        } else {
+          const existing = await run(conn, "SELECT INV_NO FROM net_sales WHERE INV_NO = ? FOR UPDATE", [invNo]);
+          if (existing.length === 0) throw fail(`Invoice ${invNo} not found`, 404);
+        }
 
-      await commit(conn);
-      console.log("save-sinv:", mode, invNo, "lines:", saved, "deleted:", deleted, "G/L entries:", posted);
-      res.json({ ok: true, invNo, saved, deleted, posted });
-    } catch (error) {
-      if (conn) await rollback(conn);
-      clearCols();
-      console.error("save-sinv failed:", error);
-      res.status(error.status || 500).json({ ok: false, error: error.sqlMessage || error.message });
-    } finally {
-      if (conn) conn.release();
+        const { saved, deleted } = await saveLines(conn, invNo, invDate, header.CustCd, items);
+        if (mode === "EDIT") await upsertHeader(conn, invNo, { ...header, userName }, lines);
+        const posted = await postSinvAcc(conn, invNo);
+
+        await commit(conn);
+        console.log("save-sinv:", mode, invNo, "lines:", saved, "deleted:", deleted, "G/L entries:", posted);
+        return { invNo, saved, deleted, posted };
+      } catch (e) {
+        await rollback(conn);
+        throw e;
+      } finally {
+        conn.release(); // always, on every path
+      }
+    };
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const out = await saveOnce();
+        const changed = mode === "ADD" && givenNo !== "" && out.invNo !== givenNo;
+        return res.json({
+          ok: true,
+          ...out,
+          changed,
+          message: changed
+            ? `Invoice No ${givenNo} was already taken. Saved as ${out.invNo}.`
+            : `Invoice ${out.invNo} saved`,
+        });
+      } catch (error) {
+        // Only a clash on net_sales' key is a number clash; a duplicate on the
+        // lines or tran_acc is a real bug and is reported.
+        const numberClash =
+          mode === "ADD" &&
+          error.code === "ER_DUP_ENTRY" &&
+          /'net_sales\./i.test(error.sqlMessage || "");
+        if (numberClash && attempt < MAX_ATTEMPTS) {
+          console.warn(`save-sinv: invoice number clash, retrying (attempt ${attempt})`);
+          continue;
+        }
+        clearCols();
+        console.error("save-sinv failed:", error);
+        return res.status(error.status || 500).json({ ok: false, error: error.sqlMessage || error.message });
+      }
     }
   });
 
