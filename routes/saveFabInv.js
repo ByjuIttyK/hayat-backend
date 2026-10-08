@@ -77,8 +77,8 @@ module.exports = function (connection) {
           { invNo: givenInvNo });
       }
 
-      console.log("FABINV_HDR ==>", fabInvNet);
-      console.log("FABINV Items ==>", fabInvItems);
+    //  console.log("FABINV_HDR ==>", fabInvNet);
+     // console.log("FABINV Items ==>", fabInvItems);
       const saveOnce = async () => {
         const conn = await getConn();
         try {
