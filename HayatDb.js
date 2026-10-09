@@ -7655,3 +7655,9 @@ app.use('/api', saveSretRoutes(connection));
 app.use("/api", require("./routes/jobContractValue")(connection));
 // Rv - View mode settlement display
 app.use("/api", require("./routes/stlFigures")(connection));
+//
+ app.use("/api", require("./routes/jobVariations")(connection));
+ //
+ app.use("/api", require("./routes/sivItemInfo")(connection));
+ //
+  app.use("/api", require("./routes/jobPanelMatCost")(connection));
