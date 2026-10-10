@@ -5238,7 +5238,7 @@ app.get("/api/gittypesfp/:vch", function (req, res) {
 app.get("/api/purfrgnitems/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO, CAST(a.SR_NO AS CHAR) AS SR_NO, " +
-    "  a.ITEM_CODE, c.ITEM_NAME1 ITEM_DESC , " +
+    "  a.ITEM_CODE, c.ITEM_NAME1 as ITEM_NAME , " +
     " a.QTY, COALESCE(a.COST_FC,0) COST_FC, a.UNIT_COST,ROUND( COALESCE(a.QTY,0) * COALESCE(a.UNIT_COST,0) ,2) AS AMOUNT " +
     " from pur_frgn_items a " +
     " left outer join item_mst c on c.item_code = a.item_code" +
