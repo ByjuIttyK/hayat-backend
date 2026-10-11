@@ -20,9 +20,10 @@
  *    ST_NO PK, BANK_ACCOUNT, TXN_DATE, CHQ_TXN_NO, DESCRIPTION,
  *    DEBIT, CREDIT, BALANCE
  *
- *  gl_bank_txn_link (already exists)
- *    TRAN_TYPE, VCHR_NO, CHQ_BANKTXN_NO, CHQ_BANKTXN_DATE,
- *    BANK_ST_NO PK
+ *  gl_bank_txn_link
+ *    srno_row_id PK, TRAN_TYPE, VCHR_NO, GL_ROW_ID, GL_CHQ_NO,
+ *    CHQ_BANKTXN_NO, CHQ_BANKTXN_DATE, BANK_ST_NO
+ *    UNIQUE (BANK_ST_NO, GL_ROW_ID) — one row per G/L cheque line
  *
  *  CREATE TABLE bank_nil_deposit (
  *    BANK_ST_NO   VARCHAR(15) NOT NULL,
@@ -134,39 +135,38 @@ router.post('/bank-statement/save', async (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 // POST /api/gl-bank-txn-link/save
 // Body: { links: GlBankTxnLink[] }
-// REPLACE INTO so re-running Auto Populate + Save refreshes the links.
-// BANK_ST_NO is PK — one link row per matched bank transaction line.
+// One link row per matched G/L CHEQUE line (GL_ROW_ID from v_bank_reco_lines).
+// Table keys: srno_row_id PK + UNIQUE (BANK_ST_NO, GL_ROW_ID).
+// Delete-then-insert (one multi-row INSERT — all rows or none), so re-saving is clean.
 // ════════════════════════════════════════════════════════════════════════════
 router.post('/gl-bank-txn-link/save', async (req, res) => {
   const { links } = req.body;
   if (!Array.isArray(links) || links.length === 0)
     return res.status(400).json({ error: 'No links provided' });
 
+  const bankStNo = links[0].BANK_ST_NO;
+  const rows = links.map(l => [
+    l.TRAN_TYPE,
+    l.VCHR_NO,
+    // GL_ROW_ID must be unique per statement; fallback keeps an older screen working
+    l.GL_ROW_ID || `${l.TRAN_TYPE}-${l.VCHR_NO}-${l.CHQ_BANKTXN_NO}`,
+    l.GL_CHQ_NO || null,
+    l.CHQ_BANKTXN_NO,
+    l.CHQ_BANKTXN_DATE,
+    bankStNo,
+  ]);
+
   try {
-    // Delete old links for this statement first (clean re-save)
-    const bankStNo = links[0].BANK_ST_NO;
+    await query('DELETE FROM gl_bank_txn_link WHERE BANK_ST_NO = ?', [bankStNo]);
     await query(
-      'DELETE FROM gl_bank_txn_link WHERE BANK_ST_NO = ?',
-      [bankStNo]);
-
-    const sql = `
-      INSERT INTO gl_bank_txn_link
-        (TRAN_TYPE, VCHR_NO, CHQ_BANKTXN_NO, CHQ_BANKTXN_DATE, BANK_ST_NO)
-      VALUES (?, ?, ?, ?, ?)`;
-
-    for (const lnk of links) {
-      await query(sql, [
-        lnk.TRAN_TYPE,
-        lnk.VCHR_NO,
-        lnk.CHQ_BANKTXN_NO,
-        lnk.CHQ_BANKTXN_DATE,
-        lnk.BANK_ST_NO,
-      ]);
-    }
-    res.json({ saved: links.length });
+      `INSERT INTO gl_bank_txn_link
+         (TRAN_TYPE, VCHR_NO, GL_ROW_ID, GL_CHQ_NO, CHQ_BANKTXN_NO, CHQ_BANKTXN_DATE, BANK_ST_NO)
+       VALUES ?`,
+      [rows]);
+    res.json({ saved: rows.length });
   } catch (err) {
     console.error('gl-bank-txn-link/save error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.sqlMessage || err.message });
   }
 });
 
