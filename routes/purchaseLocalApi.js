@@ -83,18 +83,45 @@ module.exports = function (connection) {
             }
           }
 
+          // ── Step 0: an SRV can be invoiced only once ──
+          // purchase_items has a UNIQUE key on (SRV_NO, SR_NO). Without this
+          // check, a second purchase of the same SRV hit that key, and
+          // ON DUPLICATE KEY UPDATE silently updated the FIRST voucher's lines
+          // (PJV_NO is never changed by it) — the new voucher was left with a
+          // header and no items. Reject it instead, inside the transaction.
+          const srvList = [...new Set(
+            itemsData.map((r) => String(r.SRV_NO ?? "").trim()).filter(Boolean)
+          )];
+          if (srvList.length) {
+            const taken = await q(
+              conn,
+              `SELECT DISTINCT TRIM(SRV_NO) AS SRV_NO, TRIM(PJV_NO) AS PJV_NO
+                 FROM purchase_items
+                WHERE SRV_NO IN (?) AND PJV_NO <> ?`,
+              [srvList, pjvNo]
+            );
+            if (taken.length) {
+              const list = taken.map((t) => `SRV ${t.SRV_NO} (PJV ${t.PJV_NO})`).join(", ");
+              throw Object.assign(
+                new Error(`Already invoiced: ${list}. An SRV can be entered in only one purchase.`),
+                { status: 409 }
+              );
+            }
+          }
+
           // ── Step 1: purchase_hdr ──
           // ADD = plain INSERT, so a number clash throws ER_DUP_ENTRY instead of
           // overwriting another user's voucher. EDIT keeps the upsert (row is
           // confirmed to exist and locked above).
           const insertPart = `
-            INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE, NARRATION,
+            INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE, SRV_NO,NARRATION,
                                       INV_NO, INV_DATE, PO_NO, INV_AMOUNT, DISCOUNT, VAT_PERC, VAT_AMOUNT)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?)`;
           const upsertPart = `
             ON DUPLICATE KEY UPDATE
               PJV_DATE   = VALUES(PJV_DATE),
               SUP_CODE   = VALUES(SUP_CODE),
+              SRV_NO =  VALUES(SRV_NO),
               NARRATION  = VALUES(NARRATION),
               INV_NO     = VALUES(INV_NO),
               INV_DATE   = VALUES(INV_DATE),
@@ -106,7 +133,7 @@ module.exports = function (connection) {
           const netQuery = mode === "ADD" ? insertPart : insertPart + upsertPart;
 
           const hdrResult = await q(conn, netQuery, [
-            pjvNo, netData.PjvDt, netData.SupCd,
+            pjvNo, netData.PjvDt, netData.SupCd,netData.SrvNo,
             netData.Narration, netData.InvNo, netData.InvDt, netData.LpoNo,
             netData.AMOUNT, netData.discAmt, netData.VatPct,
             netData.VatAmt, // was netData.vatAmt — the screen sends VatAmt, so VAT_AMOUNT was saving NULL

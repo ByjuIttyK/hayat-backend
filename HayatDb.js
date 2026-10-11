@@ -4734,7 +4734,7 @@ app.get("/api/pinvlst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , a.NARRATION, " +
-    " '' as SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
+    "  a.SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
     " from purchase_hdr a, sup_mst b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.PJV_NO DESC",
     [req.params.dys],
@@ -4801,7 +4801,7 @@ app.get("/api/ngpitems/:vch", function (req, res) {
 
 app.get("/api/purchaseHdr/:vch", function (req, res) {
   connection.query(
-    "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
+    "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE, a.SRV_NO, " +
     " b.SUP_NAME, COALESCE(a.INV_AMOUNT, 0) AS INV_AMOUNT , COALESCE(a.DISCOUNT,0) AS DISCOUNT ,a.PO_NO,a.INV_NO, " +
     " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,COALESCE(a.VAT_AMOUNT,0) AS VAT_AMOUNT " +
     " from purchase_hdr a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
