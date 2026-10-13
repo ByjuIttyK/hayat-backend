@@ -7662,3 +7662,6 @@ app.use("/api", wacTraceApi(connection));
 //
 const nsItemQuery = require("./routes/nsItemQuery");
 app.use("/api", nsItemQuery(connection));
+//
+const quotRevisionApi = require("./routes/quotRevisionApi");
+app.use("/api", quotRevisionApi(connection));
