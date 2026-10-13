@@ -15,9 +15,26 @@
 //   EDIT → the PJV must already exist (locked FOR UPDATE), then it is updated.
 // The response returns the saved PjvNo; if it differs from the number the
 // screen was showing, `changed` is true and `message` says so.
+//
+// tran_acc narration:
+//   NARRATION  ← the voucher's own Narration (as keyed on the screen)
+//   NARRATION1 ← supplier invoice reference, e.g. "Inv 45821 dt 12/10/2026"
+//   Both are passed to postToTranAcc as Narration / Narration1.
 
 const express = require("express");
 const { postToTranAcc } = require("../services/glPostingService");
+
+// Supplier invoice reference for tran_acc.NARRATION1.
+// InvDt arrives as yyyy-MM-dd (toDbDate on the screen) — shown as dd/MM/yyyy.
+// Blank parts are left out, so a missing date gives just "Inv 45821".
+const NARRATION1_LEN = 50; // ← set to tran_acc.NARRATION1's column length
+const invoiceRef = (invNo, invDt) => {
+  const no = String(invNo ?? "").trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(invDt ?? ""));
+  const dt = m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+  const txt = [no && `Inv ${no}`, dt && `dt ${dt}`].filter(Boolean).join(" ");
+  return txt ? txt.slice(0, NARRATION1_LEN) : null;
+};
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -171,11 +188,16 @@ module.exports = function (connection) {
 
           // ── Step 4: post GL entries to tran_acc (same connection/transaction) ──
           // Field names match acc_posting_setup FIELD_NAMEs.
+          // Was: Narration: `Inv:${netData.InvNo}:${netData.InvDt}` || "" — the
+          // template string is never empty, so a purchase with no invoice no.
+          // posted "Inv:null:null", and the date went in as yyyy-MM-dd.
+          const invRef = invoiceRef(netData.InvNo, netData.InvDt);
           const glPayload = {
             ModuleName: "PURCHASE_HDR",
             InvNo: pjvNo,
             Date: netData.PjvDt,
-            Narration: `Inv:${netData.InvNo}:${netData.InvDt}` || "",
+            Narr2: String(netData.Narration ?? "").trim() || invRef || "", // tran_acc.NARRATION
+            Narr1: invRef,                                               // tran_acc.NARRATION1
             SupCode: netData.SupCd,
             GrossAmt: netData.GrossAmt, // PURCHASE rule
             VatAmt: netData.VatAmt,     // VAT rule

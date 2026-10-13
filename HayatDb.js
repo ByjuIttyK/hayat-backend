@@ -4370,7 +4370,7 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
 
 
   connection.query(
-    "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE, a.CUST_CODE," +
+    "select a.INV_NO,DATE_FORMAT(a.INV_DATE, '%d/%m/%Y') INV_DATE, a.CUST_CODE,a.CR_DAYS," +
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_PERC, " +
     "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
     " a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
@@ -5755,58 +5755,50 @@ app.get("/api/jobsal", function (req, res) {
 // groupBy parameter: "SUP"  = group by Supplier then Item
 //                   "ITEM" = group by Item then Supplier
 
-//function getPurchaseReport(groupBy, start_date, end_date, res) {
-app.get("/api/purchaseReport", function (req, res) {
-  let selectCols, groupCols;
-  const { groupBy, groupType, start_date, end_date, ItemCd } = req.query;
-  console.log("groupBy =", groupBy, ItemCd);
-  if (groupBy === "SUP") {
-
-    if (groupType == "SUM") {
-      selectCols = "SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME";
-      groupCols = "SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME";  // match SELECT
-    } else {
-      selectCols = "PJV_NO,DATE_FORMAT(PJV_DATE,'%d/%m/%Y') AS PJV_DATE,SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME,ITEM_UNIT";
-      groupCols = "PJV_NO,PJV_DATE,SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME,QTY, ITEM_UNIT,COST";  // match SELECT
-    }
-
-  } else {
-    if (groupType == "SUM") {
-      selectCols = "ITEM_CODE, ITEM_NAME, SUP_CODE, SUP_NAME";
-      groupCols = "ITEM_CODE, ITEM_NAME, SUP_CODE, SUP_NAME";  // match SELECT
-    } else {
-      selectCols = "PJV_NO,DATE_FORMAT(PJV_DATE,'%d/%m/%Y') AS PJV_DATE,SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME,ITEM_UNIT";
-      groupCols = "PJV_NO,PJV_DATE,SUP_CODE, SUP_NAME, ITEM_CODE, ITEM_NAME,QTY,ITEM_UNIT,COST";  // match SELECT
-    }
+app.get("/api/purchaseReport", (req, res) => {
+  const { groupBy = "SUP", groupType = "SUM", start_date, end_date, ItemCd } = req.query;
+  if (!start_date || !end_date) {
+    return res.status(400).json({ error: "start_date and end_date are required" });
   }
-  // Conditional filter based on groupBy
-  // If ItemCd is provided, add the filter — otherwise skip it
-  const itemFilter = ItemCd
-    ? (groupBy === "SUP" ? `AND SUP_CODE = ?` : `AND ITEM_CODE = ?`)
-    : "";
 
+  const bySup = String(groupBy).toUpperCase() !== "ITEM";      // SUP = Party wise, ITEM = Item wise
+  const detail = String(groupType).toUpperCase() === "DTL";    // SUM = Summary, DTL = Detailed
 
-  // Only include ItemCd in params if it's provided
-  const params = ItemCd
-    ? [start_date, end_date, ItemCd]
-    : [start_date, end_date];
+  const keyCols = bySup
+    ? "v.SUP_CODE, v.SUP_NAME, v.ITEM_CODE, v.ITEM_NAME"
+    : "v.ITEM_CODE, v.ITEM_NAME, v.SUP_CODE, v.SUP_NAME";
 
-  const query =
-    `SELECT ${selectCols}, ` +
-    `SUM(QTY) AS TOTAL_QTY,  MAX(COST) AS COST ,SUM(AMOUNT) AS TOTAL_AMOUNT ` +
-    `FROM V_Purchase_Details ` +
-    `WHERE PJV_DATE BETWEEN ? AND ? ` +
-    `${itemFilter} ` +
-    `GROUP BY ${groupCols} ` +
-    `ORDER BY ${groupCols}`;
+  let selectCols, groupCols, orderCols;
+  if (detail) {
+    selectCols = `v.PJV_NO, DATE_FORMAT(v.PJV_DATE,'%d/%m/%Y') AS PJV_DATE, ${keyCols}, v.ITEM_UNIT`;
+    groupCols = `v.PJV_NO, v.PJV_DATE, ${keyCols}, v.ITEM_UNIT, v.QTY, v.COST`;
+    orderCols = `${bySup ? "v.SUP_CODE" : "v.ITEM_CODE"}, v.PJV_DATE, v.PJV_NO, ${bySup ? "v.ITEM_CODE" : "v.SUP_CODE"}`;
+  } else {
+    selectCols = keyCols;
+    groupCols = keyCols;
+    orderCols = keyCols;
+  }
 
-  connection.query(query, params, (err, result) => {
+  // Code box on the parameter screen: supplier code when Party wise, item code when Item wise
+  const code = String(ItemCd || "").trim();
+  const codeFilter = code ? (bySup ? " AND v.SUP_CODE = ?" : " AND v.ITEM_CODE = ?") : "";
+  const params = code ? [start_date, end_date, code] : [start_date, end_date];
+
+  const sql =
+    `SELECT ${selectCols},
+            SUM(v.QTY) AS TOTAL_QTY, MAX(v.COST) AS COST, SUM(v.AMOUNT) AS TOTAL_AMOUNT
+       FROM v_purchase_details v
+      WHERE v.PJV_DATE >= ? AND v.PJV_DATE < DATE_ADD(?, INTERVAL 1 DAY)${codeFilter}
+      GROUP BY ${groupCols}
+      ORDER BY ${orderCols}`;
+
+  connection.query(sql, params, (err, rows) => {
     if (err) {
-      throw err;
-    } else {
-      console.log("Purchase Report", result);
-      res.json(result);
+      console.error("purchaseReport:", err.sqlMessage || err.message, "\n", sql, params);
+      return res.status(500).json({ error: err.sqlMessage || err.message });
     }
+    console.log(`purchaseReport ${bySup ? "SUP" : "ITEM"}/${detail ? "DTL" : "SUM"} ${start_date}..${end_date} ${code || "(all)"}: ${rows.length} rows`);
+    res.json(rows);
   });
 });
 
@@ -7667,3 +7659,6 @@ app.use("/api", bankRecoLinesRoutes(connection));
 //
 const wacTraceApi = require("./routes/wacTraceApi");
 app.use("/api", wacTraceApi(connection));
+//
+const nsItemQuery = require("./routes/nsItemQuery");
+app.use("/api", nsItemQuery(connection));
