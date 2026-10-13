@@ -44,7 +44,6 @@ const F = {
   SUP_NAME: ["s.SUP_NAME", "T"],
   INV_NO: ["h.INV_NO", "T"],
   INV_DATE: ["h.INV_DATE", "D"],
-  SRV_NO: ["h.SRV_NO", "T"],
   LPO_NO: ["h.LPO_NO", "T"],
   HDR_DR_CODE: ["h.DR_CODE", "T"],
   NARRATION: ["h.NARRATION", "T"],
