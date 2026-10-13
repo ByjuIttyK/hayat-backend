@@ -7665,3 +7665,5 @@ app.use("/api", require("./routes/jobPanelMatCost")(connection));
 const bankRecoLinesRoutes = require("./routes/bankRecoLinesRoutes");
 app.use("/api", bankRecoLinesRoutes(connection));
 //
+const wacTraceApi = require("./routes/wacTraceApi");
+app.use("/api", wacTraceApi(connection));
