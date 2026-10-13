@@ -19,14 +19,14 @@ module.exports = function (connection) {
       "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
       "COALESCE(v.ACC_CODE, v.CUST_CODE) AS ACC_CODE, v.CUST_CODE, " +
       "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT, chq.CHQ_COUNT, " +
-      "v.AMOUNT, v.BANK_NAME AS NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
-      "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, " +
+      "v.AMOUNT, v.BANK_NAME , u.NARRATION1,v.NARRATION2 , ac_list.AC_HEAD AS ACC_HEAD, " +
+      "v.BANK_NAME, v.PAID_TO ,  v.CAN_CEL, " +
       "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
       "FROM vouchers AS v " +
       "LEFT OUTER JOIN ac_list " +
       "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +
       "LEFT OUTER JOIN (" +
-      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, " +
+      "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, MAX(NARRATION1) AS NAR, " +
       "         COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
       "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ, CHQ_DATE FROM pdc_rcd WHERE TRAN_TYPE = ? " +
       "    UNION ALL " +
