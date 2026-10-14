@@ -4269,7 +4269,7 @@ app.get("/api/quothdr/:id", function (req, res) {
       a.ENGG_CODE AS SMAN_CODE,
       a.DETAILS,
       b.SMAN_NAME,c.CUS_QUOTE_LIMIT,
-      a.TEL_NO,
+      a.TEL_NO,a.BOTTOM_LN,
       a.FAX_NO,a.CURR_CODE,
       a.INQ_NO,a.REV_NO,a.QUOT_APPROVED,a.QUOT_APPROVED_BY,a.QUOT_LIMIT_APPROVED_BY,
       a.AMOUNT,a.DISCOUNT,a.ROUND_OFF,a.VAT_PERC,a.VAT_AMOUNT
