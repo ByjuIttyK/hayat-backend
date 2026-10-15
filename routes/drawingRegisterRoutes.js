@@ -13,9 +13,8 @@
 // Numbering
 //   SL_NO (Doc.No)      LPAD(header srno_row_id, 5, '0')
 //   Header DRAWING_NO   AHS / MMYY(DRAW_DATE) / serial            e.g. AHS/1026/2940
-//   Panel DRAWING_NO    only for panels ticked "Dwg" (ASSIGN). The first panel
-//                       to get a number takes the header number itself, the
-//                       next ones <header no>-1, -2 …          e.g. AHS/1026/2940, AHS/1026/2940-1
+//   Panel DRAWING_NO    only for panels ticked "Dwg" (ASSIGN):
+//                       <header no>-1, -2, -3 …                e.g. AHS/1026/2940-1, AHS/1026/2940-2
 //                       Unticked panels are saved without a number and can be
 //                       given one on a later edit. An issued number never changes.
 //   serial = highest well-formed serial of the last 12 months + 1 (header and
@@ -28,9 +27,11 @@
 
 const express = require('express');
 
-// Suffix of the SECOND numbered panel (the first takes the header number):
-// 1 → AHS/1026/2940, AHS/1026/2940-1, -2 …
+// Panel numbers: <set no>-1, -2, -3 … (the set's own number is not given to
+// a panel). Set USE_SET_NO_FOR_FIRST_PANEL to true to give the first numbered
+// panel the set's number itself instead.
 const SUFFIX_START = 1;
+const USE_SET_NO_FOR_FIRST_PANEL = false;
 
 const DRAWREG_LOCK = 'drawreg_no';
 
@@ -186,7 +187,9 @@ module.exports = function (connection) {
     const pending = panels.filter((p) => p.ASSIGN && !p.DRAWING_NO);
     if (!pending.length || !base) return;
 
-    let baseFree = !panels.some((p) => p.DRAWING_NO === base) && !(await numberTaken(conn, base, hdrRowId));
+    // Panels never take the set's own number — they start at <base>-1
+    let baseFree = USE_SET_NO_FOR_FIRST_PANEL
+      && !panels.some((p) => p.DRAWING_NO === base) && !(await numberTaken(conn, base, hdrRowId));
     let next = Math.max(await maxSuffix(conn, base), SUFFIX_START - 1) + 1;
     for (const p of pending) {
       if (baseFree) { p.DRAWING_NO = base; baseFree = false; continue; }
@@ -256,6 +259,30 @@ module.exports = function (connection) {
         preview: true,
       });
     } catch (err) { sendErr(res, 'getNextDrawRegNo', err); }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET /api/drawRegNextPanelNos/:id — what the next panel numbers of a saved
+  // set would be, for the provisional numbers shown in EDIT:
+  //   base       the set's number without any old "-n"
+  //   baseFree   true if no panel holds it yet and no other record uses it
+  //              (then the first newly ticked panel gets it)
+  //   nextSuffix next free "-n" under base
+  // Preview only — the save takes the real numbers under the lock.
+  // ─────────────────────────────────────────────────────────────────────────
+  router.get('/drawRegNextPanelNos/:id', async (req, res) => {
+    const rowId = Number(req.params.id) || 0;
+    if (!rowId) return res.status(400).json({ message: 'Record id is required' });
+    try {
+      const [[hdr]] = await db.query(`SELECT DRAWING_NO FROM drawing_register WHERE srno_row_id = ?`, [rowId]);
+      if (!hdr) return res.status(404).json({ message: 'Drawing not found' });
+      const base = String(hdr.DRAWING_NO || '').replace(/-\d+$/, '');
+      const [own] = await db.query(
+        `SELECT 1 FROM drawing_reg_panel WHERE HDR_ROW_ID = ? AND DRAWING_NO = ? LIMIT 1`, [rowId, base]);
+      const baseFree = USE_SET_NO_FOR_FIRST_PANEL && !own.length && !(await numberTaken(db, base, rowId));
+      const nextSuffix = Math.max(await maxSuffix(db, base), SUFFIX_START - 1) + 1;
+      res.json({ base, baseFree, nextSuffix });
+    } catch (err) { sendErr(res, 'drawRegNextPanelNos', err); }
   });
 
   // ─────────────────────────────────────────────────────────────────────────
