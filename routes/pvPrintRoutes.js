@@ -3,8 +3,9 @@
 // Payment Voucher printout details — Telltron ERP
 //
 //   GET /api/pv-print/:tranType/:vchrNo?curr=01
-//     → { CURR_NAME, cheques: [...], settlements: [...] }
+//     → { PAID_TO, CURR_NAME, cheques: [...], settlements: [...] }
 //
+//   PAID_TO      vouchers.PAID_TO for the PV (printed as "Pay To")
 //   cheques      pdc_isu (post-dated) + current_chq (current-dated) for the PV
 //   settlements  adj_dtl rows whose SOURCE is this PV (supplier invoices settled)
 //
@@ -63,6 +64,13 @@ const SETTLE_SQL = `
    WHERE a.SOURCE_TYPE = ? AND a.SOURCE_DOC = ?
    ORDER BY a.STLD_DATE, a.STLD_DOC, a.MAIN_SR_NO`;
 
+// Paid To as saved on the voucher header
+const PAID_TO_SQL = `
+  SELECT PAID_TO
+    FROM vouchers
+   WHERE TRAN_TYPE = ? AND VCHR_NO = ?
+   LIMIT 1`;
+
 const num = (v) => (v === null || v === undefined ? null : Number(v)); // DECIMAL arrives as string
 
 module.exports = function (connection) {
@@ -81,7 +89,7 @@ module.exports = function (connection) {
       // ?curr= is the voucher's stored currency — a CUR_CODE ('01') or a CUR_NAME ('AED')
       const curr = String(req.query.curr ?? "").trim();
 
-      const [[chqRows], [stlRows], [curRows]] = await Promise.all([
+      const [[chqRows], [stlRows], [curRows], [vchRows]] = await Promise.all([
         tranType === "04"
           ? db.query(CHEQUE_SQL, [tranType, vchrNo, tranType, vchrNo])
           : Promise.resolve([[]]),
@@ -95,9 +103,11 @@ module.exports = function (connection) {
               [curr, curr, curr]
             )
           : Promise.resolve([[]]),
+        db.query(PAID_TO_SQL, [tranType, vchrNo]),
       ]);
 
       res.json({
+        PAID_TO: vchRows[0]?.PAID_TO ? String(vchRows[0].PAID_TO).trim() : "",
         CURR_NAME: curRows[0]?.CUR_NAME ? String(curRows[0].CUR_NAME).trim() : "",
         cheques: chqRows.map((r) => ({
           SRC: r.SRC,

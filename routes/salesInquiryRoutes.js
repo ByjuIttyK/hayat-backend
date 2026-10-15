@@ -129,7 +129,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await db.query(
         `SELECT s.INQ_NO,
-                DATE_FORMAT(s.INQ_DATE,'%d/%m/%y') AS INQ_DATE,
+                DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
                 s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
                 s.SUBJECT, s.SINQ_STAT, s.REGRET, s.QUOTE_NO, s.QUOTE_DATE,
                 s.CUST_CONTACT_PER
