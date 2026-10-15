@@ -1027,79 +1027,78 @@ app.post("/api/save-qtDoc", async (req, res) => {
     res.status(500).json({ message: "Qt.Doc. save Internal Server Error", error });
   }
 });
-
-app.post("/api/save-qtTermsCond", async (req, res) => {
+app.post("/api/save-qtTermsCond", (req, res) => {
   try {
-    // console.log("save-Quote-Terms -cond ==>", req.body);
-    const lpoItems = req.body;
-    if (!Array.isArray(lpoItems) || lpoItems.length === 0) {
-
-      return res.status(400).json({ message: "Invalid T&C data format" });
+    // Accept { QUOT_NO, rows } (new) or a plain array (old format)
+    let quotNo, rows;
+    if (Array.isArray(req.body)) {
+      rows = req.body;
+      quotNo = rows[0]?.QUOT_NO;
+    } else {
+      quotNo = req.body?.QUOT_NO;
+      rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     }
 
-    console.log("Qt Terms Items ==>", lpoItems);
+    if (!quotNo) {
+      return res.status(400).json({ message: "QUOT_NO is required" });
+    }
+
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
         return res.status(500).json({ message: "Error getting connection" });
       }
 
+      const query = (sql, params) =>
+        new Promise((resolve, reject) => {
+          conn.query(sql, params, (err, result) => (err ? reject(err) : resolve(result)));
+        });
+
+      const fail = (error, message) => {
+        console.error(message, error);
+        conn.rollback(() => {
+          conn.release();
+          res.status(500).json({ message, error });
+        });
+      };
+
       conn.beginTransaction(async (err) => {
+        if (err) {
+          conn.release();
+          return res.status(500).json({ message: "Transaction error", error: err });
+        }
+
         try {
-          if (err) {
-            console.error("Transaction Error:", err);
-            conn.release(); // Release the connection back to the pool
-            return res.status(500).json({ message: "Transaction error", error: err });
+          // Step 1: remove all existing terms for this quotation
+          await query("DELETE FROM quot_terms_cond WHERE QUOT_NO = ?", [quotNo]);
+
+          // Step 2: insert the rows currently in the grid
+          if (rows.length) {
+            const values = rows.map(row => [
+              quotNo, row.SR_NO, row.TERMS_HDR, row.TERMS_DETAILS,
+            ]);
+            await query(
+              "INSERT INTO quot_terms_cond (QUOT_NO, SR_NO, TERMS_HDR, TERMS_DETAILS) VALUES ?",
+              [values]
+            );
           }
 
-          // ✅ Step 2: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-              INSERT INTO quot_terms_cond (QUOT_NO, SR_NO, TERMS_HDR, TERMS_DETAILS)
-              VALUES ? 
-              ON DUPLICATE KEY UPDATE 
-              TERMS_HDR = COALESCE(VALUES(TERMS_HDR), TERMS_HDR), 
-              TERMS_DETAILS = COALESCE(VALUES(TERMS_DETAILS), TERMS_DETAILS)
-            
-            `;
-          const values = lpoItems.map(row => [
-            row.QUOT_NO, row.SR_NO, row.TERMS_HDR, row.TERMS_DETAILS
-
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              //  console.log("quot_terms_ITEMS Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-
           conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Ters & Cond. saved successfully!" });
+            if (err) return fail(err, "Commit error");
+            conn.release();
+            res.json({ message: "Terms & Cond. saved successfully!" });
           });
-
         } catch (error) {
-          console.error("Transaction Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction failed, rolled back", error });
-          });
-        };
+          fail(error, "Transaction failed, rolled back");
+        }
       });
     });
   } catch (error) {
-    console.log("QT Terms Cond  save - internal error :", error)
+    console.log("QT Terms Cond save - internal error:", error);
     res.status(500).json({ message: "Internal Server Error", error });
   }
 });
+
 //
 app.get("/api/InvStlByVchr/:tranType/:vchrNo", function (req, res) {
   connection.query(

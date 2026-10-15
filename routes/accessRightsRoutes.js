@@ -17,11 +17,22 @@
  *   GET  /api/access/users/:username/overrides    → role value + user exception, per group
  *
  * Write (admin only)
+ *   POST   /api/access/modules/sync               → { groups:[{module_code,module_name,menu_group,is_entry,order}], containers:[code] }
+ *                                                   Access Rights calls this on open with the Mainmenu.tsx list
  *   POST   /api/access/roles                      → { role_name, remarks, copy_from? }
  *   PUT    /api/access/roles/:role                → { remarks }
  *   DELETE /api/access/roles/:role                → only if no user has the role
- *   PUT    /api/access/roles/:role/permissions    → { rows:[{module_code,can_view,can_add,can_edit,can_delete,can_post}] }
- *   PUT    /api/access/users/:username/overrides  → { rows:[{module_code,can_view..can_post: 'Y'|'N'|null}] }
+ *   PUT    /api/access/roles/:role/permissions    → { rows:[{module_code,module_name?,menu_group?,is_entry?,sort_order?,
+ *                                                         can_view,can_add,can_edit,can_delete,can_post}] }
+ *   PUT    /api/access/users/:username/overrides  → { rows:[{module_code,module_name?,menu_group?,is_entry?,sort_order?,
+ *                                                         can_view..can_post: 'Y'|'N'|null}] }
+ *
+ * app_modules sync:
+ *   The grid's group list comes from Mainmenu.tsx, but loads and /my-permissions
+ *   read from app_modules. The Access Rights screen posts the full menu list to
+ *   /access/modules/sync when it opens: new keys are added, removed keys are set
+ *   inactive. As a fallback, a saved rights row that carries module_name is also
+ *   upserted into app_modules.
  *
  * Registration in HayatDb.js, just after  app.use("/api", authMiddleware);
  *   authMiddleware.init(connection);
@@ -33,6 +44,7 @@ const authMiddleware = require("../middleware/authMiddleware");
 
 const ACTIONS = ["can_view", "can_add", "can_edit", "can_delete", "can_post"];
 const PROTECTED_ROLES = ["admin", "user", "viewer"];   // cannot be deleted
+const KEEP_ACTIVE = ["utilities"];                     // checked by canRead; never deactivated by sync
 const yn = (v) => (v === "Y" || v === true || v === 1 ? "Y" : "N");
 const ynOrNull = (v) => (v === null || v === undefined || v === "" ? null : yn(v));
 
@@ -42,6 +54,21 @@ module.exports = function (connection) {
   const q = async (sql, params = []) => (await db.query(sql, params))[0];
   // pool → own connection for the transaction; single connection → use it directly
   const getConn = async () => (typeof db.getConnection === "function" ? db.getConnection() : db);
+
+  // ── keep app_modules in step with Mainmenu.tsx ────────────────────────────
+  // Registers a menu group (or refreshes its name / group / order) when the
+  // saved row carries module_name. is_entry is set only for a new group, so a
+  // value set by hand on an existing group is kept.
+  const syncModule = async (conn, r) => {
+    if (!r.module_code || !r.module_name) return;
+    await conn.query(
+      `INSERT INTO app_modules (module_code, module_name, menu_group, is_entry, sort_order, is_active)
+       VALUES (?,?,?,?,?,'Y')
+       ON DUPLICATE KEY UPDATE module_name=VALUES(module_name), menu_group=VALUES(menu_group),
+         sort_order=VALUES(sort_order), is_active='Y'`,
+      [r.module_code, r.module_name, r.menu_group || null,
+       r.is_entry === "N" ? "N" : "Y", Number(r.sort_order) || 0]);
+  };
 
   // ── guards ────────────────────────────────────────────────────────────────
   const isAdmin = (req) => req.user && req.user.role === "admin";
@@ -90,6 +117,67 @@ module.exports = function (connection) {
         `SELECT module_code, module_name, menu_group, is_entry, sort_order
            FROM app_modules WHERE is_active='Y' ORDER BY sort_order`));
     } catch (e) { res.status(500).json({ message: e.message }); }
+  });
+
+  // ── sync menu groups from Mainmenu.tsx (called when Access Rights opens) ──
+  // Body: { modules:[{ module_code, module_name, menu_group?, is_entry?, sort_order? }] }
+  // • new codes are added (is_entry from the payload, default 'Y')
+  // • existing codes get name / group / order refreshed and are made active
+  //   (is_entry on existing rows is left alone, so hand-set values are kept)
+  // • codes no longer in the menu are set is_active='N' (rights rows are kept,
+  //   so putting the menu key back restores them)
+  router.post("/access/modules/sync", adminOnly, async (req, res) => {
+    // accessGroups.ts sends { groups:[...], containers:[...] }; { modules:[...] } is also accepted
+    const src = Array.isArray(req.body.groups) ? req.body.groups
+              : Array.isArray(req.body.modules) ? req.body.modules : [];
+    const list = src
+      .filter((m) => m && m.module_code && m.module_name)
+      .map((m, i) => ({
+        module_code: String(m.module_code).trim().slice(0, 40),
+        module_name: String(m.module_name).trim(),
+        menu_group: m.menu_group ? String(m.menu_group).trim() : null,
+        is_entry: m.is_entry === "N" ? "N" : "Y",
+        sort_order: Number.isFinite(Number(m.sort_order ?? m.order)) ? Number(m.sort_order ?? m.order) + 1 : i + 1,
+      }));
+    // split parents (now only containers in the menu) stay active: older screens still check them
+    const containers = (Array.isArray(req.body.containers) ? req.body.containers : [])
+      .map((c) => String(c).trim()).filter(Boolean);
+
+    // Guard: a broken or empty menu list must never deactivate every group.
+    if (list.length < 10) {
+      return res.status(400).json({ message: `Sync refused: only ${list.length} menu group(s) received.` });
+    }
+
+    const conn = await getConn();
+    try {
+      await conn.beginTransaction();
+      const [existing] = await conn.query("SELECT module_code FROM app_modules");
+      const known = new Set(existing.map((r) => r.module_code));
+
+      let added = 0;
+      for (const m of list) {
+        if (!known.has(m.module_code)) added++;
+        await conn.query(
+          `INSERT INTO app_modules (module_code, module_name, menu_group, is_entry, sort_order, is_active)
+           VALUES (?,?,?,?,?,'Y')
+           ON DUPLICATE KEY UPDATE module_name=VALUES(module_name), menu_group=VALUES(menu_group),
+             sort_order=VALUES(sort_order), is_active='Y'`,
+          [m.module_code, m.module_name, m.menu_group, m.is_entry, m.sort_order]);
+      }
+
+      // Groups the guards check directly stay active even if not in the menu list.
+      const keep = [...new Set([...list.map((m) => m.module_code), ...containers, ...KEEP_ACTIVE])];
+      const [off] = await conn.query(
+        "UPDATE app_modules SET is_active='N' WHERE is_active='Y' AND module_code NOT IN (?)", [keep]);
+
+      await conn.commit();
+      if (added || off.affectedRows) done();
+      res.json({ message: "Menu groups synced.", total: list.length, added, deactivated: off.affectedRows });
+    } catch (e) {
+      await conn.rollback();
+      console.error("[access rights] module sync:", e.message);
+      res.status(500).json({ message: e.message });
+    } finally { if (conn !== db && conn.release) conn.release(); }
   });
 
   // ── roles ─────────────────────────────────────────────────────────────────
@@ -182,7 +270,11 @@ module.exports = function (connection) {
     const conn = await getConn();
     try {
       await conn.beginTransaction();
+      let registered = 0;
       for (const r of rows) {
+        if (!r.module_code) continue;
+        if (r.module_name) { await syncModule(conn, r); registered++; }
+
         const v = ACTIONS.map((a) => yn(r[a]));
         if (v[0] === "N") { v[1] = v[2] = v[3] = v[4] = "N"; }   // no View → no other right
         await conn.query(
@@ -194,9 +286,13 @@ module.exports = function (connection) {
       }
       await conn.commit();
       done();
+      if (!registered && rows.length) {
+        console.warn("[access rights] save carried no module_name — app_modules not synced");
+      }
       res.json({ message: `Rights saved for "${role}" (${rows.length} groups).` });
     } catch (e) {
       await conn.rollback();
+      console.error("[access rights] save:", e.message);
       res.status(500).json({ message: e.message });
     } finally { if (conn !== db && conn.release) conn.release(); }
   });
@@ -237,6 +333,8 @@ module.exports = function (connection) {
     try {
       await conn.beginTransaction();
       for (const r of rows) {
+        if (!r.module_code) continue;
+        await syncModule(conn, r);   // same fix as role rights: new groups must exist in app_modules
         const v = ACTIONS.map((a) => ynOrNull(r[a]));
         if (v.every((x) => x === null)) {
           await conn.query(
@@ -258,6 +356,7 @@ module.exports = function (connection) {
       res.json({ message: `Exceptions saved for "${username}".` });
     } catch (e) {
       await conn.rollback();
+      console.error("[access rights] overrides save:", e.message);
       res.status(500).json({ message: e.message });
     } finally { if (conn !== db && conn.release) conn.release(); }
   });
