@@ -4622,6 +4622,7 @@ app.get("/api/drawingReg", function (req, res) {
   const { start_date, end_date } = req.query;
   const query = `
         SELECT 
+           srno_row_id,
             SL_NO,
             DATE_FORMAT(DRAW_DATE, '%d/%m/%Y')     AS DRAW_DATE,
             CLIENT_NAME,
