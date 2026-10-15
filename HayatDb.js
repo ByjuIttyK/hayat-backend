@@ -7665,3 +7665,6 @@ app.use("/api", nsItemQuery(connection));
 //
 const quotRevisionApi = require("./routes/quotRevisionApi");
 app.use("/api", quotRevisionApi(connection));
+// Below panel for drawing Reg
+const drawRegPanelsApi = require("./routes/drawRegPanelsApi");
+app.use("/api", drawRegPanelsApi(connection));
