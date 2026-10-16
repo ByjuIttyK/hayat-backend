@@ -6173,7 +6173,7 @@ app.get("/api/items/:id", function (req, res) {
   connection.query(
     "select  ITEM_CODE, ITEM_NAME1,LOC_CODE, CAT_CODE, SUB_CAT, OP_STOCK,OP_RATE, CL_STOCK, " +
     "ITEM_UNIT,  COST_PRICE, SALE_PRICE , REORD_QTY, REORD_LVL ,MAX_LEVEL,ITEM_PACK, " +
-    " ITEM_PACK_FACTOR,SUP_CODE, SALES_ACCOUNT,BRAND " +
+    " ITEM_PACK_FACTOR,SUP_CODE, SALES_ACCOUNT,BRAND,ARTICLE_CODE " +
     " FROM item_mst WHERE ITEM_CODE= ?",
     [req.params.id],
 
