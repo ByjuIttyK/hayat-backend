@@ -7668,3 +7668,6 @@ app.use("/api", quotRevisionApi(connection));
 // Below panel for drawing Reg
 const drawRegPanelsApi = require("./routes/drawRegPanelsApi");
 app.use("/api", drawRegPanelsApi(connection));
+//
+const drawRegAiScanApi = require("./routes/drawRegAiScanApi");
+app.use("/api", drawRegAiScanApi(connection));
