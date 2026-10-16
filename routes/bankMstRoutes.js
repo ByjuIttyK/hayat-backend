@@ -48,7 +48,7 @@ module.exports = function (connection) {
       const [rows] = await db.query(
         `SELECT BANK_CODE, BANK_NAME
            FROM bank_mst
-          WHERE PDC_IND = 'B'
+          WHERE PDC_IND = 'N'
           ORDER BY BANK_CODE`
       );
       res.json(rows);

@@ -20,12 +20,15 @@
 const express = require("express");
 
 // Tables that hold the content of a quotation, keyed by the quote number.
-// ── Add the notes / terms tables here if they are separate tables keyed by QUOT_NO. ──
+// A table missing from a database is skipped, so the revision is still created.
 // GET /api/quot-revision/info returns `otherTables`: every other table that has a
 // QUOT_NO column and is NOT copied — use it to check nothing is missing.
 const CHILD_TABLES = [
   { table: "quot_item", key: "QUOT_NO" },
   { table: "quot_technical_details", key: "QUOT_NO" },
+  { table: "quot_technical_para", key: "QUOT_NO" },
+  { table: "quot_terms_cond", key: "QUOT_NO" },
+  { table: "quot_notes", key: "QUOT_NO" },
 ];
 
 // Header fields that must not carry over to a fresh revision.
