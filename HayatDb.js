@@ -7671,3 +7671,6 @@ app.use("/api", drawRegPanelsApi(connection));
 //
 const drawRegAiScanApi = require("./routes/drawRegAiScanApi");
 app.use("/api", drawRegAiScanApi(connection));
+//
+const sinqAiScanApi = require("./routes/sinqAiScanApi");
+app.use("/api", sinqAiScanApi(connection));
