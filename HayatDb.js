@@ -7674,3 +7674,5 @@ app.use("/api", drawRegAiScanApi(connection));
 //
 const sinqAiScanApi = require("./routes/sinqAiScanApi");
 app.use("/api", sinqAiScanApi(connection));
+//
+app.use("/api", require("./routes/gridNumericFieldsApi")(connection));
