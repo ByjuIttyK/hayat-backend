@@ -195,7 +195,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await db.query(
         `SELECT h.INV_NO,
-                DATE_FORMAT(h.INV_DATE, '%Y-%m-%d') AS INV_DATE,
+                DATE_FORMAT(h.INV_DATE, '%d-%m-%Y') AS INV_DATE,
                 h.CUST_CODE,
                 c.CUST_NAME,
                 h.NARRATION,
