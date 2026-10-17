@@ -5786,7 +5786,7 @@ app.get("/api/purchaseReport", (req, res) => {
 
   const sql =
     `SELECT ${selectCols},
-            SUM(v.QTY) AS TOTAL_QTY, MAX(v.COST) AS COST, SUM(v.AMOUNT) AS TOTAL_AMOUNT
+            SUM(v.QTY) AS TOTAL_QTY, MAX(v.COST) AS COST, SUM(AMOUNT) AS AMOUNT,SUM(DISC_AMT) AS TOTAL_DISC, SUM(VAT_AMOUNT) AS VAT_AMOUNT,  SUM(v.NET_AMOUNT) AS TOTAL_AMOUNT
        FROM v_purchase_details v
       WHERE v.PJV_DATE >= ? AND v.PJV_DATE < DATE_ADD(?, INTERVAL 1 DAY)${codeFilter}
       GROUP BY ${groupCols}
