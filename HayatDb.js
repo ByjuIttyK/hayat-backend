@@ -7676,3 +7676,5 @@ const sinqAiScanApi = require("./routes/sinqAiScanApi");
 app.use("/api", sinqAiScanApi(connection));
 //
 app.use("/api", require("./routes/gridNumericFieldsApi")(connection));
+//
+app.use("/api", require("./routes/avgCostApi")(connection));
