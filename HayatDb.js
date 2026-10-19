@@ -3802,7 +3802,7 @@ app.get("/api/joblist/:custCd?", function (req, res) {
       console.error("Error fetching joblist:", err);
       return res.status(500).json({ error: err.message });
     }
-    console.log("JOBLST", custCd ? `(filtered: ${custCd})` : "(all)", result.length, "rows");
+  //  console.log("JOBLST", custCd ? `(filtered: ${custCd})` : "(all)", result.length, "rows");
     res.json(result);
   });
 });
@@ -3823,7 +3823,7 @@ app.get("/api/joblistQuote/:jobNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log(" JOBLST", result);
+     //   console.log(" JOBLST", result);
         //  res.end(JSON.stringify(result.rows));
         res.json(result);
       }
@@ -3887,7 +3887,7 @@ app.get("/api/fponet/:fpoNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("Fpo_Net", result);
+      //  console.log("Fpo_Net", result);
         res.json(result);
       }
     }
@@ -3906,7 +3906,7 @@ app.get("/api/fpoitems/:fpoNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("Fpo_items ==>>>", result);
+       // console.log("Fpo_items ==>>>", result);
         res.json(result);
 
       }
@@ -3948,7 +3948,7 @@ app.get("/api/srvlst/:dys", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("srv list", result);
+     //   console.log("srv list", result);
         res.json(result);
       }
     }
@@ -4125,7 +4125,7 @@ app.get("/api/sadjhdr/:siv", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("STK_HDR Read", result);
+      //  console.log("STK_HDR Read", result);
         res.json(result);
       }
     }
@@ -4195,7 +4195,7 @@ app.get("/api/jobsalreg", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-        console.log("FABINVHDR =", result)
+      //  console.log("FABINVHDR =", result)
         res.json(result);
       }
 
@@ -4303,7 +4303,7 @@ app.get("/api/quotitem/:id", function (req, res) {
     function (error, results) {
       if (error) throw error;
       // console.log('quotitem', results);
-      console.log('quotitem', req.params.id);
+   //   console.log('quotitem', req.params.id);
       res.json(results);
 
     }
@@ -4357,7 +4357,7 @@ app.get("/api/invlist/:dys", function (req, res) {
         if (err) {
           throw err;
         } else {
-          console.log("Oracle INVLST", result.rows);
+       //   console.log("Oracle INVLST", result.rows);
           res.end(JSON.stringify(result.rows));
           conn.close();
         }
@@ -4407,7 +4407,7 @@ app.get("/api/fabinvjob/:job", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-        console.log("FABINVHDR =", result)
+       /// console.log("FABINVHDR =", result)
         res.json(result);
       }
 
@@ -4433,7 +4433,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-        console.log("FABINVHDR =", result);
+       // console.log("FABINVHDR =", result);
         res.json(result);
       }
     });
@@ -5801,13 +5801,11 @@ app.get("/api/purchaseReport", (req, res) => {
     res.json(rows);
   });
 });
-
 app.get("/api/suppur", function (req, res) {
-  // console.log('Sales Invoice Items ');
   const { ItemCd, start_date, end_date } = req.query;
-  //console.log('custsal==>',ItemCd,start_date,end_date);
+
   const query =
-    "SELECT t.*, c.SUP_NAME FROM (" +
+    "SELECT t.*, c.SUP_NAME, COALESCE(g.GROSS_AMT, 0) AS GROSS_AMT FROM (" +
     "  SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') AS PJV_DATE," +
     "  a.SUP_CODE, a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT as AMOUNT," +
     "  a.DISCOUNT, a.VAT_PERC, a.RND_OFF " +
@@ -5816,6 +5814,11 @@ app.get("/api/suppur", function (req, res) {
     (ItemCd ? "AND a.SUP_CODE = ? " : "") +
     ") t " +
     "LEFT OUTER JOIN sup_mst c ON (c.SUP_CODE = t.SUP_CODE) " +
+    // line total per PJV, summed once per PJV before the join
+    "LEFT OUTER JOIN (" +
+    "  SELECT PJV_NO, ROUND(SUM(COALESCE(QTY,0) * COALESCE(COST,0)), 2) AS GROSS_AMT " +
+    "  FROM purchase_items GROUP BY PJV_NO" +
+    ") g ON (g.PJV_NO = t.PJV_NO) " +
     "ORDER BY t.PJV_NO";
 
   const params = ItemCd
@@ -5824,11 +5827,11 @@ app.get("/api/suppur", function (req, res) {
 
   connection.query(query, params, function (err, result) {
     if (err) {
-      throw err;
-    } else {
-      console.log("Sup.Purchase", result);
-      res.json(result);
+      // a thrown error here would crash the whole API process
+      console.error("Sup.Purchase failed:", err);
+      return res.status(500).json({ message: err.sqlMessage || "Supplier purchase query failed" });
     }
+    res.json(result);
   });
 });
 app.get("/api/supdueinv", function (req, res) {
@@ -6302,30 +6305,63 @@ app.get("/api/stkled/:id/:stdt/:enddt", function (req, res) {
     }
   );
 });
+
+// item_mst columns (per DESC item_mst). Keys not in this list are ignored,
+// so screen-only fields (e.g. SUP_NAME on ItemEnt) never reach the SQL.
+// ITEM_DATE is left out on purpose: the table default (CURRENT_TIMESTAMP)
+// fills it on insert, and a save never overwrites the original creation date.
+const ITEM_MST_COLS = new Set([
+  "LOC_CODE", "ITEM_CODE", "CAT_CODE", "SUB_CAT", "BRAND", "BAR_CODE", "DIV_CODE",
+  "ITEM_NAME1", "ITEM_NAME2", "ITEM_UNIT", "ITEM_PACK", "OP_STOCK", "OP_RATE",
+  "CL_STOCK", "COST_PRICE", "COST_FC", "SALE_PRICE", "SALE_PRICE2", "SALE_PRICE3",
+  "SALE_PRICE4", "SALE_PRICE5", "REORD_LVL", "REORD_QTY", "MAX_LEVEL", "COUNTER_NO",
+  "USER_NAME", "LAST_COST", "ITEM_PACK_FACTOR", "PICT_FILENAME", "SUP_CODE",
+  "SALES_ACCOUNT", "SIZE_GROUP", "ARTICLE_CODE", "RACK_NO", "EXPIRY_DATE", "ITEM_TYPE",
+]);
+const ITEM_MST_KEYS = new Set(["LOC_CODE", "ITEM_CODE"]);   // PK — not in UPDATE clause
+const ITEM_MST_DATES = new Set(["EXPIRY_DATE"]);
+
+const pad2 = (n) => String(n).padStart(2, "0");
+// ISO string (or anything Date can parse) -> 'YYYY-MM-DD HH:MM:SS'.
+// Uses local time, matching how mysql2 read the value in the first place.
+const toMysqlDateTime = (v) => {
+  if (v === "" || v == null) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
+         `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+};
+
 app.post("/api/save-itemmst", (req, res) => {
-  const data = req.body; // Receive data from frontend
+  const data = req.body || {};
   console.log("Save-Items");
-  if (!data || Object.keys(data).length === 0) {
-    return res.status(400).json({ error: "No data provided" });
+
+  const keys = Object.keys(data).filter((k) => ITEM_MST_COLS.has(k));
+  if (!keys.includes("LOC_CODE") || !keys.includes("ITEM_CODE")) {
+    return res.status(400).json({ error: "LOC_CODE and ITEM_CODE are required" });
   }
 
-  // Extract keys and values from the request body
-  const columns = Object.keys(data).join(", ");
-  const values = Object.values(data);
-  const updateClause = Object.keys(data)
-    .map((key) => `${key} = VALUES(${key})`)
-    .join(", ");
+  const values = keys.map((k) => {
+    const v = data[k];
+    if (ITEM_MST_DATES.has(k)) return toMysqlDateTime(v);
+    return v === "" ? null : v;      // '' into a decimal column also fails in strict mode
+  });
 
-  // MySQL Query with ON DUPLICATE KEY UPDATE
-  const query = `INSERT INTO item_mst (${columns}) VALUES (${values.map(() => "?").join(", ")}) 
-                   ON DUPLICATE KEY UPDATE ${updateClause}`;
+  const updateCols = keys.filter((k) => !ITEM_MST_KEYS.has(k));
+  const updateClause = updateCols.length
+    ? updateCols.map((k) => `${k} = VALUES(${k})`).join(", ")
+    : "ITEM_CODE = ITEM_CODE";
+
+  const query = `INSERT INTO item_mst (${keys.join(", ")})
+                 VALUES (${keys.map(() => "?").join(", ")})
+                 ON DUPLICATE KEY UPDATE ${updateClause}`;
 
   connection.query(query, values, (err, result) => {
     if (err) {
       console.error("Error inserting/updating Item Master:", err);
-      return res.status(500).json({ error: "Database error" });
+      return res.status(500).json({ error: "Database error", detail: err.sqlMessage });
     }
-    res.json({ message: "Itens inserted/updated successfully", result });
+    res.json({ message: "Item inserted/updated successfully", result });
   });
 });
 
@@ -7678,3 +7714,6 @@ app.use("/api", sinqAiScanApi(connection));
 app.use("/api", require("./routes/gridNumericFieldsApi")(connection));
 //
 app.use("/api", require("./routes/avgCostApi")(connection));
+//
+const pjvListApi = require("./routes/pjvListApi");
+app.use("/api", pjvListApi(connection));

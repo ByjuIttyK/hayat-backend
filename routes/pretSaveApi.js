@@ -5,7 +5,8 @@
 //   app.use("/api", pretSaveApi(connection));
 //
 // Numbering (same pattern as save-fabinv / save-lpo / save-localpurch / save-ngp):
-//   ADD  → the real VCHR_NO is MAX+1 from pret_hdr, taken inside the save
+//   ADD  → the real VCHR_NO (format 000106RLV1 — see nextPretNo) is MAX+1 from
+//          pret_hdr, taken inside the save
 //          transaction, and the header goes in with a plain INSERT. VCHR_NO is
 //          the key of pret_hdr, so if two users save at the same instant the
 //          second INSERT fails with ER_DUP_ENTRY and the whole save is retried in
@@ -41,21 +42,28 @@ module.exports = function (connection) {
     return Number.isFinite(n) ? n : 0;
   };
 
-  // ── Next Purchase Return number ──
-  // Leading digits of VCHR_NO are the running number (CAST stops at the first
-  // non-digit, so a migrated "000105RLV1" counts as 105). Zero-padded to 10,
-  // the width of the column. If /api/getMaxDoc builds PRET numbers in a
-  // different shape, change only this function so both agree.
-  const PRET_NO_WIDTH = 10;
+  // ── Next Purchase Return number: 000105RLV1 → 000106RLV1 ──
+  // Format: 6-digit running number + the fixed suffix "RLV1" (as migrated
+  // from Oracle). The running number is the highest of:
+  //   • the 6 leading digits of every number already in that format, and
+  //   • any all-digit number saved by the old route (e.g. "0000000106" = 106),
+  // so a stray old-style number never lets the same running number be issued
+  // twice, whether or not it has been renamed yet.
+  const PRET_SUFFIX = "RLV1";
+  const PRET_DIGITS = 6;
   const nextPretNo = async (conn) => {
     const [r] = await q(
       conn,
-      `SELECT COALESCE(MAX(CAST(VCHR_NO AS UNSIGNED)), 0) AS mx
-         FROM pret_hdr
-        WHERE VCHR_NO REGEXP '^[0-9]'`,
-      []
+      `SELECT GREATEST(
+                COALESCE(MAX(CASE WHEN VCHR_NO REGEXP ?
+                                  THEN CAST(LEFT(VCHR_NO, ?) AS UNSIGNED) END), 0),
+                COALESCE(MAX(CASE WHEN VCHR_NO REGEXP '^[0-9]+$'
+                                  THEN CAST(VCHR_NO AS UNSIGNED) END), 0)
+              ) AS mx
+         FROM pret_hdr`,
+      [`^[0-9]{${PRET_DIGITS}}${PRET_SUFFIX}$`, PRET_DIGITS]
     );
-    return String(Number(r.mx) + 1).padStart(PRET_NO_WIDTH, "0");
+    return String(Number(r.mx) + 1).padStart(PRET_DIGITS, "0") + PRET_SUFFIX;
   };
 
   const MAX_ATTEMPTS = 5;
@@ -111,13 +119,14 @@ module.exports = function (connection) {
           // (The old route listed 6 columns but passed 7 values, so VAT_PERC was
           //  being written with the discount amount.)
           const insertPart = `
-            INSERT INTO pret_hdr (VCHR_NO, VCHR_DATE, SUP_CODE, INV_NO, INV_DATE, NARRATION,
+            INSERT INTO pret_hdr (VCHR_NO, VCHR_DATE, SUP_CODE,PJV_NO,INV_NO, INV_DATE, NARRATION,
                                   DISCOUNT, VAT_PERC, VAT_AMOUNT, INV_AMOUNT)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?)`;
           const upsertPart = `
             ON DUPLICATE KEY UPDATE
               VCHR_DATE  = VALUES(VCHR_DATE),
               SUP_CODE   = VALUES(SUP_CODE),
+              PJV_NO     =VALUES(PJV_NO),
               INV_NO     = VALUES(INV_NO),
               INV_DATE   = VALUES(INV_DATE),
               NARRATION  = VALUES(NARRATION),
@@ -129,6 +138,7 @@ module.exports = function (connection) {
             vchrNo,
             netData.PjvDt,
             String(netData.SupCd).trim(),
+             netData.PjvNo,
             String(netData.InvNo ?? "").trim() || null,
             netData.InvDt || null,
             netData.Narration ?? null,

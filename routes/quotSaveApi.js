@@ -98,8 +98,8 @@ module.exports = function (connection) {
             INSERT INTO quot_hdr
               (QUOT_NO, QUOT_DATE, CUST_CODE, PAYMENT_TERMS, ENGG_CODE, ATTN,
                YOUR_REF, SUBJECT, PROJECT_NAME, CURR_CODE, REV_NO, INQ_NO, TEL_NO,
-               AMOUNT, DISCOUNT, ROUND_OFF, VAT_PERC, VAT_AMOUNT, BOTTOM_LN)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+               AMOUNT, DISCOUNT, ROUND_OFF, VAT_PERC, VAT_AMOUNT, BOTTOM_LN, ADDR_LTR)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
           const upsertPart = `
             ON DUPLICATE KEY UPDATE
               QUOT_DATE     = COALESCE(VALUES(QUOT_DATE), QUOT_DATE),
@@ -119,7 +119,8 @@ module.exports = function (connection) {
               ROUND_OFF     = VALUES(ROUND_OFF),
               VAT_PERC      = VALUES(VAT_PERC),
               VAT_AMOUNT    = VALUES(VAT_AMOUNT),
-              BOTTOM_LN     = IF(?, VALUES(BOTTOM_LN), BOTTOM_LN)`;
+              BOTTOM_LN     = IF(?, VALUES(BOTTOM_LN), BOTTOM_LN),
+              ADDR_LTR      = IF(?, VALUES(ADDR_LTR), ADDR_LTR)`;
           // BOTTOM_LN (make / panel specifications, multi-line). Overwritten
           // only when the screen actually sends BottomLn, so a client that
           // doesn't know the field (e.g. a cached older build) can't blank it.
@@ -127,14 +128,20 @@ module.exports = function (connection) {
           const bottomLn = hasBottomLn
             ? (String(qtHdr.BottomLn ?? "").replace(/\r\n?/g, "\n").replace(/\s+$/, "") || null)
             : null;
+          // ADDR_LTR (opening text under PRICE SCHEDULE) — same guard as BOTTOM_LN.
+          const hasAddrLtr = Object.prototype.hasOwnProperty.call(qtHdr, "AddrLtr");
+          const addrLtr = hasAddrLtr
+            ? (String(qtHdr.AddrLtr ?? "").replace(/\r\n?/g, "\n").replace(/\s+$/, "") || null)
+            : null;
           const hdrParams = [
             qtNo, qtHdr.QtDt || null, qtHdr.CustCd, qtHdr.PayTrm, qtHdr.EngCd,
             qtHdr.Attn, qtHdr.YourRef, qtHdr.Subject, qtHdr.ProjName,
             qtHdr.CurrCd, qtHdr.RevNo, qtHdr.inqNo, qtHdr.TelNo,
             qtHdr.Amount || 0, qtHdr.Discount || 0, qtHdr.RoundOff || 0,
-            qtHdr.VatPerc || 0, qtHdr.VatAmount || 0, bottomLn,
+            qtHdr.VatPerc || 0, qtHdr.VatAmount || 0, bottomLn, addrLtr,
           ];
-          if (mode !== "ADD") hdrParams.push(hasBottomLn ? 1 : 0);
+          // the IF(?, …) flags, in the order they appear in the UPDATE clause
+          if (mode !== "ADD") hdrParams.push(hasBottomLn ? 1 : 0, hasAddrLtr ? 1 : 0);
           await q(conn, mode === "ADD" ? insertPart : insertPart + upsertPart, hdrParams);
 
           /* ── 2) items: wipe this quotation's rows (EDIT only — a new
