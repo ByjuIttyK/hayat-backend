@@ -1,6 +1,5 @@
 // routes/lpoRcvdApi.js
-// Received quantity per item for one LPO, from the v_lpo_srv view
-// (SRV lines come into that view with negative QTY).
+// Received quantity per item for one LPO (sum of SRV lines against it).
 // Register in HayatDb.js:
 //   const lpoRcvdApi = require("./routes/lpoRcvdApi");
 //   app.use("/api", lpoRcvdApi(connection));
@@ -19,13 +18,15 @@ module.exports = function (connection) {
     if (!lpoNo) return res.json([]);
 
     connection.query(
-      `SELECT TRIM(ITEM_CODE)  AS ITEM_CODE,
-              SUM(ABS(QTY))    AS RCVD_QTY
-         FROM v_lpo_srv
-        WHERE QTY < 0
-          AND LPO_NO = ?
-          AND ITEM_CODE IS NOT NULL
-        GROUP BY TRIM(ITEM_CODE)`,
+      // Same figures as v_lpo_srv's SRV branch (QTY < 0), read from the base
+      // tables; numbers compared trimmed (old LPO numbers are space-padded).
+      `SELECT TRIM(s.ITEM_CODE)          AS ITEM_CODE,
+              SUM(ABS(IFNULL(s.QTY, 0)))  AS RCVD_QTY
+         FROM srv_items s
+         JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
+        WHERE TRIM(h.PO_NO) = TRIM(?)
+          AND s.ITEM_CODE IS NOT NULL
+        GROUP BY TRIM(s.ITEM_CODE)`,
       [lpoNo],
       (err, rows) => {
         if (err) {

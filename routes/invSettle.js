@@ -41,6 +41,18 @@ const MODES = {
 
 const SYNC_AMT_SETTLED = true; // also refresh tran_acc.AMT_SETTLED on save
 
+// Supplier's own invoice no / date for a purchase document (TRAN_TYPE '07').
+// The document number is PJV_NO in purchase_hdr (stock) and purchase_hdr_ns
+// (non-stock), PRCH_NO in ngp_net (non-goods). Each is joined on its primary
+// key, so this stays cheap; for any other tran type the columns come back NULL.
+const supInvJoin = (typeCol, docCol) => `
+      LEFT JOIN purchase_hdr    ph ON ${typeCol} = '07' AND ph.PJV_NO  = ${docCol}
+      LEFT JOIN purchase_hdr_ns pn ON ${typeCol} = '07' AND pn.PJV_NO  = ${docCol}
+      LEFT JOIN ngp_net         ng ON ${typeCol} = '07' AND ng.PRCH_NO = ${docCol}`;
+const supInvCols = `
+            COALESCE(ph.INV_NO, pn.INV_NO, ng.INV_NO)                                AS supInvNo,
+            DATE_FORMAT(COALESCE(ph.INV_DATE, pn.INV_DATE, ng.INV_DATE), '%d/%m/%Y') AS supInvDate`;
+
 module.exports = function (connection) {
   const router = express.Router();
   const db = connection.promise();
@@ -129,12 +141,12 @@ module.exports = function (connection) {
                 a.DIV_CODE                              AS divCode,
                 a.MAIN_SR_NO                            AS mainSrNo,
                 a.REF_NO                                AS refNo,
-                t.JOB_NO                                AS jobNo
+                t.JOB_NO                                AS jobNo,${supInvCols}
            FROM adj_dtl a
       LEFT JOIN tran_acc t
              ON t.TRAN_TYPE = a.STLD_TYPE
             AND t.vchr_no   = a.STLD_DOC
-            AND t.ACC_CODE  = a.ACC_CODE
+            AND t.ACC_CODE  = a.ACC_CODE${supInvJoin("a.STLD_TYPE", "a.STLD_DOC")}
           WHERE a.SOURCE_TYPE = ? AND a.SOURCE_DOC = ?
        ORDER BY a.MAIN_SR_NO, a.STLD_DOC`,
         [tranType, vchrNo]
@@ -158,12 +170,12 @@ module.exports = function (connection) {
             v.BALANCE                          AS balance,
             v.NAR                              AS narration,
             t.DIV_CODE                         AS divCode,
-            t.JOB_NO                           AS jobNo
+            t.JOB_NO                           AS jobNo,${supInvCols}
        FROM ${m.lovView} v
   LEFT JOIN tran_acc t
          ON t.TRAN_TYPE = v.TRAN_TYPE
         AND t.vchr_no   = v.VCHR_NO
-        AND t.ACC_CODE  = v.${m.lovCodeCol}
+        AND t.ACC_CODE  = v.${m.lovCodeCol}${supInvJoin("v.TRAN_TYPE", "v.VCHR_NO")}
       WHERE v.${m.lovCodeCol} = ?`;
 
   router.get("/inv-settle/invoices/:mode/:acCode", async (req, res) => {

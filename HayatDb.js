@@ -3641,26 +3641,51 @@ app.get("/api/quotetrment/:id", function (req, res) {
 //
 app.get("/api/lpolst/:dys", function (req, res) {
   console.log("LpoList");
+  const dys = Number(req.params.dys) || 0;
 
   connection.query(
-    "SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO,a.SUP_CODE, a.LPO_TYPE," +
-    "b.SUP_NAME,a.PLACE_DLV,a.PAY_TERMS, a.DELIVERY_REQ,a.AMOUNT, a.ATTN, a.CANCELLED, a.REQ_NO, a.SMAN_CODE, a.NARRATION " +
-    "FROM lpo_net a " +
-    "LEFT OUTER JOIN sup_mst b ON (a.SUP_CODE = b.SUP_CODE) " +
-    "WHERE a.LPO_DATE >= CURDATE() - INTERVAL ? DAY " +
-    "ORDER BY a.LPO_NO DESC",
-    [req.params.dys], // Passing the :dys parameter as a placeholder
+    `SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO, a.SUP_CODE, a.LPO_TYPE,
+            b.SUP_NAME, a.PLACE_DLV, a.PAY_TERMS, a.DELIVERY_REQ, a.AMOUNT, a.ATTN, a.CANCELLED,
+            a.REQ_NO, a.SMAN_CODE, a.NARRATION,
+            IFNULL(p.PENDING_QTY, 0) AS PENDING_QTY
+       FROM lpo_net a
+       LEFT JOIN sup_mst b ON a.SUP_CODE = b.SUP_CODE
+       LEFT JOIN (
+            SELECT o.LPO_NO, SUM(GREATEST(o.QTY - IFNULL(r.RCVD, 0), 0)) AS PENDING_QTY
+              FROM (
+                    SELECT TRIM(i.LPO_NO) AS LPO_NO, TRIM(i.ITEM_CODE) AS ITEM_CODE,
+                           SUM(IFNULL(i.QTY, 0)) AS QTY
+                      FROM lpo_items i
+                      JOIN lpo_net n ON n.LPO_NO = i.LPO_NO
+                     WHERE n.LPO_DATE >= CURDATE() - INTERVAL ? DAY
+                       AND n.JOB_NO IS NULL
+                       AND i.ITEM_CODE IS NOT NULL AND TRIM(i.ITEM_CODE) <> ''
+                     GROUP BY TRIM(i.LPO_NO), TRIM(i.ITEM_CODE)
+                   ) o
+              LEFT JOIN (
+                    SELECT TRIM(h.PO_NO) AS PO_NO, TRIM(s.ITEM_CODE) AS ITEM_CODE,
+                           SUM(IFNULL(s.QTY, 0)) AS RCVD
+                      FROM srv_items s
+                      JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
+                     WHERE h.SRV_DATE >= CURDATE() - INTERVAL ? DAY
+                     GROUP BY TRIM(h.PO_NO), TRIM(s.ITEM_CODE)
+                   ) r ON r.PO_NO = o.LPO_NO AND r.ITEM_CODE = o.ITEM_CODE
+             GROUP BY o.LPO_NO
+       ) p ON p.LPO_NO = TRIM(a.LPO_NO)
+      WHERE a.LPO_DATE >= CURDATE() - INTERVAL ? DAY
+      ORDER BY a.LPO_NO DESC`,
+    [dys, dys, dys],
     function (err, results) {
       if (err) {
-        throw err;
+        console.error("lpolst failed:", err);
+        return res.status(500).json({ message: err.sqlMessage || "Query failed" });
       }
-      //console.log(res.json(results));
       res.json(results);
-
     }
   );
 });
 
+//with Pending LPO
 app.get("/api/lpolstns/:dys", function (req, res) {
   console.log("LpoList Non-Stock");
 
@@ -7725,3 +7750,7 @@ app.use("/api", lpoRcvdApi(connection));
 //
 const drawRegDeleteApi = require("./routes/drawRegDeleteApi");
 app.use("/api", drawRegDeleteApi(connection));
+//
+ const lpoPendingItemsApi = require("./routes/lpoPendingItemsApi");
+  app.use("/api", lpoPendingItemsApi(connection));
+//
