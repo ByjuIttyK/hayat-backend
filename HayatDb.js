@@ -5803,9 +5803,11 @@ app.get("/api/purchaseReport", (req, res) => {
 });
 app.get("/api/suppur", function (req, res) {
   const { ItemCd, start_date, end_date } = req.query;
-
   const query =
-    "SELECT t.*, c.SUP_NAME, COALESCE(g.GROSS_AMT, 0) AS GROSS_AMT FROM (" +
+    "SELECT t.*, c.SUP_NAME, COALESCE(g.GROSS_AMT, 0) AS GROSS_AMT, " +
+    // VAT on the line total (gross) after discount
+    "  ROUND((COALESCE(g.GROSS_AMT, 0) - COALESCE(t.DISCOUNT, 0)) * COALESCE(t.VAT_PERC, 0) / 100, 2) AS VAT_AMOUNT " +
+    "FROM (" +
     "  SELECT a.PJV_NO, DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') AS PJV_DATE," +
     "  a.SUP_CODE, a.PO_NO, a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT as AMOUNT," +
     "  a.DISCOUNT, a.VAT_PERC, a.RND_OFF " +
