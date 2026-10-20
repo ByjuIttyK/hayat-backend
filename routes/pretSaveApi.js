@@ -20,6 +20,7 @@
 // `desc pret_hdr;` (the screen already reads all of these back via /api/prethdr).
 
 const express = require("express");
+const { postToTranAcc } = require('../services/glPostingService');
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -173,6 +174,19 @@ module.exports = function (connection) {
             );
             console.log("pret_items deleted rows:", delResult.affectedRows);
           }
+          //GL
+     await postToTranAcc({
+        ModuleName: 'PRET',
+        InvNo: vchrNo,
+        Date: netData.PjvDt,
+        Narration: netData.Narration|| '',
+        SupCode: netData.SupCd,
+        GrossAmt: netData.GrossAmt,
+        VatAmt: netData.VatAmt,
+        DiscAmt: netData.discAmt,
+        NetAmt: netData.AMOUNT,
+        JobNo: netData.PjvNo || null,
+      }, conn);
 
           await commit(conn);
           return vchrNo;

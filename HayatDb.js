@@ -3802,7 +3802,7 @@ app.get("/api/joblist/:custCd?", function (req, res) {
       console.error("Error fetching joblist:", err);
       return res.status(500).json({ error: err.message });
     }
-  //  console.log("JOBLST", custCd ? `(filtered: ${custCd})` : "(all)", result.length, "rows");
+    //  console.log("JOBLST", custCd ? `(filtered: ${custCd})` : "(all)", result.length, "rows");
     res.json(result);
   });
 });
@@ -3823,7 +3823,7 @@ app.get("/api/joblistQuote/:jobNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-     //   console.log(" JOBLST", result);
+        //   console.log(" JOBLST", result);
         //  res.end(JSON.stringify(result.rows));
         res.json(result);
       }
@@ -3887,7 +3887,7 @@ app.get("/api/fponet/:fpoNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-      //  console.log("Fpo_Net", result);
+        //  console.log("Fpo_Net", result);
         res.json(result);
       }
     }
@@ -3906,7 +3906,7 @@ app.get("/api/fpoitems/:fpoNo", function (req, res) {
       if (err) {
         throw err;
       } else {
-       // console.log("Fpo_items ==>>>", result);
+        // console.log("Fpo_items ==>>>", result);
         res.json(result);
 
       }
@@ -3948,7 +3948,7 @@ app.get("/api/srvlst/:dys", function (req, res) {
       if (err) {
         throw err;
       } else {
-     //   console.log("srv list", result);
+        //   console.log("srv list", result);
         res.json(result);
       }
     }
@@ -4125,7 +4125,7 @@ app.get("/api/sadjhdr/:siv", function (req, res) {
       if (err) {
         throw err;
       } else {
-      //  console.log("STK_HDR Read", result);
+        //  console.log("STK_HDR Read", result);
         res.json(result);
       }
     }
@@ -4195,7 +4195,7 @@ app.get("/api/jobsalreg", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-      //  console.log("FABINVHDR =", result)
+        //  console.log("FABINVHDR =", result)
         res.json(result);
       }
 
@@ -4303,7 +4303,7 @@ app.get("/api/quotitem/:id", function (req, res) {
     function (error, results) {
       if (error) throw error;
       // console.log('quotitem', results);
-   //   console.log('quotitem', req.params.id);
+      //   console.log('quotitem', req.params.id);
       res.json(results);
 
     }
@@ -4357,7 +4357,7 @@ app.get("/api/invlist/:dys", function (req, res) {
         if (err) {
           throw err;
         } else {
-       //   console.log("Oracle INVLST", result.rows);
+          //   console.log("Oracle INVLST", result.rows);
           res.end(JSON.stringify(result.rows));
           conn.close();
         }
@@ -4407,7 +4407,7 @@ app.get("/api/fabinvjob/:job", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-       /// console.log("FABINVHDR =", result)
+        /// console.log("FABINVHDR =", result)
         res.json(result);
       }
 
@@ -4433,7 +4433,7 @@ app.get("/api/fabinvhdr/:inv", function (req, res) {
         console.error("Error executing query:", err);
         res.status(500).json({ error: "Query execution error" });
       } else {
-       // console.log("FABINVHDR =", result);
+        // console.log("FABINVHDR =", result);
         res.json(result);
       }
     });
@@ -6331,7 +6331,7 @@ const toMysqlDateTime = (v) => {
   const d = new Date(v);
   if (isNaN(d.getTime())) return null;
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ` +
-         `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+    `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 };
 
 app.post("/api/save-itemmst", (req, res) => {
@@ -7719,3 +7719,9 @@ app.use("/api", require("./routes/avgCostApi")(connection));
 //
 const pjvListApi = require("./routes/pjvListApi");
 app.use("/api", pjvListApi(connection));
+//
+const lpoRcvdApi = require("./routes/lpoRcvdApi");
+app.use("/api", lpoRcvdApi(connection));
+//
+const drawRegDeleteApi = require("./routes/drawRegDeleteApi");
+app.use("/api", drawRegDeleteApi(connection));
