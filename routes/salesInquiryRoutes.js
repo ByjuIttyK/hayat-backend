@@ -125,24 +125,28 @@ module.exports = function (connection) {
   // -------------------------------------------------------------------------
   // GET /api/sales-inquiry
   // -------------------------------------------------------------------------
-  router.get("/sales-inquiry", async (req, res) => {
-    try {
-      const [rows] = await db.query(
-        `SELECT s.INQ_NO,
-                DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
-                s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
-                s.SUBJECT, s.SINQ_STAT, s.REGRET, s.QUOTE_NO, s.QUOTE_DATE,
-                s.CUST_CONTACT_PER
-           FROM sales_inquiry s
-           LEFT JOIN cus_mst c ON c.CUST_CODE = s.CUST_CODE
-          ORDER BY s.INQ_NO DESC`
-      );
-      res.json(rows);
-    } catch (err) {
-      console.error("[sales-inquiry] list failed:", err);
-      res.status(500).json({ message: "Failed to fetch sales inquiries" });
-    }
-  });
+ router.get("/sales-inquiry", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT s.INQ_NO,
+              DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
+              s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
+              s.SUBJECT, s.SINQ_STAT, s.REGRET,
+              (SELECT MAX(q.QUOT_NO)
+                 FROM quot_hdr q
+                WHERE q.INQ_NO = s.INQ_NO) AS QUOTE_NO,
+              s.QUOTE_DATE,
+              s.CUST_CONTACT_PER
+         FROM sales_inquiry s
+         LEFT JOIN cus_mst c ON c.CUST_CODE = s.CUST_CODE
+        ORDER BY s.INQ_NO DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error("[sales-inquiry] list failed:", err);
+    res.status(500).json({ message: "Failed to fetch sales inquiries" });
+  }
+});
 
   // -------------------------------------------------------------------------
   // GET /api/sales-inquiry/next-no

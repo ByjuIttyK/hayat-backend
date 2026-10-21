@@ -4363,7 +4363,7 @@ app.get("/api/quotitem/:id", function (req, res) {
 
 
 app.get("/api/sinqlst/:dys", function (req, res) {
-  var pool = orcl1.getPool();
+ // var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('sinq List. ');
 
