@@ -3652,12 +3652,19 @@ app.get("/api/lpolst/:dys", function (req, res) {
     `SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO, a.SUP_CODE, a.LPO_TYPE,
             b.SUP_NAME, a.PLACE_DLV, a.PAY_TERMS, a.DELIVERY_REQ, a.AMOUNT, a.ATTN, a.CANCELLED,
             a.REQ_NO, a.SMAN_CODE, a.NARRATION,
-            IFNULL(p.PENDING_QTY, 0) AS PENDING_QTY
+                    
+            IFNULL(p.TOT_LPO_QTY, 0)  AS TOT_LPO_QTY,
+            IFNULL(p.TOT_RCVD_QTY, 0) AS TOT_RCVD_QTY,
+            IFNULL(p.PENDING_QTY, 0)  AS PENDING_QTY
+      
        FROM lpo_net a
        LEFT JOIN sup_mst b ON a.SUP_CODE = b.SUP_CODE
        LEFT JOIN (
             -- 2) one row per LPO: total pending across its lines
-            SELECT l.LPO_NO, SUM(GREATEST(l.QTY - l.RCVD, 0)) AS PENDING_QTY
+
+            SELECT l.LPO_NO,SUM(l.QTY)              AS TOT_LPO_QTY,
+                   SUM(l.RCVD)                      AS TOT_RCVD_QTY,
+                   SUM(GREATEST(l.QTY - l.RCVD, 0)) AS PENDING_QTY
               FROM (
                     -- 1) one row per LPO line with its received qty
                     SELECT o.LPO_NO, o.SR_NO, o.ITEM_CODE, o.QTY,
@@ -7771,6 +7778,6 @@ app.use("/api", lpoRcvdApi(connection));
 const drawRegDeleteApi = require("./routes/drawRegDeleteApi");
 app.use("/api", drawRegDeleteApi(connection));
 //
- const lpoPendingItemsApi = require("./routes/lpoPendingItemsApi");
-  app.use("/api", lpoPendingItemsApi(connection));
+const lpoPendingItemsApi = require("./routes/lpoPendingItemsApi");
+app.use("/api", lpoPendingItemsApi(connection));
 //
