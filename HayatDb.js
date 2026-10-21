@@ -3644,6 +3644,11 @@ app.get("/api/lpolst/:dys", function (req, res) {
   const dys = Number(req.params.dys) || 0;
 
   connection.query(
+    // Pending Qty per LPO = sum over its lines of (Qty − Rcvd), never below 0
+    // per line. Rcvd is matched per LPO line on LPO No + Sr No (numeric, so
+    // '1' = '0001'), plus Item Code when the LPO line has one — the same rule
+    // as /lpo-rcvd on the LPO screen and /lpo-pending-items. Blank-item lines
+    // are included. Numbers compared trimmed (old LPO numbers are space-padded).
     `SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO, a.SUP_CODE, a.LPO_TYPE,
             b.SUP_NAME, a.PLACE_DLV, a.PAY_TERMS, a.DELIVERY_REQ, a.AMOUNT, a.ATTN, a.CANCELLED,
             a.REQ_NO, a.SMAN_CODE, a.NARRATION,
@@ -3651,26 +3656,41 @@ app.get("/api/lpolst/:dys", function (req, res) {
        FROM lpo_net a
        LEFT JOIN sup_mst b ON a.SUP_CODE = b.SUP_CODE
        LEFT JOIN (
-            SELECT o.LPO_NO, SUM(GREATEST(o.QTY - IFNULL(r.RCVD, 0), 0)) AS PENDING_QTY
+            -- 2) one row per LPO: total pending across its lines
+            SELECT l.LPO_NO, SUM(GREATEST(l.QTY - l.RCVD, 0)) AS PENDING_QTY
               FROM (
-                    SELECT TRIM(i.LPO_NO) AS LPO_NO, TRIM(i.ITEM_CODE) AS ITEM_CODE,
-                           SUM(IFNULL(i.QTY, 0)) AS QTY
-                      FROM lpo_items i
-                      JOIN lpo_net n ON n.LPO_NO = i.LPO_NO
-                     WHERE n.LPO_DATE >= CURDATE() - INTERVAL ? DAY
-                       AND n.JOB_NO IS NULL
-                       AND i.ITEM_CODE IS NOT NULL AND TRIM(i.ITEM_CODE) <> ''
-                     GROUP BY TRIM(i.LPO_NO), TRIM(i.ITEM_CODE)
-                   ) o
-              LEFT JOIN (
-                    SELECT TRIM(h.PO_NO) AS PO_NO, TRIM(s.ITEM_CODE) AS ITEM_CODE,
-                           SUM(IFNULL(s.QTY, 0)) AS RCVD
-                      FROM srv_items s
-                      JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
-                     WHERE h.SRV_DATE >= CURDATE() - INTERVAL ? DAY
-                     GROUP BY TRIM(h.PO_NO), TRIM(s.ITEM_CODE)
-                   ) r ON r.PO_NO = o.LPO_NO AND r.ITEM_CODE = o.ITEM_CODE
-             GROUP BY o.LPO_NO
+                    -- 1) one row per LPO line with its received qty
+                    SELECT o.LPO_NO, o.SR_NO, o.ITEM_CODE, o.QTY,
+                           IFNULL(SUM(r.RCVD), 0) AS RCVD
+                      FROM (
+                            SELECT TRIM(i.LPO_NO)                AS LPO_NO,
+                                   (i.SR_NO + 0)                 AS SR_NO,
+                                   TRIM(IFNULL(i.ITEM_CODE, '')) AS ITEM_CODE,
+                                   SUM(IFNULL(i.QTY, 0))         AS QTY
+                              FROM lpo_items i
+                              JOIN lpo_net n ON n.LPO_NO = i.LPO_NO
+                             WHERE n.LPO_DATE >= CURDATE() - INTERVAL ? DAY
+                               AND n.JOB_NO IS NULL
+                             GROUP BY TRIM(i.LPO_NO), (i.SR_NO + 0),
+                                      TRIM(IFNULL(i.ITEM_CODE, ''))
+                           ) o
+                      LEFT JOIN (
+                            SELECT TRIM(h.PO_NO)                 AS PO_NO,
+                                   (s.SR_NO + 0)                 AS SR_NO,
+                                   TRIM(IFNULL(s.ITEM_CODE, '')) AS ITEM_CODE,
+                                   SUM(ABS(IFNULL(s.QTY, 0)))    AS RCVD
+                              FROM srv_items s
+                              JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
+                             WHERE h.SRV_DATE >= CURDATE() - INTERVAL ? DAY
+                             GROUP BY TRIM(h.PO_NO), (s.SR_NO + 0),
+                                      TRIM(IFNULL(s.ITEM_CODE, ''))
+                           ) r
+                        ON r.PO_NO = o.LPO_NO
+                       AND r.SR_NO = o.SR_NO
+                       AND (o.ITEM_CODE = '' OR r.ITEM_CODE = o.ITEM_CODE)
+                     GROUP BY o.LPO_NO, o.SR_NO, o.ITEM_CODE, o.QTY
+                   ) l
+             GROUP BY l.LPO_NO
        ) p ON p.LPO_NO = TRIM(a.LPO_NO)
       WHERE a.LPO_DATE >= CURDATE() - INTERVAL ? DAY
       ORDER BY a.LPO_NO DESC`,
