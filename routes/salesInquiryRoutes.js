@@ -132,7 +132,7 @@ module.exports = function (connection) {
               DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
               s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
               s.SUBJECT, s.SINQ_STAT, s.REGRET,
-              (SELECT MAX(q.QUOT_NO)
+              (SELECT MAX(q.QUOT_NO) 
                  FROM quot_hdr q
                 WHERE q.INQ_NO = s.INQ_NO) AS QUOTE_NO,
               s.QUOTE_DATE,
