@@ -5600,9 +5600,9 @@ app.get("/api/pretitems/:vchr", function (req, res) {
 
   connection.query(
     "select a.VCHR_NO,DATE_FORMAT(a.VCHR_DATE,'%d%m%Y') VCHR_DATE," +
-    " a.ITEM_CODE, b.ITEM_NAME1,a.QTY, a.COST ,a.SR_NO, (a.QTY * a.COST) AMOUNT" +
+    " a.ITEM_CODE, b.ITEM_NAME1 as ITEM_NAME,a.QTY, a.COST ,a.SR_NO, (a.QTY * a.COST) AMOUNT" +
     " from pret_items a" +
-    " left outer join item_mst b  on a.loc_code = b.loc_code and a.item_code = b.item_code " +
+    " left outer join item_mst b  on  a.item_code = b.item_code " +
     " where  a.vchr_no = ? " +
     "  ORDER BY a.SR_NO",
     [req.params.vchr],
