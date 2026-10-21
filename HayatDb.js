@@ -4276,33 +4276,32 @@ app.get("/api/invitem/:id", function (req, res) {
   );
 });
 
-
 app.get("/api/quotlst/:dys", function (req, res) {
-
-
   connection.query(
     "select a.QUOT_NO,DATE_FORMAT(a.QUOT_DATE, '%d/%m/%Y') AS QUOT_DATE, a.CUST_CODE," +
     " a.PROJECT_NAME,a.SUBJECT, a.YOUR_REF,a.INQ_NO," +
     " a.ATTN,b.CUST_NAME, a.DETAILS, a.NARRATION, a.ENGG_CODE SMAN_CODE,c.ENG_NAME, " +
-    "a.CANCELLED ,a.PAYMENT_TERMS,a.AMOUNT" +
+    " a.CANCELLED ,a.PAYMENT_TERMS,a.AMOUNT, j.JOB_NO" +
     " from quot_hdr a  " +
     " left outer join cus_mst b on a.cust_code = b.cust_code " +
     " left outer join eng_mst c on  a.engg_code = c.eng_code  " +
+    " left outer join (select QUOT_REF, " +
+    "                         GROUP_CONCAT(JOB_NO ORDER BY JOB_NO SEPARATOR ', ') JOB_NO " +
+    "                    from job_card " +
+    "                   where QUOT_REF is not null " +
+    "                     and IFNULL(CANCEL_IND,'N') <> 'Y' " +
+    "                   group by QUOT_REF) j on j.QUOT_REF = a.QUOT_NO " +
     " where  a.QUOT_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY Substr(a.QUOT_NO,1,10) DESC ",
     [req.params.dys],
-//a.QUOT_DATE DESC,a.QUOT_NO
     function (err, results, fields) {
       if (err) {
         throw err;
       } else {
-        // console.log("Oracle QUOTLST", results);
         res.json(results);
-
       }
     }
   );
 });
-
 app.get("/api/quothdr/:id", function (req, res) {
 
   const sql = `
