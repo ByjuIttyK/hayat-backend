@@ -20,6 +20,12 @@
 // Received qty is computed per LPO line in a correlated subquery, so a
 // blank-item line can never be duplicated by several SRV item codes.
 // Only lines with something still to receive are returned.
+//
+// GET /api/lpo-srv-list/:lpoNo
+//   → [{ SRV_NO, SRV_DATE, INV_NO, INV_DATE, SRV_QTY, INV_AMT_VAT, CAN_CEL }]
+//   Every SRV raised against the LPO (srv_hdr.PO_NO = LPO No, both trimmed)
+//   — for the Received Qty list icon on the LPO list. SRV_QTY is the SRV's
+//   total qty (ABS, same as /lpo-rcvd).
 
 const express = require("express");
 
@@ -78,6 +84,34 @@ module.exports = function (connection) {
       (err, rows) => {
         if (err) {
           console.error("lpo-pending-items failed:", err);
+          return res.status(500).json({ message: err.sqlMessage || "Query failed" });
+        }
+        res.json(rows);
+      }
+    );
+  });
+
+  router.get("/lpo-srv-list/:lpoNo", (req, res) => {
+    const lpoNo = String(req.params.lpoNo ?? "").trim();
+    if (!lpoNo) return res.json([]);
+
+    connection.query(
+      `SELECT h.SRV_NO,
+              DATE_FORMAT(h.SRV_DATE, '%d/%m/%Y') AS SRV_DATE,
+              h.INV_NO,
+              DATE_FORMAT(h.INV_DATE, '%d/%m/%Y') AS INV_DATE,
+              IFNULL(SUM(ABS(IFNULL(s.QTY, 0))), 0) AS SRV_QTY,
+              IFNULL(h.INV_AMT_VAT, 0)            AS INV_AMT_VAT,
+              h.CAN_CEL
+         FROM srv_hdr h
+         LEFT JOIN srv_items s ON s.SRV_NO = h.SRV_NO
+        WHERE TRIM(h.PO_NO) = ?
+        GROUP BY h.SRV_NO, h.SRV_DATE, h.INV_NO, h.INV_DATE, h.INV_AMT_VAT, h.CAN_CEL
+        ORDER BY h.SRV_DATE, h.SRV_NO`,
+      [lpoNo],
+      (err, rows) => {
+        if (err) {
+          console.error("lpo-srv-list failed:", err);
           return res.status(500).json({ message: err.sqlMessage || "Query failed" });
         }
         res.json(rows);
