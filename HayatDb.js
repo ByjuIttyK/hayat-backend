@@ -4288,9 +4288,9 @@ app.get("/api/quotlst/:dys", function (req, res) {
     " from quot_hdr a  " +
     " left outer join cus_mst b on a.cust_code = b.cust_code " +
     " left outer join eng_mst c on  a.engg_code = c.eng_code  " +
-    " where  a.QUOT_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.QUOT_DATE DESC,a.QUOT_NO DESC ",
+    " where  a.QUOT_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY Substr(a.QUOT_NO,1,10) DESC ",
     [req.params.dys],
-
+//a.QUOT_DATE DESC,a.QUOT_NO
     function (err, results, fields) {
       if (err) {
         throw err;
