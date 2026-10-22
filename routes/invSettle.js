@@ -385,5 +385,139 @@ module.exports = function (connection) {
     }
   });
 
+    // --- 6. settlements of one voucher — RV / PV list detail grid ------------
+  // GET /api/inv-settle/voucher-settlements/:tranType/:vchrNo?side=C|D
+  router.get("/inv-settle/voucher-settlements/:tranType/:vchrNo", async (req, res) => {
+    const { tranType, vchrNo } = req.params;
+    const side = String(req.query.side || "").toUpperCase();   // RV → C, PV → D
+    try {
+      const linesQ = db.execute(
+        `SELECT a.MAIN_SR_NO                           AS srNo,
+                a.ACC_CODE                             AS acCode,
+                CASE WHEN a.STLD_DBCR = 'C' THEN COALESCE(s.SUP_NAME, c.CUST_NAME)
+                     ELSE COALESCE(c.CUST_NAME, s.SUP_NAME) END AS acName,
+                a.STLD_TYPE                            AS stldType,
+                a.STLD_DOC                             AS stldDoc,
+                DATE_FORMAT(a.STLD_DATE, '%d/%m/%Y')   AS stldDate,
+                a.STLD_AMT                             AS stldAmt,
+                a.STLD_DBCR                            AS stldDbcr,
+                a.DIV_CODE                             AS divCode,
+                a.REF_NO                               AS refNo,
+                (SELECT SUM(x.AMOUNT) FROM tran_acc x
+                  WHERE x.TRAN_TYPE = a.STLD_TYPE AND x.vchr_no = a.STLD_DOC
+                    AND x.ACC_CODE = a.ACC_CODE AND x.DB_CR = a.STLD_DBCR) AS invAmount,
+                (SELECT MAX(x.JOB_NO) FROM tran_acc x
+                  WHERE x.TRAN_TYPE = a.STLD_TYPE AND x.vchr_no = a.STLD_DOC
+                    AND x.ACC_CODE = a.ACC_CODE)                           AS jobNo,
+                (SELECT SUM(z.STLD_AMT) FROM adj_dtl z
+                  WHERE z.STLD_TYPE = a.STLD_TYPE AND z.STLD_DOC = a.STLD_DOC
+                    AND z.ACC_CODE = a.ACC_CODE)                           AS invSettled,${supInvCols}
+           FROM adj_dtl a
+      LEFT JOIN cus_mst c ON c.CUST_CODE = a.ACC_CODE
+      LEFT JOIN sup_mst s ON s.SUP_CODE  = a.ACC_CODE${supInvJoin("a.STLD_TYPE", "a.STLD_DOC")}
+          WHERE a.SOURCE_TYPE = ? AND a.SOURCE_DOC = ?
+       ORDER BY a.MAIN_SR_NO, a.STLD_DOC`,
+        [tranType, vchrNo]
+      );
+
+      // party-side amount of the voucher (customer / supplier lines only)
+      const partyQ = side === "C" || side === "D"
+        ? db.execute(
+            `SELECT SUM(t.AMOUNT) AS amt FROM tran_acc t
+              WHERE t.TRAN_TYPE = ? AND t.vchr_no = ? AND t.DB_CR = ?
+                AND (EXISTS (SELECT 1 FROM cus_mst c WHERE c.CUST_CODE = t.ACC_CODE)
+                  OR EXISTS (SELECT 1 FROM sup_mst s WHERE s.SUP_CODE  = t.ACC_CODE))`,
+            [tranType, vchrNo, side])
+        : Promise.resolve([[{ amt: null }]]);
+
+      const onAccQ = db
+        .execute(`SELECT SUM(AMOUNT) AS amt FROM rcp_on_acc WHERE DOC_TYPE = ? AND DOC_NO = ?`,
+                 [tranType, vchrNo])
+        .catch(() => [[{ amt: 0 }]]);
+
+      const [[lines], [party], [onAcc]] = await Promise.all([linesQ, partyQ, onAccQ]);
+      res.json({
+        lines,
+        partyAmount: party[0]?.amt == null ? null : Number(party[0].amt),
+        onAccount: Number(onAcc[0]?.amt || 0),
+      });
+    } catch (err) {
+      fail(res, err, "voucher settlements");
+    }
+  });
+
+    // --- 7. cheques of one voucher — RV / PV detail "Cheques" tab ------------
+  router.get("/inv-settle/voucher-cheques/:tranType/:vchrNo", async (req, res) => {
+    const { tranType, vchrNo } = req.params;
+    const cols = (partyCol, fcCol) => `
+          MAIN_SR_NO                            AS mainSrNo,
+          CHQ_NO                                AS chqNo,
+          DATE_FORMAT(CHQ_DATE, '%d/%m/%Y')     AS chqDate,
+          DATE_FORMAT(CHQ_DATE, '%Y-%m-%d')     AS chqDateIso,
+          CHQ_BANK                              AS chqBank,
+          PDC_CODE                              AS pdcCode,
+          ${partyCol}                           AS partyCode,
+          AMOUNT                                AS amount,
+          ${fcCol}                              AS amountFc,
+          NARRATION                             AS narration,
+          JV_NO_RLZ                             AS jvNoRlz,
+          DATE_FORMAT(JV_DATE_RLZ, '%d/%m/%Y')  AS jvDateRlz,
+          REALISED                              AS realised`;
+    try {
+      const [rows] = await db.execute(
+        `SELECT u.*,
+                COALESCE(c.CUST_NAME, s.SUP_NAME,
+                         (SELECT MAX(l.AC_HEAD) FROM ac_list l WHERE l.AC_CODE = u.partyCode)) AS partyName,
+                (SELECT MAX(l.AC_HEAD) FROM ac_list l WHERE l.AC_CODE = u.pdcCode)           AS pdcHead
+           FROM (
+                 SELECT 'PDC_RCD' AS src, ${cols("CUST_CODE", "AMOUNT_FC")}
+                   FROM pdc_rcd     WHERE TRAN_TYPE = ? AND VCHR_NO = ?
+                 UNION ALL
+                 SELECT 'PDC_ISU' AS src, ${cols("SUP_CODE", "NULL")}
+                   FROM pdc_isu     WHERE TRAN_TYPE = ? AND VCHR_NO = ?
+                 UNION ALL
+                 SELECT 'CURRENT' AS src, ${cols("SUP_CODE", "AMOUNT_FC")}
+                   FROM current_chq WHERE TRAN_TYPE = ? AND VCHR_NO = ?
+                ) u
+      LEFT JOIN cus_mst c ON c.CUST_CODE = u.partyCode
+      LEFT JOIN sup_mst s ON s.SUP_CODE  = u.partyCode
+       ORDER BY u.mainSrNo, u.chqDateIso, u.chqNo`,
+        [tranType, vchrNo, tranType, vchrNo, tranType, vchrNo]
+      );
+      res.json(rows);
+    } catch (err) {
+      fail(res, err, "voucher cheques");
+    }
+  });
+
+  // --- 8. A/c entries of one voucher — RV / PV detail "A/c Entries" tab ----
+  router.get("/inv-settle/voucher-entries/:tranType/:vchrNo", async (req, res) => {
+    const { tranType, vchrNo } = req.params;
+    try {
+      const [rows] = await db.execute(
+        `SELECT t.SR_NO                                         AS srNo,
+                t.ACC_CODE                                      AS acCode,
+                COALESCE(c.CUST_NAME, s.SUP_NAME,
+                         (SELECT MAX(l.AC_HEAD) FROM ac_list l WHERE l.AC_CODE = t.ACC_CODE)) AS acHead,
+                (c.CUST_CODE IS NOT NULL OR s.SUP_CODE IS NOT NULL) AS isParty,
+                TRIM(CONCAT_WS(' ', t.NARRATION1, t.NARRATION2)) AS narration,
+                t.JOB_NO                                        AS jobNo,
+                t.DIV_CODE                                      AS divCode,
+                CASE WHEN t.DB_CR = 'D' THEN t.AMOUNT END       AS debit,
+                CASE WHEN t.DB_CR = 'C' THEN t.AMOUNT END       AS credit,
+                t.AMOUNT_FC                                     AS amountFc
+           FROM tran_acc t
+      LEFT JOIN cus_mst c ON c.CUST_CODE = t.ACC_CODE
+      LEFT JOIN sup_mst s ON s.SUP_CODE  = t.ACC_CODE
+          WHERE t.TRAN_TYPE = ? AND t.vchr_no = ?
+       ORDER BY CAST(t.SR_NO AS UNSIGNED), t.srno_row_id`,
+        [tranType, vchrNo]
+      );
+      res.json(rows);
+    } catch (err) {
+      fail(res, err, "voucher entries");
+    }
+  });
+  
   return router;
 };
