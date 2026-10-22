@@ -4348,7 +4348,7 @@ app.get("/api/quotitem/:id", function (req, res) {
     "select QUOT_NO,  DATE_FORMAT(QUOT_DATE,'%d/%m/%Y')  QUOT_DATE ,SR_NO , ITEM_CODE, ITEM_NAME , QTY, UNIT ,RATE ," +
     " round(qty*rate,2) AMOUNT" +
     " FROM quot_item  WHERE QUOT_NO = ? " +
-    "  order by sr_no",
+    "  order by LPAD(SR_NO, 4, '0')",
     [req.params.id],
 
     function (error, results) {
@@ -4363,7 +4363,7 @@ app.get("/api/quotitem/:id", function (req, res) {
 
 
 app.get("/api/sinqlst/:dys", function (req, res) {
- // var pool = orcl1.getPool();
+  // var pool = orcl1.getPool();
   pool.getConnection(function (err, conn) {
     // console.log('sinq List. ');
 
@@ -7780,3 +7780,8 @@ app.use("/api", drawRegDeleteApi(connection));
 const lpoPendingItemsApi = require("./routes/lpoPendingItemsApi");
 app.use("/api", lpoPendingItemsApi(connection));
 //
+const invReceiptsRoutes = require("./routes/invReceipts");
+app.use("/api", authMiddleware, invReceiptsRoutes(connection));
+// 
+const invPaymentsRoutes = require("./routes/invPayments");
+app.use("/api", authMiddleware, invPaymentsRoutes(connection));
