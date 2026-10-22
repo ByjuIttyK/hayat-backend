@@ -220,6 +220,7 @@ app.get('/api/column-metadata/:tableId', (req, res) => {
           sortable: Boolean(row.sortable),
           editable: Boolean(row.editable),
           flex: row.flex,
+          pinSide: row.pin_side,
           cellStyle: (() => {
             if (!row.cell_style) return {}; // Handle NULL
             try {
@@ -7785,3 +7786,5 @@ app.use("/api", authMiddleware, invReceiptsRoutes(connection));
 // 
 const invPaymentsRoutes = require("./routes/invPayments");
 app.use("/api", authMiddleware, invPaymentsRoutes(connection));
+//
+app.use("/api", require("./routes/payStatus")(connection));
