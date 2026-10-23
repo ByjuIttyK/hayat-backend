@@ -4,14 +4,15 @@
 module.exports = function (connection) {
   const router = require("express").Router();
 
-  // ── GET — fetch the single period record ─────────────────────────────────────
-  router.get("/current", async (req, res) => {
+  // ── GET /api/ac-period — fetch the single period record ──────────────────────
+  router.get("/", async (req, res) => {
     try {
       const [rows] = await connection.promise().query(
-         `SELECT DATE_FORMAT(START_DATE,'%Y-%m-%d') AS START_DATE,
-              DATE_FORMAT(END_DATE,'%Y-%m-%d')   AS END_DATE,
-              Main_sr_no
-       FROM ac_period LIMIT 1`
+        `SELECT DATE_FORMAT(START_DATE,'%Y-%m-%d') AS START_DATE,
+                DATE_FORMAT(END_DATE,'%Y-%m-%d')   AS END_DATE,
+                Main_sr_no
+           FROM ac_period
+          LIMIT 1`
       );
       if (rows.length === 0) return res.status(404).json({ message: "No period found" });
       res.json(rows[0]);
@@ -43,7 +44,7 @@ module.exports = function (connection) {
     }
   });
 
-  // ── PUT — update the single existing period ───────────────────────────────────
+  // ── PUT — update the single existing period ──────────────────────────────────
   router.put("/", async (req, res) => {
     const { START_DATE, END_DATE, Main_sr_no } = req.body;
     if (!START_DATE || !END_DATE)

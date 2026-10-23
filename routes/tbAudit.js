@@ -96,6 +96,7 @@ module.exports = function (connection) {
   // ── Check catalogue ──────────────────────────────────────────────────────
   // CRITICAL = the T.B. will not tally / the row silently vanishes from it
   // WARNING  = suspect data that does not by itself unbalance the T.B.
+  // args(from, to, ctx) — ctx also carries periodTo (ac_period END_DATE)
   const buildChecks = (s) => {
     const dr = DR(s), cr = CR(s);
     const amt = `COALESCE(t.${s.amt},0)`;
@@ -185,9 +186,11 @@ module.exports = function (connection) {
 
       {
         code: "BAD_DATE",
-        label: "Null / out-of-period dates",
+        label: "Null dates / after A/c period end",
         severity: "CRITICAL",
-        hint: "DATTE is null, zero, or falls outside the window — the leg is excluded from a dated T.B. while its contra leg is not",
+        hint: "DATTE is null or zero, or is later than ac_period END_DATE",
+        // Compared with ac_period END_DATE, not the screen's From/To window.
+        // Dates before the period start are not flagged.
         sql: `
           SELECT t.TRAN_TYPE, ty.TYPE_ABBR, t.VCHR_NO, t.SR_NO, t.DATTE, t.ACC_CODE,
                  a.AC_HEAD, ${dr} AS DR, ${cr} AS CR
@@ -196,17 +199,15 @@ module.exports = function (connection) {
             LEFT JOIN tran_type ty ON ty.TRAN_TYPE = t.TRAN_TYPE
            WHERE t.DATTE IS NULL
               OR CAST(t.DATTE AS CHAR) IN ('0000-00-00', '0000-00-00 00:00:00')
-              OR t.DATTE < ?
-              OR t.DATTE > ?
+              OR (? IS NOT NULL AND t.DATTE > ?)
            ORDER BY t.DATTE IS NULL DESC, t.DATTE
            LIMIT ${CAP + 1}`,
-        args: (f, t) => [f, t],
+        args: (f, t, ctx) => [ctx.periodTo, ctx.periodTo],
         map: (r, ctx) => {
           const d = iso(r.DATTE);
-          let why;
-          if (!d || d.startsWith("0000")) why = "Date is null / zero";
-          else if (d > ctx.to) why = `Dated ${d} — after ${ctx.to}`;
-          else why = `Dated ${d} — before ${ctx.from}`;
+          const why = (!d || d.startsWith("0000"))
+            ? "Date is null / zero"
+            : `Dated ${d} — after A/c period end ${ctx.periodTo}`;
           return {
             TRAN_TYPE: r.TRAN_TYPE, TYPE_ABBR: r.TYPE_ABBR, VCHR_NO: r.VCHR_NO,
             SR_NO: r.SR_NO, DATTE: d, ACC_CODE: r.ACC_CODE, AC_HEAD: r.AC_HEAD,
@@ -428,7 +429,7 @@ module.exports = function (connection) {
 
       from = from || periodFrom || "1900-01-01";
       to   = to   || periodTo   || "2999-12-31";
-      const ctx = { from, to };
+      const ctx = { from, to, periodTo };
 
       // Headline: does the whole window tally at all?
       const [tot] = await q(
@@ -445,7 +446,7 @@ module.exports = function (connection) {
         let raw = [];
         let failed = null;
         try {
-          raw = await q(c.sql, c.args(from, to));
+          raw = await q(c.sql, c.args(from, to, ctx));
         } catch (e) {
           failed = e.sqlMessage || e.message;
           console.log(`tb-audit: check ${c.code} failed —`, failed);
