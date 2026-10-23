@@ -6543,7 +6543,7 @@ app.get("/api/lastpricehistory/:itemCode", function (req, res) {
     "SELECT ph.PJV_NO, DATE_FORMAT(ph.PJV_DATE,'%d/%m/%Y') PJV_DATE, " +
     "       ph.SUP_CODE, s.SUP_NAME, pi.COST " +
     "FROM purchase_items pi " +
-    "JOIN purchase_hdr ph ON pi.SRV_NO = ph.PJV_NO " +
+    "JOIN purchase_hdr ph ON pi.PJV_NO = ph.PJV_NO " +
     "LEFT OUTER JOIN sup_mst s ON ph.SUP_CODE = s.SUP_CODE " +
     "WHERE pi.ITEM_CODE = ? " +
     "  AND (ph.CAN_CEL IS NULL OR ph.CAN_CEL <> 'Y') " +
