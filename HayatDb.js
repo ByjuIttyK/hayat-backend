@@ -3991,7 +3991,7 @@ app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%Y') SRV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, a.INV_DATE, a.INV_AMOUNT " +
+    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT " +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " LEFT OUTER JOIN  purchase_hdr c on (a.srv_no = c.srv_no) "+
     " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
