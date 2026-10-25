@@ -10,6 +10,16 @@
 //         doc_attachments (MODULE = 'TIMESHEET', REF_NO = TSHT_NO)
 // All times are handled in minutes. The calculation here is the only
 // place the shift rules are applied (screen calls /tsht/calc).
+//
+// 25-Oct-2026: /tsht/save stores the month totals in time_sheet_hdr (TOT_COLS) in Draft:
+//   TOT_NORMAL_HRS / TOT_NOT_HRS / TOT_HOT_HRS as Hrs:Min worked out here from the days,
+//   wages from req.body.totals. /tsht/list returns them for the list grid.
+//
+// Approval (24-Oct-2026): STATUS D = Draft, T = Time approved, A = Job approved
+//   POST /tsht/save              D: full save · T: Job No only · A: refused
+//   POST /tsht/time-approve/:no  D -> T  (TIME_APPR_BY / TIME_APPR_DT)
+//   POST /tsht/job-approve/:no   T -> A  (APPROVED_BY / APPROVED_DT)
+//   POST /tsht/revoke/:no        admin only: A -> T, T -> D  (REVOKED_BY / REVOKED_DT)
 // =====================================================================
 const express = require('express');
 const fs = require('fs');
@@ -22,6 +32,36 @@ const DEFAULT_SHIFT = 'GEN';
 const ATT_MODULE = 'TIMESHEET';
 const UPLOAD_DIR = process.env.TSHT_UPLOAD_DIR || path.join(__dirname, '..', 'uploads', 'timesheets');
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || '';
+// The screen gives up at 120 s: main model gets 60 s, the fallback model 45 s.
+const GEMINI_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS) || 60000;
+const GEMINI_FALLBACK_TIMEOUT_MS = Number(process.env.GEMINI_FALLBACK_TIMEOUT_MS) || 45000;
+// Thinking makes card reads very slow. Gemini 3.x uses a thinking LEVEL
+// (minimal | low | medium | high); Gemini 2.5 uses a thinking BUDGET (0 = off).
+const GEMINI_THINKING_LEVEL = process.env.GEMINI_THINKING_LEVEL || 'minimal';
+const GEMINI_THINKING_BUDGET = process.env.GEMINI_THINKING_BUDGET !== undefined ? Number(process.env.GEMINI_THINKING_BUDGET) : 0;
+/** thinkingConfig for a model, or null if the model has no known thinking control */
+const thinkingConfigFor = (model) => {
+  if (/gemini-2\.5/.test(model)) return { thinkingBudget: GEMINI_THINKING_BUDGET };
+  if (/gemini-[3-9]/.test(model)) return { thinkingLevel: GEMINI_THINKING_LEVEL };
+  return null;
+};
+// Card photos are shrunk to this long edge before sending (needs the optional 'sharp' package)
+const CARD_MAX_EDGE_PX = Number(process.env.TSHT_CARD_MAX_EDGE) || 1800;
+let sharp = null;
+try {
+  sharp = require('sharp'); // optional: npm install sharp
+} catch {
+  console.warn('[tsht] sharp not installed — card images are sent to Gemini at full size (slower). Run: npm install sharp');
+}
+const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+// time_sheet_hdr month totals — saved in Draft, frozen after Time approval
+//   hours as Hrs:Min text (e.g. "176:30"), wages to 2 decimals
+const HRS_COLS = ['TOT_NORMAL_HRS', 'TOT_NOT_HRS', 'TOT_HOT_HRS'];
+const WAGE_COLS = ['NORMAL_WAGES', 'NOT_WAGES', 'HOT_WAGES', 'TOTAL_SALARY'];
+const TOT_COLS = [...HRS_COLS, ...WAGE_COLS];
+/** minutes -> "H:MM" (hours not limited to 24), e.g. 10590 -> "176:30" */
+const totHrsMin = (mins) => `${Math.floor((Number(mins) || 0) / 60)}:${String((Number(mins) || 0) % 60).padStart(2, '0')}`;
 // ---------------------------------------------------------------------
 
 // ---------- time helpers ----------
@@ -43,6 +83,12 @@ const padEmp = (c) => String(c || '').trim().toUpperCase().padStart(4, '0').slic
 const tsNoOf = (tshtDate, empCode) => `${tshtDate.slice(0, 7)}-${padEmp(empCode)}`;
 const userOf = (req) =>
   (req.user && (req.user.USER_NAME || req.user.username || req.user.user_name)) || (req.body && req.body.user) || 'system';
+/** Users allowed to revoke approvals. Taken from the login token only — never from the request body. */
+const REVOKE_USERS = ['admin'];
+const canRevokeUser = (req) => {
+  const u = req.user && (req.user.USER_NAME || req.user.username || req.user.user_name);
+  return !!u && REVOKE_USERS.includes(String(u).trim().toLowerCase());
+};
 
 function parseMonth(tshtDate) {
   const m = String(tshtDate || '').match(/^(\d{4})-(\d{2})/);
@@ -235,7 +281,7 @@ module.exports = function timeSheetApi(connection) {
       } catch (e) {
         console.warn('[tsht] job_card not read:', e.code || e.message);
       }
-      res.json({ ok: true, allowCodes, dedCodes, shifts, jobs });
+      res.json({ ok: true, allowCodes, dedCodes, shifts, jobs, canRevoke: canRevokeUser(req) });
     } catch (e) {
       send(res, e);
     }
@@ -278,17 +324,23 @@ module.exports = function timeSheetApi(connection) {
         args.push(`${req.query.year}-${pad2(req.query.month)}-01`);
       }
       const [rows] = await db.query(
-        `SELECT h.TSHT_NO, DATE_FORMAT(h.TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, h.EMP_CODE, e.EMP_NAME, h.STATUS,
-                SUM(d.NORMAL_HRS) AS NORMAL_MINS, SUM(d.NORMAL_OT) AS NORMAL_OT_MINS, SUM(d.HOLIDAY_OT) AS HOLIDAY_OT_MINS
+        `SELECT h.TSHT_NO, DATE_FORMAT(h.TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, h.EMP_CODE, e.EMP_NAME,
+                CASE h.STATUS
+                  WHEN 'D' THEN 'Draft'
+                  WHEN 'T' THEN 'Time Approved'
+                  WHEN 'A' THEN 'Job Approved'
+                  ELSE h.STATUS
+                END AS STATUS,
+                h.STATUS AS STATUS_CODE,
+                ${TOT_COLS.map((c) => `h.${c}`).join(', ')}
            FROM time_sheet_hdr h
            JOIN emp_mst e ON e.EMP_CODE = h.EMP_CODE
-           LEFT JOIN time_sheet_dtl d ON d.TSHT_NO = h.TSHT_NO
           ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-          GROUP BY h.TSHT_NO, h.TSHT_DATE, h.EMP_CODE, e.EMP_NAME, h.STATUS
           ORDER BY h.TSHT_DATE DESC, h.EMP_CODE`,
         args,
       );
-      res.json({ ok: true, rows });
+      //  res.json({ ok: true, rows });
+      res.json(rows);
     } catch (e) {
       send(res, e);
     }
@@ -300,7 +352,7 @@ module.exports = function timeSheetApi(connection) {
       const no = req.params.no;
       const [h] = await db.query(
         `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, REMARKS, STATUS,
-                CREATED_BY, EDITED_BY, APPROVED_BY
+                CREATED_BY, EDITED_BY, TIME_APPR_BY, APPROVED_BY
            FROM time_sheet_hdr WHERE TSHT_NO = ?`,
         [no],
       );
@@ -332,7 +384,7 @@ module.exports = function timeSheetApi(connection) {
         empCode: hdr.EMP_CODE,
         rows: dtl.map((r) => ({ dayNo: r.DAY_NO, timeIn: r.TIME_IN, timeOut: r.TIME_OUT, shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS })),
       });
-      res.json({ ok: true, hdr, emp, rows: calc.rows, allow, ded });
+      res.json({ ok: true, hdr, emp, rows: calc.rows, allow, ded, canRevoke: canRevokeUser(req) });
     } catch (e) {
       send(res, e);
     }
@@ -348,7 +400,33 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
+  // ---------- stored rows of one sheet, recalculated ----------
+  async function loadStoredSheet(no, conn = db, lock = false) {
+    const [h] = await conn.query(
+      `SELECT DATE_FORMAT(TSHT_DATE, "%Y-%m-%d") AS TSHT_DATE, EMP_CODE, STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?${lock ? ' FOR UPDATE' : ''}`,
+      [no],
+    );
+    if (!h.length) throw httpErr(404, `Time sheet ${no} not found`);
+    const [dtl] = await conn.query(
+      `SELECT DAY_NO, TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
+              SHIFT_CODE, JOB_NO, REMARKS FROM time_sheet_dtl WHERE TSHT_NO = ?`,
+      [no],
+    );
+    const calc = await computeSheet(
+      {
+        tshtDate: h[0].TSHT_DATE,
+        empCode: h[0].EMP_CODE,
+        rows: dtl.map((r) => ({ dayNo: r.DAY_NO, timeIn: r.TIME_IN, timeOut: r.TIME_OUT, shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS })),
+      },
+      conn,
+    );
+    return { hdr: h[0], calc };
+  }
+
   // ---------- save ----------
+  // STATUS D (Draft)         : header, days, allowances and deductions are replaced
+  // STATUS T (Time approved) : only JOB_NO of each day is updated
+  // STATUS A (Job approved)  : refused
   router.post('/tsht/save', async (req, res) => {
     const { mode, tshtDate, empCode, remarks, allow = [], ded = [] } = req.body || {};
     const user = String(userOf(req)).slice(0, 20);
@@ -358,6 +436,36 @@ module.exports = function timeSheetApi(connection) {
       if (!month) throw httpErr(400, 'Invalid month');
       const no = tsNoOf(month.first, empCode);
 
+      conn = await db.getConnection();
+      await conn.beginTransaction();
+
+      const [ex] = await conn.query('SELECT STATUS FROM time_sheet_hdr WHERE TSHT_NO = ? FOR UPDATE', [no]);
+      if (mode === 'ADD' && ex.length) throw httpErr(409, `Time sheet ${no} already exists — open it in EDIT`);
+      if (mode !== 'ADD' && !ex.length) throw httpErr(404, `Time sheet ${no} not found`);
+      const status = ex.length ? ex[0].STATUS : 'D';
+      if (status === 'A') throw httpErr(423, `Time sheet ${no} is job-approved and locked`);
+
+      // ---- Time approved: Job No only ----
+      if (status === 'T') {
+        const validJobs = new Set();
+        try {
+          const [jobs] = await conn.query(JOB_SQL);
+          jobs.forEach((j) => validJobs.add(j.JOB_NO));
+        } catch {
+          /* job_card not readable: skip the check */
+        }
+        for (const r of req.body.rows || []) {
+          const jobNo = r.jobNo ? String(r.jobNo).trim().slice(0, 20) : null;
+          if (jobNo && validJobs.size && !validJobs.has(jobNo)) throw httpErr(400, `Day ${r.dayNo}: Job No ${jobNo} not found in job_card`);
+          await conn.execute('UPDATE time_sheet_dtl SET JOB_NO = ? WHERE TSHT_NO = ? AND DAY_NO = ?', [jobNo, no, Number(r.dayNo)]);
+        }
+        await conn.execute('UPDATE time_sheet_hdr SET EDITED_BY = ?, EDITED_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
+        const { calc } = await loadStoredSheet(no, conn);
+        await conn.commit();
+        return res.json({ ok: true, tshtNo: no, status: 'T', rows: calc.rows });
+      }
+
+      // ---- Draft: full save ----
       const codesOk = (list, label) => {
         const seen = new Set();
         list.forEach((r) => {
@@ -370,26 +478,34 @@ module.exports = function timeSheetApi(connection) {
       };
       codesOk(allow, 'Allowances');
       codesOk(ded, 'Deductions');
-
-      conn = await db.getConnection();
-      await conn.beginTransaction();
-
-      const [ex] = await conn.query('SELECT STATUS FROM time_sheet_hdr WHERE TSHT_NO = ? FOR UPDATE', [no]);
-      if (mode === 'ADD' && ex.length) throw httpErr(409, `Time sheet ${no} already exists — open it in EDIT`);
-      if (mode !== 'ADD' && !ex.length) throw httpErr(404, `Time sheet ${no} not found`);
-      if (ex.length && ex[0].STATUS === 'A') throw httpErr(423, `Time sheet ${no} is approved and locked`);
-
       const calc = await computeSheet({ tshtDate: month.first, empCode, rows: req.body.rows }, conn);
       const bad = calc.rows.find((r) => r.error);
       if (bad) throw httpErr(400, `Day ${bad.dayNo}: ${bad.error}`);
 
+      // month totals → time_sheet_hdr: hours as Hrs:Min from the calculated days, wages from the screen
+      const sumMins = (k) => calc.rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+      const wages = req.body.totals || {};
+      const totVals = [
+        totHrsMin(sumMins('normalHrs')),
+        totHrsMin(sumMins('normalOt')),
+        totHrsMin(sumMins('holidayOt')),
+        ...WAGE_COLS.map((c) => Math.round((Number(wages[c]) || 0) * 100) / 100),
+      ];
+
       if (mode === 'ADD') {
         await conn.execute(
-          'INSERT INTO time_sheet_hdr (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, CREATED_BY, STATUS) VALUES (?, ?, ?, ?, ?, "D")',
-          [no, month.first, calc.emp.EMP_CODE, remarks || null, user],
+          `INSERT INTO time_sheet_hdr
+             (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, STATUS, CREATED_BY, ${TOT_COLS.join(', ')})
+           VALUES (?, ?, ?, ?, 'D', ?, ${TOT_COLS.map(() => '?').join(', ')})`,
+          [no, month.first, calc.emp.EMP_CODE, remarks || null, user, ...totVals],
         );
       } else {
-        await conn.execute('UPDATE time_sheet_hdr SET REMARKS = ?, EDITED_BY = ? WHERE TSHT_NO = ?', [remarks || null, user, no]);
+        await conn.execute(
+          `UPDATE time_sheet_hdr
+              SET REMARKS = ?, EDITED_BY = ?, EDITED_DT = NOW(), ${TOT_COLS.map((c) => `${c} = ?`).join(', ')}
+            WHERE TSHT_NO = ?`,
+          [remarks || null, user, ...totVals, no],
+        );
       }
 
       await conn.execute('DELETE FROM time_sheet_dtl WHERE TSHT_NO = ?', [no]);
@@ -418,9 +534,9 @@ module.exports = function timeSheetApi(connection) {
       }
 
       await conn.commit();
-      res.json({ ok: true, tshtNo: no, rows: calc.rows });
+      res.json({ ok: true, tshtNo: no, status: 'D', rows: calc.rows });
     } catch (e) {
-      if (conn) await conn.rollback().catch(() => {});
+      if (conn) await conn.rollback().catch(() => { });
       if (e.code === 'ER_DUP_ENTRY') e = httpErr(409, 'This time sheet was just saved by another user — reopen it in EDIT');
       send(res, e);
     } finally {
@@ -428,33 +544,16 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
-  // ---------- approve (recalculate stored rows, then lock) ----------
-  router.post('/tsht/approve/:no', async (req, res) => {
+  // ---------- Time approval: D -> T (recalculate stored rows, freeze times) ----------
+  router.post('/tsht/time-approve/:no', async (req, res) => {
     const no = req.params.no;
     const user = String(userOf(req)).slice(0, 20);
     let conn;
     try {
       conn = await db.getConnection();
       await conn.beginTransaction();
-      const [h] = await conn.query(
-        'SELECT DATE_FORMAT(TSHT_DATE, "%Y-%m-%d") AS TSHT_DATE, EMP_CODE, STATUS FROM time_sheet_hdr WHERE TSHT_NO = ? FOR UPDATE',
-        [no],
-      );
-      if (!h.length) throw httpErr(404, `Time sheet ${no} not found`);
-      if (h[0].STATUS === 'A') throw httpErr(409, `Time sheet ${no} is already approved`);
-      const [dtl] = await conn.query(
-        `SELECT DAY_NO, TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
-                SHIFT_CODE, JOB_NO, REMARKS FROM time_sheet_dtl WHERE TSHT_NO = ?`,
-        [no],
-      );
-      const calc = await computeSheet(
-        {
-          tshtDate: h[0].TSHT_DATE,
-          empCode: h[0].EMP_CODE,
-          rows: dtl.map((r) => ({ dayNo: r.DAY_NO, timeIn: r.TIME_IN, timeOut: r.TIME_OUT, shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS })),
-        },
-        conn,
-      );
+      const { hdr, calc } = await loadStoredSheet(no, conn, true);
+      if (hdr.STATUS !== 'D') throw httpErr(409, `Time sheet ${no} is already time-approved`);
       const bad = calc.rows.find((r) => r.error);
       if (bad) throw httpErr(400, `Day ${bad.dayNo}: ${bad.error}`);
       for (const r of calc.rows) {
@@ -462,11 +561,75 @@ module.exports = function timeSheetApi(connection) {
           r.normalHrs, r.normalOt, r.holidayOt, no, r.dayNo,
         ]);
       }
+      await conn.execute('UPDATE time_sheet_hdr SET STATUS = "T", TIME_APPR_BY = ?, TIME_APPR_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
+      await conn.commit();
+      res.json({ ok: true, tshtNo: no, status: 'T', rows: calc.rows });
+    } catch (e) {
+      if (conn) await conn.rollback().catch(() => { });
+      send(res, e);
+    } finally {
+      if (conn) conn.release();
+    }
+  });
+
+  // ---------- Job approval: T -> A (every worked day needs a Job No, then lock) ----------
+  router.post('/tsht/job-approve/:no', async (req, res) => {
+    const no = req.params.no;
+    const user = String(userOf(req)).slice(0, 20);
+    let conn;
+    try {
+      conn = await db.getConnection();
+      await conn.beginTransaction();
+      const { hdr, calc } = await loadStoredSheet(no, conn, true);
+      if (hdr.STATUS === 'D') throw httpErr(409, `Approve the time for ${no} first`);
+      if (hdr.STATUS === 'A') throw httpErr(409, `Time sheet ${no} is already job-approved`);
+      const noJob = calc.rows.filter((r) => r.normalHrs + r.normalOt + r.holidayOt > 0 && !r.jobNo).map((r) => r.dayNo);
+      if (noJob.length) throw httpErr(400, `Enter a Job No on every worked day first (days ${noJob.join(', ')})`);
       await conn.execute('UPDATE time_sheet_hdr SET STATUS = "A", APPROVED_BY = ?, APPROVED_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
       await conn.commit();
-      res.json({ ok: true, tshtNo: no, rows: calc.rows });
+      res.json({ ok: true, tshtNo: no, status: 'A', rows: calc.rows });
     } catch (e) {
-      if (conn) await conn.rollback().catch(() => {});
+      if (conn) await conn.rollback().catch(() => { });
+      send(res, e);
+    } finally {
+      if (conn) conn.release();
+    }
+  });
+
+  // ---------- Revoke approval (admin only): A -> T, or T -> D ----------
+  // Steps back one approval at a time, so a job-approved sheet needs two revokes to reach Draft.
+  // The approver columns of the revoked step are cleared; REVOKED_BY / REVOKED_DT keep who did it.
+  router.post('/tsht/revoke/:no', async (req, res) => {
+    const no = req.params.no;
+    let conn;
+    try {
+      if (!canRevokeUser(req)) throw httpErr(403, 'Only admin can revoke approvals');
+      const user = String(userOf(req)).slice(0, 20);
+      conn = await db.getConnection();
+      await conn.beginTransaction();
+      const { hdr } = await loadStoredSheet(no, conn, true);
+      let newStatus;
+      if (hdr.STATUS === 'A') {
+        newStatus = 'T';
+        await conn.execute(
+          'UPDATE time_sheet_hdr SET STATUS = "T", APPROVED_BY = NULL, APPROVED_DT = NULL, REVOKED_BY = ?, REVOKED_DT = NOW() WHERE TSHT_NO = ?',
+          [user, no],
+        );
+      } else if (hdr.STATUS === 'T') {
+        newStatus = 'D';
+        await conn.execute(
+          'UPDATE time_sheet_hdr SET STATUS = "D", TIME_APPR_BY = NULL, TIME_APPR_DT = NULL, REVOKED_BY = ?, REVOKED_DT = NOW() WHERE TSHT_NO = ?',
+          [user, no],
+        );
+      } else {
+        throw httpErr(409, `Time sheet ${no} is a draft — nothing to revoke`);
+      }
+      const { calc } = await loadStoredSheet(no, conn);
+      await conn.commit();
+      console.log(`[tsht] ${user} revoked ${hdr.STATUS === 'A' ? 'job' : 'time'} approval of ${no}`);
+      res.json({ ok: true, tshtNo: no, status: newStatus, rows: calc.rows });
+    } catch (e) {
+      if (conn) await conn.rollback().catch(() => { });
       send(res, e);
     } finally {
       if (conn) conn.release();
@@ -478,7 +641,7 @@ module.exports = function timeSheetApi(connection) {
     try {
       const [h] = await db.query('SELECT STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?', [req.params.no]);
       if (!h.length) return res.status(404).json({ ok: false, error: 'Not found' });
-      if (h[0].STATUS === 'A') return res.status(423).json({ ok: false, error: 'Approved time sheets cannot be deleted' });
+      if (h[0].STATUS !== 'D') return res.status(423).json({ ok: false, error: 'Approved time sheets cannot be deleted' });
       await db.query('DELETE FROM time_sheet_hdr WHERE TSHT_NO = ?', [req.params.no]); // dtl / allow / ded cascade
       res.json({ ok: true });
     } catch (e) {
@@ -487,7 +650,37 @@ module.exports = function timeSheetApi(connection) {
   });
 
   // ---------- AI card read (Gemini) ----------
+  /** Shrinks one card photo (JPEG, long edge CARD_MAX_EDGE_PX). Returns the original if sharp is missing or fails. */
+  async function shrinkCardImage(im) {
+    const mime = im.mime || 'image/jpeg';
+    const data = String(im.data || '').replace(/^data:[^,]+,/, '');
+    if (!sharp || !/^image\//.test(mime)) return { mime, data };
+    try {
+      const out = await sharp(Buffer.from(data, 'base64'))
+        .rotate() // honour the phone's EXIF orientation
+        .resize({ width: CARD_MAX_EDGE_PX, height: CARD_MAX_EDGE_PX, fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+      return { mime: 'image/jpeg', data: out.toString('base64') };
+    } catch (e) {
+      console.warn('[tsht] image shrink failed, sending original:', e.message);
+      return { mime, data };
+    }
+  }
+
   router.post('/tsht/ai-read', async (req, res) => {
+    const startedAt = Date.now();
+    const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+    let clientClosed = false;
+    let currentCall = null; // AbortController of the Gemini call in progress
+    // browser cancelled / timed out -> stop waiting for Gemini too
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        clientClosed = true;
+        if (currentCall) currentCall.abort('client-closed');
+      }
+    });
+
     try {
       const key = process.env.GEMINI_API_KEY;
       if (!key) throw httpErr(500, 'GEMINI_API_KEY is not set on the server');
@@ -496,65 +689,140 @@ module.exports = function timeSheetApi(connection) {
       if (!month) throw httpErr(400, 'Select the month first');
       if (!images.length) throw httpErr(400, 'No card images sent');
 
-      const prompt = `These are photos of a monthly punch time card (an employee may have two cards: days 1-15 and 16-31) for ${month.y}-${pad2(month.mo)}.
+      const sentKb = Math.round(images.reduce((t, im) => t + String(im.data || '').length, 0) * 0.75 / 1024);
+      const cardImages = await Promise.all(images.map(shrinkCardImage));
+      const geminiKb = Math.round(cardImages.reduce((t, im) => t + im.data.length, 0) * 0.75 / 1024);
+      console.log(`[tsht] ai-read: ${images.length} image(s), ${sentKb} KB received, ${geminiKb} KB to Gemini, month ${month.y}-${pad2(month.mo)}`);
+
+      const prompt = `These are photos of a monthly punch time card (an employee may have two cards: days 1-15 and 16-31). The operator selected ${MONTH_NAMES[month.mo - 1]} ${month.y}.
+The card No. is written in bold at the top left (e.g. "03" or "04"); return it as "cardNo" exactly as written, keeping leading zeros. Return the employee name written beside it as "name".
+Also return the month and year written on the card as "cardMonth" (1-12) and "cardYear" (4 digits), or null if not written.
 Each stamp is printed as "<day digits><HH:MM>", e.g. "17 07:55" or "1707:55". Use the printed day digits to decide the day — stamps are often printed slightly off their row.
 For every day 1-${month.days} return the FIRST stamp of the day as "in" and the LAST stamp as "out" (24-hour HH:MM), whichever column they are in.
 Handwritten times count (set "manual": true). A stamp printed in red means late (set "late": true).
 If a digit is unclear, give your best reading and set "check": true with a short "note" (max 25 chars).
 Days with no stamps: in and out null. Return only JSON.`;
 
-      const body = {
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              ...images.map((im) => ({ inline_data: { mime_type: im.mime || 'image/jpeg', data: String(im.data).replace(/^data:[^,]+,/, '') } })),
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              cardNo: { type: 'STRING', nullable: true },
-              name: { type: 'STRING', nullable: true },
-              days: {
-                type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    day: { type: 'INTEGER' },
-                    in: { type: 'STRING', nullable: true },
-                    out: { type: 'STRING', nullable: true },
-                    late: { type: 'BOOLEAN' },
-                    manual: { type: 'BOOLEAN' },
-                    check: { type: 'BOOLEAN' },
-                    note: { type: 'STRING', nullable: true },
-                  },
-                  required: ['day'],
-                },
+      const responseSchema = {
+        type: 'OBJECT',
+        properties: {
+          cardNo: { type: 'STRING', nullable: true },
+          name: { type: 'STRING', nullable: true },
+          cardMonth: { type: 'INTEGER', nullable: true },
+          cardYear: { type: 'INTEGER', nullable: true },
+          days: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                day: { type: 'INTEGER' },
+                in: { type: 'STRING', nullable: true },
+                out: { type: 'STRING', nullable: true },
+                late: { type: 'BOOLEAN' },
+                manual: { type: 'BOOLEAN' },
+                check: { type: 'BOOLEAN' },
+                note: { type: 'STRING', nullable: true },
               },
+              required: ['day'],
             },
-            required: ['days'],
           },
         },
+        required: ['days'],
       };
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const j = await r.json();
-      if (!r.ok) throw httpErr(502, `Gemini: ${(j.error && j.error.message) || r.status}`);
-      const text = (((j.candidates || [])[0] || {}).content || { parts: [] }).parts.map((p) => p.text || '').join('');
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw httpErr(502, 'Could not read the AI response — try a clearer photo');
+      const imageParts = cardImages.map((im) => ({ inline_data: { mime_type: im.mime, data: im.data } }));
+
+      /** One Gemini call. Returns the parsed JSON, or throws (e.status, e.thinkingRejected). */
+      async function askGemini(model, timeoutMs, useThinkingConfig) {
+        const generationConfig = { temperature: 0, responseMimeType: 'application/json', responseSchema };
+        const thinkingConfig = useThinkingConfig ? thinkingConfigFor(model) : null;
+        if (thinkingConfig) generationConfig.thinkingConfig = thinkingConfig;
+        const body = { contents: [{ parts: [{ text: prompt }, ...imageParts] }], generationConfig };
+
+        const call = new AbortController();
+        currentCall = call;
+        const timer = setTimeout(() => call.abort('timeout'), timeoutMs);
+        const t0 = Date.now();
+        try {
+          let r;
+          try {
+            r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, // key in a header, not the URL
+              body: JSON.stringify(body),
+              signal: call.signal,
+            });
+          } catch (e) {
+            if (call.signal.reason === 'client-closed') throw httpErr(499, 'cancelled by the screen');
+            if (call.signal.reason === 'timeout') throw httpErr(504, `${model} did not answer within ${timeoutMs / 1000} s`);
+            throw httpErr(502, `Could not reach Gemini: ${e.message}`);
+          }
+          const rawText = await r.text();
+          let j;
+          try {
+            j = JSON.parse(rawText);
+          } catch {
+            throw httpErr(502, `${model} returned an unreadable reply (HTTP ${r.status})`);
+          }
+          if (!r.ok) {
+            const message = (j.error && j.error.message) || String(r.status);
+            const err = httpErr(502, `${model}: ${message}`);
+            // a model that does not accept this thinking setting: retry without it
+            err.thinkingRejected = r.status === 400 && /thinking/i.test(message);
+            throw err;
+          }
+          const candidate = (j.candidates || [])[0] || {};
+          if (!candidate.content && candidate.finishReason) throw httpErr(502, `${model} stopped without an answer (${candidate.finishReason}) — try a clearer photo`);
+          const text = (candidate.content || { parts: [] }).parts.map((p) => p.text || '').join('');
+          try {
+            const parsed = JSON.parse(text);
+            console.log(`[tsht] ${model} answered in ${((Date.now() - t0) / 1000).toFixed(1)}s${thinkingConfig ? ` (thinking ${JSON.stringify(thinkingConfig)})` : ''}`);
+            return parsed;
+          } catch {
+            throw httpErr(502, `Could not read the ${model} response — try a clearer photo`);
+          }
+        } finally {
+          clearTimeout(timer);
+          if (currentCall === call) currentCall = null;
+        }
       }
+
+      // main model first, then the fallback model from .env
+      const attempts = [{ model: GEMINI_MODEL, timeoutMs: GEMINI_TIMEOUT_MS }];
+      if (GEMINI_FALLBACK_MODEL && GEMINI_FALLBACK_MODEL !== GEMINI_MODEL) {
+        attempts.push({ model: GEMINI_FALLBACK_MODEL, timeoutMs: GEMINI_FALLBACK_TIMEOUT_MS });
+      }
+
+      let parsed = null;
+      let usedModel = '';
+      let lastError = null;
+      for (const attempt of attempts) {
+        if (clientClosed) break;
+        try {
+          try {
+            parsed = await askGemini(attempt.model, attempt.timeoutMs, true);
+          } catch (e) {
+            if (!e.thinkingRejected) throw e;
+            console.warn(`[tsht] ${attempt.model} rejected the thinking setting — retrying without it`);
+            parsed = await askGemini(attempt.model, attempt.timeoutMs, false);
+          }
+          usedModel = attempt.model;
+          break;
+        } catch (e) {
+          lastError = e;
+          if (e.status === 499) break; // screen cancelled
+          console.warn(`[tsht] ${attempt.model} failed after ${elapsed()}: ${e.message}`);
+        }
+      }
+
+      if (clientClosed) {
+        console.warn(`[tsht] ai-read cancelled by the screen after ${elapsed()}`);
+        return; // nobody is waiting for a reply
+      }
+      if (!parsed) {
+        const tried = attempts.map((a) => a.model).join(' and ');
+        throw httpErr(lastError && lastError.status === 504 ? 504 : 502, `AI read failed (${tried}): ${lastError ? lastError.message : 'no answer'}`);
+      }
+
       const days = (parsed.days || [])
         .filter((d) => Number.isInteger(d.day) && d.day >= 1 && d.day <= month.days)
         .map((d) => {
@@ -570,9 +838,24 @@ Days with no stamps: in and out null. Return only JSON.`;
             remarks: notes.join('; ').slice(0, 30) || null,
           };
         });
-      res.json({ ok: true, cardNo: parsed.cardNo || null, name: parsed.name || null, days, model: GEMINI_MODEL });
+
+      const cardMonth = Number.isInteger(parsed.cardMonth) && parsed.cardMonth >= 1 && parsed.cardMonth <= 12 ? parsed.cardMonth : null;
+      const cardYear = Number.isInteger(parsed.cardYear) && parsed.cardYear >= 2000 && parsed.cardYear <= 2100 ? parsed.cardYear : null;
+
+      console.log(`[tsht] ai-read done in ${elapsed()} with ${usedModel}: card ${parsed.cardNo || '?'}, ${days.filter((d) => d.timeIn || d.timeOut).length} day(s) with stamps`);
+      res.json({
+        ok: true,
+        cardNo: parsed.cardNo ? String(parsed.cardNo).trim() : null,
+        name: parsed.name || null,
+        cardMonth,
+        cardYear,
+        days,
+        model: usedModel,
+        seconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      });
     } catch (e) {
-      send(res, e);
+      console.warn(`[tsht] ai-read failed after ${elapsed()}:`, e.message);
+      if (!res.headersSent && !clientClosed) send(res, e);
     }
   });
 
@@ -644,10 +927,10 @@ Days with no stamps: in and out null. Return only JSON.`;
         [req.params.id, ATT_MODULE],
       );
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
-      if (rows[0].STATUS === 'A') return res.status(423).json({ ok: false, error: 'Time sheet is approved' });
+      if (rows[0].STATUS === 'T' || rows[0].STATUS === 'A') return res.status(423).json({ ok: false, error: 'Time sheet is approved — card images can no longer be removed' });
       await db.query('DELETE FROM doc_attachments WHERE ID = ?', [req.params.id]);
       const r = rows[0];
-      fs.rm(path.join(UPLOAD_DIR, r.REF_NO.slice(0, 4), r.REF_NO.slice(5, 7), path.basename(r.STORED_NAME)), () => {});
+      fs.rm(path.join(UPLOAD_DIR, r.REF_NO.slice(0, 4), r.REF_NO.slice(5, 7), path.basename(r.STORED_NAME)), () => { });
       res.json({ ok: true });
     } catch (e) {
       send(res, e);

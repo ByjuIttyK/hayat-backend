@@ -7794,3 +7794,9 @@ app.use("/api", require("./routes/stockRecalApi")(connection));
 //
 const timeSheetApi = require('./routes/timeSheetApi');
 app.use('/api', timeSheetApi(connection));
+//
+app.use("/api", require("./routes/empMstApi")(connection));
+//
+app.use("/api", require("./routes/holidayMstApi")(connection));
+//
+ app.use("/api", require("./routes/shiftMstApi")(connection));
