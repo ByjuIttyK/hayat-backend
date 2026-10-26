@@ -20,6 +20,18 @@
 //   POST /tsht/time-approve/:no  D -> T  (TIME_APPR_BY / TIME_APPR_DT)
 //   POST /tsht/job-approve/:no   T -> A  (APPROVED_BY / APPROVED_DT)
 //   POST /tsht/revoke/:no        admin only: A -> T, T -> D  (REVOKED_BY / REVOKED_DT)
+//
+// 26-Oct-2026: shift crossing midnight — time_sheet_dtl key is TSHT_NO + DAY_NO + SEQ_NO
+//   CONT_FLAG 'C' = continuation row (00:00 → out) of the previous day's shift:
+//     day 14 seq 1  18:00 → 23:59   (23:59 counts as 24:00 when a continuation follows)
+//     day 15 seq 1  00:00 → 02:30   C  minutes classified by DAY 14: working day → N.OT,
+//                                      week off / holiday → H.OT; never late / short / absent
+//     day 15 seq 2  08:00 → 17:30      regular duty, judged as usual
+//   A shift on the last day continues on day "last + 1" (1st of next month), kept on this sheet.
+// 26-Oct-2026: AI card read returns EVERY stamp of every column (A.M./P.M./Overtime In/Out);
+//   In / Out are worked out here: In = first stamp, Out = last stamp. An early-morning stamp
+//   (before TSHT_CARRY_BEFORE, default 05:00) that ends the previous day's shift is moved to
+//   that day as its Out (earlier than In → the screen splits it at midnight).
 // =====================================================================
 const express = require('express');
 const fs = require('fs');
@@ -54,6 +66,9 @@ try {
 } catch {
   console.warn('[tsht] sharp not installed — card images are sent to Gemini at full size (slower). Run: npm install sharp');
 }
+// AI read: a stamp before this time (minutes) can be the Out of the previous day's shift
+const CARRY_BEFORE_MIN = Number(process.env.TSHT_CARRY_BEFORE_MIN) || 300; // 05:00
+const STAMP_COLS = ['AM_IN', 'AM_OUT', 'PM_IN', 'PM_OUT', 'OT_IN', 'OT_OUT'];
 const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 // time_sheet_hdr month totals — saved in Draft, frozen after Time approval
 //   hours as Hrs:Min text (e.g. "176:30"), wages to 2 decimals
@@ -132,7 +147,7 @@ const breakMins = (from, to, sh) => sh.breaks.reduce((t, [f, e]) => t + overlap(
  *  - Breaks are always deducted from regular time; from OT only if OT_BREAK_DEDUCT = 'Y'.
  *  - OT is rounded down to OT_ROUND_MINS.
  */
-function calcDay(date, timeIn, timeOut, sh, holidays, otEligible) {
+function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride) {
   const dow = new Date(`${date}T00:00:00Z`).getUTCDay() + 1; // 1 = Sunday (MySQL DAYOFWEEK)
   const isWeekOff = dow === sh.weekOff;
   const isHol = isWeekOff || holidays.has(date);
@@ -141,7 +156,7 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible) {
     effIn: null, effOut: null, normalHrs: 0, normalOt: 0, holidayOt: 0, lateMins: 0, shortMins: 0, error: null,
   };
   const i = toMin(timeIn);
-  const o = toMin(timeOut);
+  const o = outMinOverride !== undefined && outMinOverride !== null ? outMinOverride : toMin(timeOut);
   if (i === null && o === null) {
     if (!isHol) res.dayType = 'A';
     return res;
@@ -190,6 +205,116 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible) {
   return res;
 }
 
+/**
+ * AI card read: every stamp per day → In / Out per day.
+ *  - Stamps of a day are sorted by time; In = first, Out = last (one stamp only: In, Out missing).
+ *  - Carry-over: when a day's first stamp is before CARRY_BEFORE_MIN (05:00) and the day before has
+ *    stamps, and either day has an odd number of stamps (an Out missing on one side), that early
+ *    stamp is the Out of the previous day's shift. It becomes that day's Out — earlier than its In —
+ *    and the screen splits it at midnight (23:59 + a 00:00 continuation row).
+ *  - Day 1 cannot take a carry-over (the shift began last month) → marked to check.
+ */
+function stampsToDays(aiDays, monthDays) {
+  const byDay = new Map();
+  const meta = new Map();
+  for (const d of aiDays || []) {
+    const day = Number(d.day);
+    if (!Number.isInteger(day) || day < 1 || day > monthDays) continue;
+    const list = byDay.get(day) || [];
+    for (const st of d.stamps || []) {
+      const t = toMin(st.time);
+      if (t === null) continue;
+      if (list.some((x) => x.t === t)) continue; // same stamp read twice
+      list.push({ t, manual: !!st.manual, late: !!st.late, col: st.col });
+    }
+    list.sort((a, b) => a.t - b.t);
+    byDay.set(day, list);
+    const m = meta.get(day) || { check: false, notes: [] };
+    if (d.check) m.check = true;
+    if (d.note) m.notes.push(String(d.note));
+    meta.set(day, m);
+  }
+  const metaOf = (day) => {
+    if (!meta.has(day)) meta.set(day, { check: false, notes: [] });
+    return meta.get(day);
+  };
+
+  // early-morning stamp that ends the previous day's shift
+  const carried = new Set(); // days whose Out was carried in from the next day
+  for (let day = 1; day <= monthDays; day++) {
+    const list = byDay.get(day) || [];
+    if (!list.length || list[0].t >= CARRY_BEFORE_MIN) continue;
+    const prev = byDay.get(day - 1) || [];
+    const oddSomewhere = prev.length % 2 === 1 || list.length % 2 === 1;
+    if (day === 1) {
+      if (list.length % 2 === 1) {
+        metaOf(1).check = true;
+        metaOf(1).notes.push('Early stamp: prev month?');
+      }
+      continue;
+    }
+    if (!prev.length || !oddSomewhere || carried.has(day - 1)) continue;
+    prev.push(list.shift()); // stays last → becomes the Out (after midnight)
+    byDay.set(day - 1, prev);
+    carried.add(day - 1);
+  }
+
+  const out = [];
+  for (let day = 1; day <= monthDays; day++) {
+    const list = byDay.get(day) || [];
+    const m = meta.get(day) || { check: false, notes: [] };
+    if (!list.length && !m.check) continue;
+    const first = list[0];
+    const last = list.length > 1 ? list[list.length - 1] : null;
+    const notes = [];
+    if (list.some((x) => x.late)) notes.push('Late stamp');
+    if (list.some((x) => x.manual)) notes.push('Manual time');
+    if (carried.has(day)) notes.push('Out next day');
+    notes.push(...m.notes);
+    out.push({
+      dayNo: day,
+      timeIn: first ? hhmm(first.t) : null,
+      timeOut: last ? hhmm(last.t) : null,
+      needsCheck: m.check || list.some((x) => x.manual),
+      remarks: notes.join('; ').slice(0, 30) || null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Continuation row (00:00 → out) of a shift that started the day before.
+ * All minutes are OT, classified by the START day: week off / holiday → H.OT, else N.OT.
+ * Never late, short or absent. dayType shows the row's own date (W / S / H).
+ */
+function calcCont(prevDate, ownDate, timeIn, timeOut, sh, holidays, otEligible) {
+  const dowOf = (d) => new Date(`${d}T00:00:00Z`).getUTCDay() + 1;
+  const prevHol = dowOf(prevDate) === sh.weekOff || holidays.has(prevDate);
+  const ownWeekOff = dowOf(ownDate) === sh.weekOff;
+  const res = {
+    dayType: ownWeekOff ? 'S' : holidays.has(ownDate) ? 'H' : 'W',
+    effIn: null, effOut: null, normalHrs: 0, normalOt: 0, holidayOt: 0, lateMins: 0, shortMins: 0, error: null,
+  };
+  const i = toMin(timeIn) ?? 0;
+  const o = toMin(timeOut);
+  if (o === null) {
+    res.error = 'Out time missing';
+    return res;
+  }
+  if (o <= i) {
+    res.error = 'Out must be after In';
+    return res;
+  }
+  let w = o - i;
+  if (sh.otBreak) w -= breakMins(i, o, sh);
+  const mins = otEligible ? Math.floor(Math.max(0, w) / sh.round) * sh.round : 0;
+  res.effIn = i;
+  res.effOut = o;
+  if (prevHol) res.holidayOt = mins;
+  else res.normalOt = mins;
+  return res;
+}
+
 module.exports = function timeSheetApi(connection) {
   const router = express.Router();
   const db = connection.promise();
@@ -222,7 +347,12 @@ module.exports = function timeSheetApi(connection) {
     return rows[0] || null;
   }
 
-  /** Builds one full month of computed rows from the screen's rows (by day no.). */
+  /**
+   * Builds one full month of computed rows from the screen's rows.
+   * Rows are matched by day no.; a day may have a continuation row (contFlag 'C', listed first)
+   * and its regular row(s). Day "last + 1" may hold the continuation of the last day's shift.
+   * SEQ_NO is renumbered per day: continuation first, then regular rows.
+   */
   async function computeSheet({ tshtDate, empCode, rows }, conn = db) {
     const month = parseMonth(tshtDate);
     if (!month) throw httpErr(400, 'Invalid month');
@@ -232,32 +362,92 @@ module.exports = function timeSheetApi(connection) {
     const holidays = await loadHolidays(month, conn);
     const empShift = emp.SHIFT_CODE || DEFAULT_SHIFT;
     const otEligible = emp.OT_ELIGIBLE !== 'N';
-    const byDay = new Map((rows || []).map((r) => [Number(r.dayNo), r]));
+    const dateOf = (d) => {
+      const x = new Date(Date.UTC(month.y, month.mo - 1, d));
+      return `${x.getUTCFullYear()}-${pad2(x.getUTCMonth() + 1)}-${pad2(x.getUTCDate())}`;
+    };
+    const shiftOf = (code) => {
+      const sh = shifts.get(code);
+      if (!sh) throw httpErr(400, `Shift ${code} not found in shift_mst`);
+      return sh;
+    };
+
+    // split the screen rows into continuation and regular rows per day (in seq order)
+    const contByDay = new Map();
+    const regByDay = new Map();
+    (rows || [])
+      .map((r) => ({ ...r, dayNo: Number(r.dayNo), seqNo: Number(r.seqNo) || 1 }))
+      .sort((a, b) => a.dayNo - b.dayNo || a.seqNo - b.seqNo)
+      .forEach((r) => {
+        const isCont = r.contFlag === 'C';
+        if (!Number.isInteger(r.dayNo) || r.dayNo < 1) return;
+        if (r.dayNo > month.days + (isCont ? 1 : 0)) return;
+        if (isCont && r.dayNo === 1) return; // would belong to last month's sheet
+        const m = isCont ? contByDay : regByDay;
+        if (!m.has(r.dayNo)) m.set(r.dayNo, []);
+        m.get(r.dayNo).push(r);
+      });
 
     const out = [];
-    for (let d = 1; d <= month.days; d++) {
-      const src = byDay.get(d) || {};
-      const date = `${month.first.slice(0, 8)}${pad2(d)}`;
-      const shiftCode = src.shiftCode || empShift;
-      const sh = shifts.get(shiftCode);
-      if (!sh) throw httpErr(400, `Shift ${shiftCode} not found in shift_mst`);
-      const timeIn = toMin(src.timeIn);
-      const timeOut = toMin(src.timeOut);
-      const c = calcDay(date, src.timeIn, src.timeOut, sh, holidays, otEligible);
-      out.push({
-        dayNo: d,
-        attDate: date,
-        timeIn: hhmm(timeIn),
-        timeOut: hhmm(timeOut),
-        shiftCode,
-        jobNo: src.jobNo || null,
-        remarks: src.remarks ? String(src.remarks).slice(0, 30) : null,
-        needsCheck: !!src.needsCheck || !!c.error,
-        ...c,
+    for (let d = 1; d <= month.days + 1; d++) {
+      const date = dateOf(d);
+      let seq = 0;
+
+      // continuation of the shift that started the day before
+      for (const c of contByDay.get(d) || []) {
+        const prevRows = regByDay.get(d - 1) || [];
+        const prevSrc = prevRows[prevRows.length - 1] || {};
+        const shiftCode = c.shiftCode || prevSrc.shiftCode || empShift;
+        const calc = calcCont(dateOf(d - 1), date, c.timeIn, c.timeOut, shiftOf(shiftCode), holidays, otEligible);
+        out.push({
+          dayNo: d,
+          seqNo: ++seq,
+          contFlag: 'C',
+          attDate: date,
+          timeIn: hhmm(toMin(c.timeIn) ?? 0),
+          timeOut: hhmm(toMin(c.timeOut)),
+          shiftCode,
+          jobNo: c.jobNo || null,
+          remarks: c.remarks ? String(c.remarks).slice(0, 30) : null,
+          needsCheck: !!c.needsCheck || !!calc.error,
+          ...calc,
+        });
+      }
+      if (d > month.days) break; // day "last + 1" holds only a continuation
+
+      const regs = regByDay.get(d) || [{}];
+      const nextHasCont = (contByDay.get(d + 1) || []).length > 0;
+      regs.forEach((src, idx) => {
+        const shiftCode = src.shiftCode || empShift;
+        const isLastReg = idx === regs.length - 1;
+        // runs on past midnight: 23:59 counts as 24:00 so no minute is lost at the split
+        const outOverride = isLastReg && nextHasCont && toMin(src.timeOut) === 23 * 60 + 59 ? 24 * 60 : undefined;
+        const calc = calcDay(date, src.timeIn, src.timeOut, shiftOf(shiftCode), holidays, otEligible, outOverride);
+        out.push({
+          dayNo: d,
+          seqNo: ++seq,
+          contFlag: null,
+          attDate: date,
+          timeIn: hhmm(toMin(src.timeIn)),
+          timeOut: hhmm(toMin(src.timeOut)),
+          shiftCode,
+          jobNo: src.jobNo || null,
+          remarks: src.remarks ? String(src.remarks).slice(0, 30) : null,
+          needsCheck: !!src.needsCheck || !!calc.error,
+          ...calc,
+        });
       });
     }
     return { month, emp, rows: out };
   }
+
+  /** "Day 15" or "Day 15 (cont.)" for messages */
+  const dayLabel = (r) => `Day ${r.dayNo}${r.contFlag === 'C' ? ' (cont.)' : ''}`;
+  /** stored dtl row -> screen row */
+  const dtlToRow = (r) => ({
+    dayNo: r.DAY_NO, seqNo: r.SEQ_NO, contFlag: r.CONT_FLAG, timeIn: r.TIME_IN, timeOut: r.TIME_OUT,
+    shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS,
+  });
 
   function httpErr(status, message) {
     const e = new Error(message);
@@ -360,10 +550,10 @@ module.exports = function timeSheetApi(connection) {
       const hdr = h[0];
       const emp = await loadEmp(hdr.EMP_CODE);
       const [dtl] = await db.query(
-        `SELECT DAY_NO, DATE_FORMAT(ATT_DATE, '%Y-%m-%d') AS ATT_DATE,
+        `SELECT DAY_NO, SEQ_NO, CONT_FLAG, DATE_FORMAT(ATT_DATE, '%Y-%m-%d') AS ATT_DATE,
                 TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
                 SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, REMARKS
-           FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO`,
+           FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO, SEQ_NO`,
         [no],
       );
       const [allow] = await db.query(
@@ -382,7 +572,7 @@ module.exports = function timeSheetApi(connection) {
       const calc = await computeSheet({
         tshtDate: hdr.TSHT_DATE,
         empCode: hdr.EMP_CODE,
-        rows: dtl.map((r) => ({ dayNo: r.DAY_NO, timeIn: r.TIME_IN, timeOut: r.TIME_OUT, shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS })),
+        rows: dtl.map(dtlToRow),
       });
       res.json({ ok: true, hdr, emp, rows: calc.rows, allow, ded, canRevoke: canRevokeUser(req) });
     } catch (e) {
@@ -408,15 +598,15 @@ module.exports = function timeSheetApi(connection) {
     );
     if (!h.length) throw httpErr(404, `Time sheet ${no} not found`);
     const [dtl] = await conn.query(
-      `SELECT DAY_NO, TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
-              SHIFT_CODE, JOB_NO, REMARKS FROM time_sheet_dtl WHERE TSHT_NO = ?`,
+      `SELECT DAY_NO, SEQ_NO, CONT_FLAG, TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
+              SHIFT_CODE, JOB_NO, REMARKS FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO, SEQ_NO`,
       [no],
     );
     const calc = await computeSheet(
       {
         tshtDate: h[0].TSHT_DATE,
         empCode: h[0].EMP_CODE,
-        rows: dtl.map((r) => ({ dayNo: r.DAY_NO, timeIn: r.TIME_IN, timeOut: r.TIME_OUT, shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS })),
+        rows: dtl.map(dtlToRow),
       },
       conn,
     );
@@ -456,8 +646,10 @@ module.exports = function timeSheetApi(connection) {
         }
         for (const r of req.body.rows || []) {
           const jobNo = r.jobNo ? String(r.jobNo).trim().slice(0, 20) : null;
-          if (jobNo && validJobs.size && !validJobs.has(jobNo)) throw httpErr(400, `Day ${r.dayNo}: Job No ${jobNo} not found in job_card`);
-          await conn.execute('UPDATE time_sheet_dtl SET JOB_NO = ? WHERE TSHT_NO = ? AND DAY_NO = ?', [jobNo, no, Number(r.dayNo)]);
+          if (jobNo && validJobs.size && !validJobs.has(jobNo)) throw httpErr(400, `${dayLabel(r)}: Job No ${jobNo} not found in job_card`);
+          await conn.execute('UPDATE time_sheet_dtl SET JOB_NO = ? WHERE TSHT_NO = ? AND DAY_NO = ? AND SEQ_NO = ?', [
+            jobNo, no, Number(r.dayNo), Number(r.seqNo) || 1,
+          ]);
         }
         await conn.execute('UPDATE time_sheet_hdr SET EDITED_BY = ?, EDITED_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
         const { calc } = await loadStoredSheet(no, conn);
@@ -480,7 +672,7 @@ module.exports = function timeSheetApi(connection) {
       codesOk(ded, 'Deductions');
       const calc = await computeSheet({ tshtDate: month.first, empCode, rows: req.body.rows }, conn);
       const bad = calc.rows.find((r) => r.error);
-      if (bad) throw httpErr(400, `Day ${bad.dayNo}: ${bad.error}`);
+      if (bad) throw httpErr(400, `${dayLabel(bad)}: ${bad.error}`);
 
       // month totals → time_sheet_hdr: hours as Hrs:Min from the calculated days, wages from the screen
       const sumMins = (k) => calc.rows.reduce((t, r) => t + (Number(r[k]) || 0), 0);
@@ -512,9 +704,12 @@ module.exports = function timeSheetApi(connection) {
       for (const r of calc.rows) {
         await conn.execute(
           `INSERT INTO time_sheet_dtl
-             (TSHT_NO, ATT_DATE, DAY_NO, TIME_IN, TIME_OUT, SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, REMARKS)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [no, r.attDate, r.dayNo, toTime(toMin(r.timeIn)), toTime(toMin(r.timeOut)), r.shiftCode, r.jobNo, r.normalHrs, r.normalOt, r.holidayOt, r.remarks],
+             (TSHT_NO, ATT_DATE, DAY_NO, SEQ_NO, CONT_FLAG, TIME_IN, TIME_OUT, SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, REMARKS)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            no, r.attDate, r.dayNo, r.seqNo, r.contFlag, toTime(toMin(r.timeIn)), toTime(toMin(r.timeOut)),
+            r.shiftCode, r.jobNo, r.normalHrs, r.normalOt, r.holidayOt, r.remarks,
+          ],
         );
       }
 
@@ -555,11 +750,12 @@ module.exports = function timeSheetApi(connection) {
       const { hdr, calc } = await loadStoredSheet(no, conn, true);
       if (hdr.STATUS !== 'D') throw httpErr(409, `Time sheet ${no} is already time-approved`);
       const bad = calc.rows.find((r) => r.error);
-      if (bad) throw httpErr(400, `Day ${bad.dayNo}: ${bad.error}`);
+      if (bad) throw httpErr(400, `${dayLabel(bad)}: ${bad.error}`);
       for (const r of calc.rows) {
-        await conn.execute('UPDATE time_sheet_dtl SET NORMAL_HRS = ?, NORMAL_OT = ?, HOLIDAY_OT = ? WHERE TSHT_NO = ? AND DAY_NO = ?', [
-          r.normalHrs, r.normalOt, r.holidayOt, no, r.dayNo,
-        ]);
+        await conn.execute(
+          'UPDATE time_sheet_dtl SET NORMAL_HRS = ?, NORMAL_OT = ?, HOLIDAY_OT = ? WHERE TSHT_NO = ? AND DAY_NO = ? AND SEQ_NO = ?',
+          [r.normalHrs, r.normalOt, r.holidayOt, no, r.dayNo, r.seqNo],
+        );
       }
       await conn.execute('UPDATE time_sheet_hdr SET STATUS = "T", TIME_APPR_BY = ?, TIME_APPR_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
       await conn.commit();
@@ -583,7 +779,7 @@ module.exports = function timeSheetApi(connection) {
       const { hdr, calc } = await loadStoredSheet(no, conn, true);
       if (hdr.STATUS === 'D') throw httpErr(409, `Approve the time for ${no} first`);
       if (hdr.STATUS === 'A') throw httpErr(409, `Time sheet ${no} is already job-approved`);
-      const noJob = calc.rows.filter((r) => r.normalHrs + r.normalOt + r.holidayOt > 0 && !r.jobNo).map((r) => r.dayNo);
+      const noJob = [...new Set(calc.rows.filter((r) => r.normalHrs + r.normalOt + r.holidayOt > 0 && !r.jobNo).map((r) => r.dayNo))];
       if (noJob.length) throw httpErr(400, `Enter a Job No on every worked day first (days ${noJob.join(', ')})`);
       await conn.execute('UPDATE time_sheet_hdr SET STATUS = "A", APPROVED_BY = ?, APPROVED_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
       await conn.commit();
@@ -694,14 +890,27 @@ module.exports = function timeSheetApi(connection) {
       const geminiKb = Math.round(cardImages.reduce((t, im) => t + im.data.length, 0) * 0.75 / 1024);
       console.log(`[tsht] ai-read: ${images.length} image(s), ${sentKb} KB received, ${geminiKb} KB to Gemini, month ${month.y}-${pad2(month.mo)}`);
 
-      const prompt = `These are photos of a monthly punch time card (an employee may have two cards: days 1-15 and 16-31). The operator selected ${MONTH_NAMES[month.mo - 1]} ${month.y}.
-The card No. is written in bold at the top left (e.g. "03" or "04"); return it as "cardNo" exactly as written, keeping leading zeros. Return the employee name written beside it as "name".
-Also return the month and year written on the card as "cardMonth" (1-12) and "cardYear" (4 digits), or null if not written.
-Each stamp is printed as "<day digits><HH:MM>", e.g. "17 07:55" or "1707:55". Use the printed day digits to decide the day — stamps are often printed slightly off their row.
-For every day 1-${month.days} return the FIRST stamp of the day as "in" and the LAST stamp as "out" (24-hour HH:MM), whichever column they are in.
-Handwritten times count (set "manual": true). A stamp printed in red means late (set "late": true).
-If a digit is unclear, give your best reading and set "check": true with a short "note" (max 25 chars).
-Days with no stamps: in and out null. Return only JSON.`;
+      const prompt = `These are photos of a monthly punch time card. An employee may have two cards: days 1-15 and days 16-31. The operator selected ${MONTH_NAMES[month.mo - 1]} ${month.y}.
+
+HEADER
+- The card No. is written in bold at the top left (e.g. "03", "06"). Return it as "cardNo" exactly as written, keeping leading zeros. Return the name written beside it as "name".
+- Return the month and year written on the card as "cardMonth" (1-12) and "cardYear" (4 digits), or null if not written.
+
+CARD LAYOUT
+- One row per day. Each row has SIX stamp columns, left to right:
+  AM_IN (A.M. In), AM_OUT (A.M. Out), PM_IN (P.M. In), PM_OUT (P.M. Out), OT_IN (Overtime In), OT_OUT (Overtime Out).
+- READ ALL SIX COLUMNS. An employee who stays late is stamped in the OVERTIME columns (e.g. OT_OUT "20:26") — that stamp is part of the day and must be returned. Do not skip the Overtime columns.
+- The time clock prints the DAY NUMBER rotated 90 degrees (sideways) immediately to the LEFT of each time, e.g. a sideways "17" followed by "07:56". It may also look like "1707:56" or "17 07:56".
+  Use that printed day number to decide which day the stamp belongs to — stamps are often printed slightly off their row. If it differs from the row, trust the printed day number.
+  NEVER make the sideways day number part of the time.
+
+WHAT TO RETURN for every day 1-${month.days} that has any stamp:
+- "day": the day number.
+- "stamps": EVERY stamp of that day, each as { "col": one of AM_IN, AM_OUT, PM_IN, PM_OUT, OT_IN, OT_OUT, "time": "HH:MM" (24-hour) }.
+  Handwritten times count — set "manual": true on that stamp. A stamp printed in red means late — set "late": true.
+  Return the stamps exactly as printed on that day; do not move a stamp to another day and do not decide which one is In or Out.
+- If a digit is unclear, give your best reading and set "check": true on the day with a short "note" (max 25 chars).
+Days with no stamps can be left out. Return only JSON.`;
 
       const responseSchema = {
         type: 'OBJECT',
@@ -716,14 +925,23 @@ Days with no stamps: in and out null. Return only JSON.`;
               type: 'OBJECT',
               properties: {
                 day: { type: 'INTEGER' },
-                in: { type: 'STRING', nullable: true },
-                out: { type: 'STRING', nullable: true },
-                late: { type: 'BOOLEAN' },
-                manual: { type: 'BOOLEAN' },
+                stamps: {
+                  type: 'ARRAY',
+                  items: {
+                    type: 'OBJECT',
+                    properties: {
+                      col: { type: 'STRING', enum: STAMP_COLS },
+                      time: { type: 'STRING' },
+                      manual: { type: 'BOOLEAN' },
+                      late: { type: 'BOOLEAN' },
+                    },
+                    required: ['col', 'time'],
+                  },
+                },
                 check: { type: 'BOOLEAN' },
                 note: { type: 'STRING', nullable: true },
               },
-              required: ['day'],
+              required: ['day', 'stamps'],
             },
           },
         },
@@ -823,21 +1041,7 @@ Days with no stamps: in and out null. Return only JSON.`;
         throw httpErr(lastError && lastError.status === 504 ? 504 : 502, `AI read failed (${tried}): ${lastError ? lastError.message : 'no answer'}`);
       }
 
-      const days = (parsed.days || [])
-        .filter((d) => Number.isInteger(d.day) && d.day >= 1 && d.day <= month.days)
-        .map((d) => {
-          const notes = [];
-          if (d.late) notes.push('Late stamp');
-          if (d.manual) notes.push('Manual time');
-          if (d.note) notes.push(d.note);
-          return {
-            dayNo: d.day,
-            timeIn: hhmm(toMin(d.in)),
-            timeOut: hhmm(toMin(d.out)),
-            needsCheck: !!d.check || !!d.manual,
-            remarks: notes.join('; ').slice(0, 30) || null,
-          };
-        });
+      const days = stampsToDays(parsed.days, month.days);
 
       const cardMonth = Number.isInteger(parsed.cardMonth) && parsed.cardMonth >= 1 && parsed.cardMonth <= 12 ? parsed.cardMonth : null;
       const cardYear = Number.isInteger(parsed.cardYear) && parsed.cardYear >= 2000 && parsed.cardYear <= 2100 ? parsed.cardYear : null;
@@ -942,4 +1146,6 @@ Days with no stamps: in and out null. Return only JSON.`;
 
 // exported for tests
 module.exports.calcDay = calcDay;
+module.exports.calcCont = calcCont;
+module.exports.stampsToDays = stampsToDays;
 module.exports.prepShift = prepShift;
