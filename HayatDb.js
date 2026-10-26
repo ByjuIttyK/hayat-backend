@@ -7800,3 +7800,5 @@ app.use("/api", require("./routes/empMstApi")(connection));
 app.use("/api", require("./routes/holidayMstApi")(connection));
 //
  app.use("/api", require("./routes/shiftMstApi")(connection));
+ //
+ app.use("/api", require("./routes/allowDedMstApi")(connection));
