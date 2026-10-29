@@ -4541,7 +4541,7 @@ app.get("/api/srethdr/:vchr", function (req, res) {
   connection.query(
 
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.NARRATION1, a.INV_NO, a.SMAN_CODE, a.AMOUNT ,a.DISCOUNT, DR_CODE,c.ACC_HEAD FROM  sret_hdr a " +
+    " b.CUST_NAME, a.NARRATION1, a.INV_NO,a.JOB_NO, a.SMAN_CODE, a.AMOUNT ,a.DISCOUNT, DR_CODE,c.ACC_HEAD FROM  sret_hdr a " +
     " left outer join cus_mst b on a.cust_code = b.cust_code" +
     " left outer join acc_mst c on a.dr_code =c.acc_code " +
     " WHERE    a.SRET_NO = ? ",
@@ -4563,11 +4563,23 @@ app.get("/api/sretitems/:vchr", function (req, res) {
   console.log("SRet.Note  req:=", req.params.vchr);
   connection.query(
 
-    "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.LOC_CODE," +
-    " a.ITEM_CODE, a.SR_NO, a.QTY, a.COST, a.INV_RATE,a.VAT_PERC " +
-    " FROM sret_items a" +
-    " WHERE  a.SRET_NO = ? ",
-
+    `SELECT i.*,
+       COALESCE(
+         (SELECT MAX(d.INV_ITEM_DESC)
+            FROM fab_inv_dtl d
+           WHERE d.INV_NO   = h.INV_NO
+             AND d.PANEL_NO = i.ITEM_CODE),
+         m.ITEM_NAME1, ''
+       ) AS ITEM_DES1,
+       (SELECT MAX(d.INV_UNIT)
+          FROM fab_inv_dtl d
+         WHERE d.INV_NO   = h.INV_NO
+           AND d.PANEL_NO = i.ITEM_CODE) AS INV_UNIT
+  FROM sret_items i
+  JOIN sret_hdr  h ON h.SRET_NO  = i.SRET_NO
+  LEFT JOIN item_mst m ON m.ITEM_CODE = i.ITEM_CODE
+ WHERE i.SRET_NO = ?
+ ORDER BY i.SR_NO`,
     [req.params.vchr],
 
     function (err, result) {
@@ -7799,6 +7811,8 @@ app.use("/api", require("./routes/empMstApi")(connection));
 //
 app.use("/api", require("./routes/holidayMstApi")(connection));
 //
- app.use("/api", require("./routes/shiftMstApi")(connection));
- //
- app.use("/api", require("./routes/allowDedMstApi")(connection));
+app.use("/api", require("./routes/shiftMstApi")(connection));
+//
+app.use("/api", require("./routes/allowDedMstApi")(connection));
+//
+app.use("/api", require("./routes/salretLovApi")(connection));

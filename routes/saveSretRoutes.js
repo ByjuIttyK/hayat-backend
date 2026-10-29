@@ -43,12 +43,12 @@ class ConflictError extends Error {}
 
 const HDR_INSERT = `
   INSERT INTO sret_hdr
-    (SRET_NO, SRET_DATE, INV_NO, CUST_CODE, DR_CODE, NARRATION1, NARRATION2, SMAN_CODE, DISCOUNT, AMOUNT)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    (SRET_NO, SRET_DATE, INV_NO, JOB_NO,CUST_CODE, DR_CODE, NARRATION1, NARRATION2, SMAN_CODE, DISCOUNT, AMOUNT)
+  VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?)`;
 
 const HDR_UPDATE = `
   UPDATE sret_hdr
-     SET SRET_DATE=?, INV_NO=?, CUST_CODE=?, DR_CODE=?, NARRATION1=?, NARRATION2=?,
+     SET SRET_DATE=?, INV_NO=?, JOB_NO=?,CUST_CODE=?, DR_CODE=?, NARRATION1=?, NARRATION2=?,
          SMAN_CODE=?, DISCOUNT=?, AMOUNT=?
    WHERE SRET_NO=?`;
 
@@ -92,7 +92,7 @@ module.exports = function (connection) {
     if (!canPrune) console.warn('[save-sret] line without SR_NO — removed rows not pruned', { clientSretNo });
 
     const hdrFields = [
-      sretNet.SretDt, sretNet.invNo ?? null, sretNet.CustCd ?? null, sretNet.AccCd ?? null,
+      sretNet.SretDt, sretNet.invNo ?? null,sretNet.JobNo ?? null, sretNet.CustCd ?? null, sretNet.AccCd ?? null,
       sretNet.Narration1 ?? null, sretNet.Narration2 ?? null, sretNet.SmanCd ?? null,
       sretNet.Discount ?? null, sretNet.TotAmt ?? null,
     ];
