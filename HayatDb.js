@@ -3188,7 +3188,7 @@ app.get("/api/trantypelst", function (req, res) {
   // const tableName= "TRAN_TYPE";
 
   connection.query(
-    "select TRAN_TYPE,TYPE_DES, TYPE_ABBR from tran_type ORDER BY TRAN_TYPE",
+    "select TRAN_TYPE,TYPE_DES, TYPE_ABBR, DATE_FORMAT(CLOSED_PERIOD,'%d/%m/%Y') as CLOSED_PERIOD ,NL_ENABLED  from tran_type ORDER BY TRAN_TYPE",
     [],
 
     function (error, result) {
@@ -7817,3 +7817,8 @@ app.use("/api", require("./routes/shiftMstApi")(connection));
 app.use("/api", require("./routes/allowDedMstApi")(connection));
 //
 app.use("/api", require("./routes/salretLovApi")(connection));
+//
+app.use("/api", require("./routes/quotCopyRoutes")(connection));
+//
+ const empCatgMst = require("./routes/empCatgMst");
+  app.use("/api", empCatgMst(connection));

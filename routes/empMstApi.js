@@ -19,7 +19,7 @@ module.exports = function (connection) {
   router.get("/emp-mst/list", async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, e.GENDER, e.NATION_CODE,
+        `SELECT e.EMP_CODE, e.EMP_NAME, e.EMP_CATG,e.CARD_NO, e.GENDER, e.NATION_CODE,
                 p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE
            FROM emp_mst e
            LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
@@ -49,7 +49,7 @@ module.exports = function (connection) {
   router.get("/emp-mst/:code", async (req, res) => {
     try {
       const [rows] = await pool.query(
-        `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, e.GENDER, e.NATION_CODE,
+        `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, e.GENDER, e.NATION_CODE,e.EMP_CATG,
                 p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE,
                 e.CREATED_BY, e.CREATED_DT, e.MODIFIED_BY, e.MODIFIED_DT
            FROM emp_mst e
