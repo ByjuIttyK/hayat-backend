@@ -4541,7 +4541,8 @@ app.get("/api/srethdr/:vchr", function (req, res) {
   connection.query(
 
     "select a.SRET_NO,DATE_FORMAT(a.SRET_DATE,'%d/%m/%Y') SRET_DATE, a.CUST_CODE," +
-    " b.CUST_NAME, a.NARRATION1, a.INV_NO,a.JOB_NO, a.SMAN_CODE, a.AMOUNT ,a.DISCOUNT, DR_CODE,c.ACC_HEAD FROM  sret_hdr a " +
+    " b.CUST_NAME, a.NARRATION1, a.INV_NO,h.INV_DATE,a.JOB_NO, a.SMAN_CODE, a.AMOUNT ,a.DISCOUNT, DR_CODE,c.ACC_HEAD FROM  sret_hdr a " +
+    " left outer join  fab_inv_hdr h  on a.inv_no = h.inv_no" +
     " left outer join cus_mst b on a.cust_code = b.cust_code" +
     " left outer join acc_mst c on a.dr_code =c.acc_code " +
     " WHERE    a.SRET_NO = ? ",
@@ -5226,7 +5227,7 @@ app.get("/api/getMaxDoc/:table/:field", async (req, res) => {
         database: "hayat",
       });*/
 
-    const [rows] = await connection.promise().query(`CALL get_max_docno(?, ?)`, [table, field]);
+    const [rows] = await connection.promise().query(`CALL get_max_docno(?, ?)`, [table.toLowerCase(), field]);
     const result = rows[0][0].max_value;
     switch (table) {
       case "PRET_HDR":
