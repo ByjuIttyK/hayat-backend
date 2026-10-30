@@ -7820,5 +7820,8 @@ app.use("/api", require("./routes/salretLovApi")(connection));
 //
 app.use("/api", require("./routes/quotCopyRoutes")(connection));
 //
- const empCatgMst = require("./routes/empCatgMst");
-  app.use("/api", empCatgMst(connection));
+const empCatgMst = require("./routes/empCatgMst");
+app.use("/api", empCatgMst(connection));
+//
+const tsJobAllocApi = require('./routes/tsJobAllocApi');
+app.use('/api', tsJobAllocApi(connection));
