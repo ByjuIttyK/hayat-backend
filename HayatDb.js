@@ -7834,3 +7834,6 @@ app.use('/api', salRevApi(connection));
 //
 const empLookupsApi = require('./routes/empLookupsApi');
 app.use('/api', empLookupsApi(connection));
+//
+const salaryJvApi = require('./routes/salaryJvApi');
+app.use('/api', salaryJvApi(connection));
