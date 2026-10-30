@@ -7825,3 +7825,9 @@ app.use("/api", empCatgMst(connection));
 //
 const tsJobAllocApi = require('./routes/tsJobAllocApi');
 app.use('/api', tsJobAllocApi(connection));
+//
+const empAllowDedApi = require('./routes/empAllowDedApi');
+app.use('/api', empAllowDedApi(connection));
+//
+const salRevApi = require('./routes/salRevApi');
+app.use('/api', salRevApi(connection));

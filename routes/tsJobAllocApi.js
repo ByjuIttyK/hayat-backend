@@ -3,6 +3,7 @@
 //
 //   GET  /api/ts-job-alloc/:tshtNo        header, daily hours, allocation lines, job list
 //   GET  /api/ts-job-alloc-sheets?q=      time-approved sheets (LOV when opened without a key)
+//   GET  /api/ts-job-alloc-done/:tshtNo   DAY_NOs whose hours are fully allocated (Day colour on TimeSheetEnt)
 //   POST /api/save-ts-job-alloc           { tshtNo, lines: [...], approve }
 //
 // Daily hours = time_sheet_dtl summed per DAY_NO (a midnight-shift day has 2 SEQ_NO rows).
@@ -15,6 +16,7 @@
 //   app.use('/api', tsJobAllocApi(connection));
 // =====================================================================
 const express = require('express');
+const { payAsOf } = require('./salRevPay'); // basic in force for the sheet's month (salary revisions)
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -30,7 +32,7 @@ module.exports = function (connection) {
   const money = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
   // ---------------------------------------------------------------
-  const loadHeader = (conn, tshtNo) =>
+  const loadHeaderRaw = (conn, tshtNo) =>
     q(
       conn,
       `SELECT h.TSHT_NO, DATE_FORMAT(h.TSHT_DATE,'%Y-%m-%d') AS TSHT_DATE, h.EMP_CODE, e.EMP_NAME, h.STATUS,
@@ -42,6 +44,12 @@ module.exports = function (connection) {
         WHERE h.TSHT_NO = ?`,
       [tshtNo],
     ).then((r) => r[0] || null);
+  // Basic = pay in force for the sheet's month (employee master + approved salary revisions)
+  const loadHeader = async (conn, tshtNo) => {
+    const hdr = await loadHeaderRaw(conn, tshtNo);
+    if (hdr && hdr.TSHT_DATE) hdr.BASIC_SAL = (await payAsOf(q, conn, hdr.EMP_CODE, `${hdr.TSHT_DATE.slice(0, 8)}01`)).basic;
+    return hdr;
+  };
 
   const loadDays = (conn, tshtNo) =>
     q(
@@ -77,6 +85,31 @@ module.exports = function (connection) {
       res.json({ hdr, days, lines, jobs });
     } catch (err) {
       console.error('ts-job-alloc load:', err);
+      res.status(500).json({ error: err.message });
+    } finally {
+      if (conn) conn.release();
+    }
+  });
+
+  // days where every hours column of time_sheet_job tallies with time_sheet_dtl
+  router.get('/ts-job-alloc-done/:tshtNo', async (req, res) => {
+    let conn;
+    try {
+      conn = await getConn();
+      const rows = await q(
+        conn,
+        `SELECT d.DAY_NO
+           FROM (SELECT DAY_NO, SUM(IFNULL(NORMAL_HRS,0)) N, SUM(IFNULL(NORMAL_OT,0)) O, SUM(IFNULL(HOLIDAY_OT,0)) H
+                   FROM time_sheet_dtl WHERE TSHT_NO = ? GROUP BY DAY_NO) d
+           JOIN (SELECT DAY_NO, SUM(NORMAL_MINS) N, SUM(NOT_MINS) O, SUM(HOT_MINS) H
+                   FROM time_sheet_job WHERE TSHT_NO = ? GROUP BY DAY_NO) j ON j.DAY_NO = d.DAY_NO
+          WHERE d.N + d.O + d.H > 0 AND d.N = j.N AND d.O = j.O AND d.H = j.H
+          ORDER BY d.DAY_NO`,
+        [req.params.tshtNo, req.params.tshtNo],
+      );
+      res.json(rows.map((r) => Number(r.DAY_NO)));
+    } catch (err) {
+      console.error('ts-job-alloc-done:', err);
       res.status(500).json({ error: err.message });
     } finally {
       if (conn) conn.release();
