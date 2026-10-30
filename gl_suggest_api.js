@@ -318,13 +318,22 @@ Return ONLY this JSON:
       }
 
       // ── 1. Load account + customer master for context ─────────────────────
-      const [accounts, customers, customerCandidates] = await Promise.all([
+      //    accountCandidates: G/L accounts whose head matches a word in the
+      //    narration (a bank named at the end — "...into ENBD"), so they are in
+      //    the prompt even when they sit beyond the first 400 accounts.
+      const [accounts, customers, customerCandidates, accountCandidates] = await Promise.all([
         dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM acc_mst ORDER BY ACC_CODE LIMIT 400'),
         dbQuery(connection, 'SELECT CUST_CODE, CUST_NAME FROM cus_mst ORDER BY CUST_NAME LIMIT 300'),
         findCandidates(connection, 'cus_mst', 'CUST_CODE', 'CUST_NAME', narration),
+        findCandidatesByTokens(connection, 'acc_mst', 'ACC_CODE', 'ACC_HEAD', extractAccountTokens(narration), 20),
       ]);
 
-      const accList = accounts.map(r => `${r.ACC_CODE} - ${r.ACC_HEAD}`).join('\n');
+      // named accounts first, then the broad list — one entry per code
+      const mergedAccounts = mergeCandidates(accountCandidates, accounts, 'ACC_CODE', 'ACC_HEAD');
+      const accList = candidatesToPromptList(mergedAccounts);
+      const namedAccList = accountCandidates.length
+        ? accountCandidates.map(r => `${r.CODE} - ${r.NAME}`).join('\n')
+        : '(none — no account head matches a word in the narration)';
       const mergedCustomers = mergeCandidates(customerCandidates, customers, 'CUST_CODE', 'CUST_NAME');
       const custList = candidatesToPromptList(mergedCustomers);
       // Deterministic Jaccard token-set match — overrides the LLM's pick below
