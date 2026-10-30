@@ -1,6 +1,9 @@
 // routes/empMstApi.js
 // Miniature Employee Master + Payroll Master (emp_mst / payroll_mst, linked by EMP_CODE)
 // Register in HayatDb.js:  app.use("/api", require("./routes/empMstApi")(connection));
+// 30-Oct-2026: NATION_CODE is the nation_mst code (VARCHAR 3, e.g. UAE) — no longer a number;
+//              payroll_mst.ACCRUED_SAL_AC (acc_mst 213… account, "Accrued Sal A/c (Cr)") added;
+//              EMP_CATG now saved on ADD; delete blocked when the employee has salary revisions.
 
 const express = require("express");
 
@@ -20,7 +23,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await pool.query(
         `SELECT e.EMP_CODE, e.EMP_NAME, e.EMP_CATG,e.CARD_NO, e.GENDER, e.NATION_CODE,
-                p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE
+                p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE, p.ACCRUED_SAL_AC
            FROM emp_mst e
            LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
           ORDER BY e.EMP_CODE`
@@ -50,7 +53,7 @@ module.exports = function (connection) {
     try {
       const [rows] = await pool.query(
         `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, e.GENDER, e.NATION_CODE,e.EMP_CATG,
-                p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE,
+                p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE, p.ACCRUED_SAL_AC,
                 e.CREATED_BY, e.CREATED_DT, e.MODIFIED_BY, e.MODIFIED_DT
            FROM emp_mst e
            LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
@@ -76,25 +79,37 @@ module.exports = function (connection) {
 
     const cardNo = clean(data.CARD_NO);
     const gender = clean(data.GENDER);
-    const nation = clean(data.NATION_CODE) === null ? null : Number(data.NATION_CODE);
+    const catg = clean(data.EMP_CATG)?.toUpperCase() || null;
+    const nation = clean(data.NATION_CODE)?.toUpperCase() || null; // nation_mst code, e.g. UAE
+    const accruedAc = clean(data.ACCRUED_SAL_AC);                   // acc_mst 213… account
     const basic = Number(data.BASIC_SAL || 0);
     const shift = clean(data.SHIFT_CODE)?.toUpperCase() || null;
     const ot = data.OT_ELIGIBLE === "N" ? "N" : "Y";
 
     const conn = await pool.getConnection();
     try {
+      // dropdown values must still exist in their masters
+      if (nation) {
+        const [n] = await conn.query(`SELECT 1 FROM nation_mst WHERE NATION_CODE = ?`, [nation]);
+        if (!n.length) throw Object.assign(new Error(`Nation ${nation} is not in the nation master`), { status: 400 });
+      }
+      if (accruedAc) {
+        const [a] = await conn.query(`SELECT 1 FROM acc_mst WHERE ACC_CODE = ? AND ACC_CODE LIKE '231%'`, [accruedAc]);
+        if (!a.length) throw Object.assign(new Error(`Accrued Sal A/c ${accruedAc} is not a 231… account in acc_mst`), { status: 400 });
+      }
+
       await conn.beginTransaction();
 
       if (mode === "ADD") {
         await conn.query(
-          `INSERT INTO emp_mst (EMP_CODE, EMP_NAME, CARD_NO, GENDER, NATION_CODE, CREATED_BY)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [empCode, empName, cardNo, gender, nation, user]
+          `INSERT INTO emp_mst (EMP_CODE, EMP_NAME, EMP_CATG, CARD_NO, GENDER, NATION_CODE, CREATED_BY)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [empCode, empName, catg, cardNo, gender, nation, user]
         );
         await conn.query(
-          `INSERT INTO payroll_mst (EMP_CODE, BASIC_SAL, SHIFT_CODE, OT_ELIGIBLE, CREATED_BY)
-           VALUES (?, ?, ?, ?, ?)`,
-          [empCode, basic, shift, ot, user]
+          `INSERT INTO payroll_mst (EMP_CODE, BASIC_SAL, SHIFT_CODE, OT_ELIGIBLE, ACCRUED_SAL_AC, CREATED_BY)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [empCode, basic, shift, ot, accruedAc, user]
         );
       } else {
         const [r] = await conn.query(
@@ -106,18 +121,19 @@ module.exports = function (connection) {
 
         // payroll row may be missing for imported employees -> upsert
         await conn.query(
-          `INSERT INTO payroll_mst (EMP_CODE, BASIC_SAL, SHIFT_CODE, OT_ELIGIBLE, CREATED_BY)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO payroll_mst (EMP_CODE, BASIC_SAL, SHIFT_CODE, OT_ELIGIBLE, ACCRUED_SAL_AC, CREATED_BY)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE BASIC_SAL = VALUES(BASIC_SAL), SHIFT_CODE = VALUES(SHIFT_CODE),
-                                   OT_ELIGIBLE = VALUES(OT_ELIGIBLE), MODIFIED_BY = ?`,
-          [empCode, basic, shift, ot, user, user]
+                                   OT_ELIGIBLE = VALUES(OT_ELIGIBLE), ACCRUED_SAL_AC = VALUES(ACCRUED_SAL_AC),
+                                   MODIFIED_BY = ?`,
+          [empCode, basic, shift, ot, accruedAc, user, user]
         );
       }
 
       await conn.commit();
       res.json({ success: true, EMP_CODE: empCode, message: `Employee ${empCode} saved successfully` });
     } catch (err) {
-      await conn.rollback();
+      await conn.rollback().catch(() => {});
       if (err.code === "ER_DUP_ENTRY") {
         const msg = /CARD_NO/i.test(err.sqlMessage)
           ? `Card No ${cardNo} is already assigned to another employee`
@@ -136,13 +152,14 @@ module.exports = function (connection) {
     const empCode = req.params.code.toUpperCase();
     const conn = await pool.getConnection();
     try {
-      // block delete if the employee already has time sheets
-      try {
-        const [ts] = await conn.query(`SELECT COUNT(*) AS n FROM time_sheet_hdr WHERE EMP_CODE = ?`, [empCode]);
-        if (ts[0].n > 0)
-          return res.status(409).json({ message: `Cannot delete — ${empCode} has ${ts[0].n} time sheet(s)` });
-      } catch (e) {
-        if (e.code !== "ER_NO_SUCH_TABLE") throw e;
+      // block delete if the employee already has time sheets or salary revisions
+      for (const [tbl, what] of [["time_sheet_hdr", "time sheet(s)"], ["sal_rev_hdr", "salary revision(s)"]]) {
+        try {
+          const [cnt] = await conn.query(`SELECT COUNT(*) AS n FROM ${tbl} WHERE EMP_CODE = ?`, [empCode]);
+          if (cnt[0].n > 0) return res.status(409).json({ message: `Cannot delete — ${empCode} has ${cnt[0].n} ${what}` });
+        } catch (e) {
+          if (e.code !== "ER_NO_SUCH_TABLE") throw e;
+        }
       }
 
       await conn.beginTransaction();

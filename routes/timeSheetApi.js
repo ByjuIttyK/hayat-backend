@@ -28,6 +28,10 @@
 //                                      week off / holiday → H.OT; never late / short / absent
 //     day 15 seq 2  08:00 → 17:30      regular duty, judged as usual
 //   A shift on the last day continues on day "last + 1" (1st of next month), kept on this sheet.
+// 30-Oct-2026: POST /tsht/payslips { nos: [...] } — payslip figures of processed sheets (Payslip Print list):
+//   stored days recalculated (as when the sheet is opened), the same month totals as the screen
+//   (useTimeSheet totals), the sheet's own allowance / deduction lines, and the basic in force for
+//   the month (salary revisions, salRevPay.js) — so the slip matches "Print Payslip" on the sheet.
 // 26-Oct-2026: AI card read returns EVERY stamp of every column (A.M./P.M./Overtime In/Out);
 //   In / Out are worked out here: In = first stamp, Out = last stamp. An early-morning stamp
 //   (before TSHT_CARRY_BEFORE, default 05:00) that ends the previous day's shift is moved to
@@ -35,6 +39,13 @@
 // =====================================================================
 const express = require('express');
 const fs = require('fs');
+// basic in force for a month (salary revisions); falls back to payroll_mst.BASIC_SAL if not installed
+let payAsOf = null;
+try {
+  ({ payAsOf } = require('./salRevPay'));
+} catch {
+  /* salary revisions not installed */
+}
 const path = require('path');
 
 // ---- adjust these to your schema if names differ --------------------
@@ -829,6 +840,86 @@ module.exports = function timeSheetApi(connection) {
       send(res, e);
     } finally {
       if (conn) conn.release();
+    }
+  });
+
+  // ---------- payslips of processed sheets (Payslip Print list) ----------
+  /** Month totals exactly as useTimeSheet builds them on the screen. */
+  function sheetTotals(rows, allow, ded) {
+    const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+    const dayRows = rows.filter((r) => r.contFlag !== 'C');
+    const days = (fn) => new Set(dayRows.filter(fn).map((r) => r.dayNo)).size;
+    return {
+      normalHrs: sum('normalHrs'),
+      normalOt: sum('normalOt'),
+      holidayOt: sum('holidayOt'),
+      lateMins: sum('lateMins'),
+      shortMins: sum('shortMins'),
+      workDays: days((r) => r.dayType === 'W' && r.normalHrs > 0),
+      offDays: days((r) => (r.dayType === 'S' || r.dayType === 'H') && !r.holidayOt),
+      absentDays: days((r) => r.dayType === 'A'),
+      lateDays: days((r) => r.lateMins > 0),
+      allow: allow.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
+      ded: ded.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
+    };
+  }
+
+  router.post('/tsht/payslips', async (req, res) => {
+    try {
+      const nos = Array.isArray(req.body && req.body.nos) ? req.body.nos.map(String).slice(0, 500) : [];
+      if (!nos.length) throw httpErr(400, 'No time sheets selected');
+      const slips = [];
+      const skipped = [];
+      for (const no of nos) {
+        const [h] = await db.query(
+          `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?`,
+          [no],
+        );
+        if (!h.length) {
+          skipped.push(`${no}: not found`);
+          continue;
+        }
+        const hdr = h[0];
+        if (hdr.STATUS !== 'T' && hdr.STATUS !== 'A') {
+          skipped.push(`${no}: not processed (draft)`);
+          continue;
+        }
+        const { calc } = await loadStoredSheet(no);
+        const [allow] = await db.query(
+          `SELECT a.ALLOW_CODE AS CODE, m.ALLOW_DESC AS DESCR, a.AMOUNT, a.REMARKS
+             FROM tsht_allow a LEFT JOIN allow_mst m ON m.ALLOW_CODE = a.ALLOW_CODE
+            WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
+          [no],
+        );
+        const [ded] = await db.query(
+          `SELECT a.DED_CODE AS CODE, m.DED_DESC AS DESCR, a.AMOUNT, a.REMARKS
+             FROM tsht_ded a LEFT JOIN ded_mst m ON m.DED_CODE = a.DED_CODE
+            WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
+          [no],
+        );
+        const emp = calc.emp;
+        let basic = emp.BASIC_SAL;
+        if (payAsOf) {
+          try {
+            basic = (await payAsOf((c, sql, params) => c.query(sql, params).then(([rows]) => rows), db, emp.EMP_CODE, hdr.TSHT_DATE)).basic;
+          } catch (e) {
+            console.warn('[tsht] payslips: month basic not read, using payroll_mst:', e.code || e.message);
+          }
+        }
+        const line = (a) => ({ code: a.CODE, descr: a.DESCR || '', amount: Number(a.AMOUNT) || 0, remarks: a.REMARKS || '' });
+        slips.push({
+          tshtNo: hdr.TSHT_NO,
+          tshtDate: hdr.TSHT_DATE,
+          status: 'A', // processed: pay is fixed once the time is approved (same as the sheet's Print Payslip)
+          employee: { EMP_CODE: emp.EMP_CODE, EMP_NAME: emp.EMP_NAME, CARD_NO: emp.CARD_NO, SHIFT_CODE: emp.SHIFT_CODE, BASIC_SAL: basic },
+          totals: sheetTotals(calc.rows, allow, ded),
+          allowances: allow.map(line),
+          deductions: ded.map(line),
+        });
+      }
+      res.json({ ok: true, slips, skipped });
+    } catch (e) {
+      send(res, e);
     }
   });
 

@@ -7831,3 +7831,6 @@ app.use('/api', empAllowDedApi(connection));
 //
 const salRevApi = require('./routes/salRevApi');
 app.use('/api', salRevApi(connection));
+//
+const empLookupsApi = require('./routes/empLookupsApi');
+app.use('/api', empLookupsApi(connection));

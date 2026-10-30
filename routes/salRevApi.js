@@ -8,6 +8,7 @@
 //   POST /api/save-sal-rev                   { mode: 'ADD'|'EDIT', revNo, hdr, lines }  (Draft only)
 //   POST /api/approve-sal-rev                { revNo }  → STATUS 'A', masters updated when due
 //   POST /api/delete-sal-rev                 { revNo }  (Draft only)
+//   POST /api/revoke-sal-rev                 { revNo }  admin only: Approved → Draft (masters put back if applied)
 //   GET  /api/sal-rev-company                company row for the letter's letterhead
 //   GET  /api/pay-for-period/:empCode?month=YYYY-MM-01
 //                                            pay for that month (time sheet: basic, allowances, deductions)
@@ -30,6 +31,12 @@ module.exports = function (connection) {
   const q = (conn, sql, params = []) =>
     new Promise((resolve, reject) => conn.query(sql, params, (err, rows) => (err ? reject(err) : resolve(rows))));
   const userOf = (req) => (req.user && (req.user.username || req.user.USER_NAME || req.user.userId)) || null;
+  // users allowed to revoke an approval — taken from the login token only (same rule as the time sheet)
+  const REVOKE_USERS = ['admin'];
+  const canRevokeUser = (req) => {
+    const u = req.user && (req.user.USER_NAME || req.user.username || req.user.user_name);
+    return !!u && REVOKE_USERS.includes(String(u).trim().toLowerCase());
+  };
   const amt3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
   const dayBefore = (iso) => {
     const d = new Date(`${iso}T00:00:00Z`);
@@ -94,7 +101,7 @@ module.exports = function (connection) {
     // the employee's other items as they stood just before this revision (for the gross)
     const before = await payAsOf(q, conn, hdr.EMP_CODE, dayBefore(hdr.APPLY_FROM));
     res.json({
-      ok: true, hdr, lines,
+      ok: true, hdr, lines, canRevoke: canRevokeUser(req),
       current: { basic: before.basic, allow: withDesc(maps, 'A', before.allow), ded: withDesc(maps, 'D', before.ded) },
       history: await history(conn, hdr.EMP_CODE, revNo),
     });
@@ -250,6 +257,78 @@ module.exports = function (connection) {
     res.json({
       ok: true, revNo,
       message: applied ? `Revision ${revNo} approved — employee master updated` : `Revision ${revNo} approved — applies from ${h.APPLY_FROM.split('-').reverse().join('/')}`,
+    });
+  }));
+
+  // Revoke approval (admin only): Approved → Draft.
+  //  - only the employee's LATEST approved revision can be revoked (later ones first)
+  //  - refused when a time sheet of the APPLY_FROM month or later is already Time / Job approved
+  //  - if the revision was already written into the masters, the Old amounts are put back
+  router.post('/revoke-sal-rev', withConn(async (conn, req, res) => {
+    if (!canRevokeUser(req)) throw new Error('Only admin can revoke an approval');
+    const revNo = String(req.body?.revNo || '').trim().toUpperCase();
+    await q(conn, 'START TRANSACTION');
+    const h = (await q(
+      conn,
+      `SELECT EMP_CODE, STATUS, APPLIED, DATE_FORMAT(APPLY_FROM,'%Y-%m-%d') APPLY_FROM FROM sal_rev_hdr WHERE REV_NO = ? FOR UPDATE`,
+      [revNo],
+    ))[0];
+    if (!h) throw new Error(`Revision ${revNo} not found`);
+    if (h.STATUS !== 'A') throw new Error('This revision is a draft — nothing to revoke');
+
+    const later = await q(
+      conn,
+      `SELECT REV_NO FROM sal_rev_hdr
+        WHERE EMP_CODE = ? AND STATUS = 'A' AND REV_NO <> ?
+          AND (APPLY_FROM > ? OR (APPLY_FROM = ? AND REV_NO > ?))
+        ORDER BY APPLY_FROM DESC, REV_NO DESC LIMIT 1`,
+      [h.EMP_CODE, revNo, h.APPLY_FROM, h.APPLY_FROM, revNo],
+    );
+    if (later.length) throw new Error(`A later revision (${later[0].REV_NO}) is approved for this employee — revoke that one first`);
+
+    const locked = await q(
+      conn,
+      `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE,'%m/%Y') MON FROM time_sheet_hdr
+        WHERE EMP_CODE = ? AND STATUS IN ('T','A') AND LAST_DAY(TSHT_DATE) >= ? ORDER BY TSHT_DATE LIMIT 1`,
+      [h.EMP_CODE, h.APPLY_FROM],
+    );
+    if (locked.length)
+      throw new Error(`The time sheet for ${locked[0].MON} (${locked[0].TSHT_NO}) is approved with this pay — revoke that time sheet's approval first`);
+
+    // put the masters back to the Old amounts
+    if (h.APPLIED === 'Y') {
+      const lines = await q(conn, `SELECT ITEM_TYPE, ITEM_CODE, OLD_AMT FROM sal_rev_dtl WHERE REV_NO = ?`, [revNo]);
+      for (const l of lines) {
+        const old = amt3(l.OLD_AMT);
+        if (l.ITEM_TYPE === 'B') {
+          await q(conn, `UPDATE payroll_mst SET BASIC_SAL = ? WHERE EMP_CODE = ?`, [old, h.EMP_CODE]);
+          continue;
+        }
+        const t = l.ITEM_TYPE === 'A' ? { tbl: 'emp_allow_mst', col: 'ALLOW_CODE' } : { tbl: 'emp_ded_mst', col: 'DED_CODE' };
+        if (old > 0)
+          await q(
+            conn,
+            `INSERT INTO ${t.tbl} (EMP_CODE, ${t.col}, AMOUNT, CREATED_BY) VALUES (?,?,?, 'SAL-REV')
+             ON DUPLICATE KEY UPDATE AMOUNT = VALUES(AMOUNT), MODIFIED_BY = 'SAL-REV'`,
+            [h.EMP_CODE, l.ITEM_CODE, old],
+          );
+        else await q(conn, `DELETE FROM ${t.tbl} WHERE EMP_CODE = ? AND ${t.col} = ?`, [h.EMP_CODE, l.ITEM_CODE]);
+      }
+    }
+
+    await q(
+      conn,
+      `UPDATE sal_rev_hdr SET STATUS = 'D', APPLIED = 'N', APPROVED_BY = NULL, APPROVED_DT = NULL,
+              REVOKED_BY = ?, REVOKED_DT = NOW() WHERE REV_NO = ?`,
+      [userOf(req), revNo],
+    );
+    await q(conn, 'COMMIT');
+    console.log(`[sal-rev] ${userOf(req)} revoked the approval of ${revNo}`);
+    res.json({
+      ok: true, revNo,
+      message: h.APPLIED === 'Y'
+        ? `Approval of ${revNo} revoked — back to Draft; the employee's pay is back to the old amounts`
+        : `Approval of ${revNo} revoked — back to Draft`,
     });
   }));
 
