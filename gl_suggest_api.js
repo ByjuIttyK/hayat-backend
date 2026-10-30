@@ -191,13 +191,17 @@ module.exports = function (connection) {
       }
 
       // ── 1. Load account + supplier master for context ─────────────────────
-      const [accounts, suppliers, supplierCandidates] = await Promise.all([
+      //    accountCandidates: G/L accounts whose head matches a word in the
+      //    narration (the paying bank, "...from ENBD"), listed first.
+      const [accounts, suppliers, supplierCandidates, accountCandidates] = await Promise.all([
         dbQuery(connection, 'SELECT ACC_CODE, ACC_HEAD FROM acc_mst ORDER BY ACC_CODE LIMIT 400'),
         dbQuery(connection, 'SELECT SUP_CODE, SUP_NAME FROM sup_mst ORDER BY SUP_NAME LIMIT 300'),
         findCandidates(connection, 'sup_mst', 'SUP_CODE', 'SUP_NAME', narration),
+        findCandidatesByTokens(connection, 'acc_mst', 'ACC_CODE', 'ACC_HEAD', extractAccountTokens(narration), 20),
       ]);
 
-      const accList = accounts.map(r => `${r.ACC_CODE} - ${r.ACC_HEAD}`).join('\n');
+      const mergedAccounts = mergeCandidates(accountCandidates, accounts, 'ACC_CODE', 'ACC_HEAD');
+      const accList = candidatesToPromptList(mergedAccounts);
       const mergedSuppliers = mergeCandidates(supplierCandidates, suppliers, 'SUP_CODE', 'SUP_NAME');
       const supList = candidatesToPromptList(mergedSuppliers);
       // Deterministic Jaccard token-set match — overrides the LLM's pick below
@@ -216,22 +220,35 @@ PAYMENT TYPE: ${isBankPay ? 'Bank Payment (may involve PDC cheques, bank transfe
 SUPPLIER MASTER (SUP_CODE - SUP_NAME) — candidates extracted from the narration are listed first:
 ${supList}
 
-CHART OF ACCOUNTS (ACC_CODE - ACC_HEAD):
+CHART OF ACCOUNTS (ACC_CODE - ACC_HEAD) — accounts named in the narration are listed first:
 ${accList}
 
+HOW THIS VOUCHER IS ENTERED:
+The bank / cash / PDC account being credited sits in the voucher HEADER (crAcc). The lines grid holds ONLY the
+DEBIT lines — the suppliers (parties) being paid. Never put the bank / cash / PDC account, or any credit, in "lines".
+
 EXTRACTION RULES:
-1. drAcc / drHead  → Party being paid. Match supplier name from narration against SUPPLIER MASTER. Pick the closest match. Return SUP_CODE as drAcc, SUP_NAME as drHead. NEVER return an ACC_CODE from the chart of accounts here — drAcc must always come from SUPPLIER MASTER, even if the match is imperfect.
-2. crAcc / crHead  → Credit side account from CHART OF ACCOUNTS:
+1. crAcc / crHead  → The ONE account the money is paid from, from CHART OF ACCOUNTS (header only):
+   - If the narration NAMES a bank, use THAT bank's account; never substitute a similar-looking bank.
    - If narration mentions PDC / post-dated / cheque → find PDC PAYABLE or similar account.
    - If bank transfer / NEFT / wire / online → find the BANK account.
    - If cash → find CASH IN HAND or PETTY CASH account.
-3. amount          → Total payment amount as a number. 0 if not found.
-4. cheques         → Array of cheque objects extracted from narration. Each: { chqNo, chqDt (YYYY-MM-DD), amount (number) }. Empty array [] if none.
-5. narration       → Clean one-line voucher narration max 100 chars summarising the payment.
-6. confidence      → "high" if supplier + amount clearly found, "medium" if partial, "low" if guessed.
+   - Leave both empty if the narration gives no clue — the user fills the header.
+2. lines           → DEBIT lines only, one per supplier being paid:
+   { "acc": "", "head": "", "dr": 0, "narration": "" }
+   - acc / head come from SUPPLIER MASTER (SUP_CODE / SUP_NAME) — NEVER an ACC_CODE from the chart of accounts.
+   - Usually one supplier = one line. Several suppliers named, each with an amount → one line each.
+   - dr is that supplier's amount; narration is a short line note (invoice / cheque reference) or "".
+   - No "cr" field and no credit lines.
+3. drAcc / drHead  → The main supplier paid (the largest debit line) — SUP_CODE / SUP_NAME. Pick the closest match even if imperfect.
+4. amount          → Total payment amount = the sum of the debit lines. 0 if not found.
+5. cheques         → Array of cheque objects extracted from narration. Each: { chqNo, chqDt (YYYY-MM-DD), amount (number) }. Empty array [] if none.
+6. narration       → Clean one-line voucher narration max 100 chars summarising the payment.
+7. confidence      → "high" if supplier + amount clearly found, "medium" if partial, "low" if guessed.
 
 Return ONLY this JSON:
 {
+  "lines": [{ "acc": "", "head": "", "dr": 0, "narration": "" }],
   "drAcc": "",
   "drHead": "",
   "crAcc": "",
@@ -252,7 +269,7 @@ Return ONLY this JSON:
           }],
           generationConfig: {
             temperature: 0,
-            maxOutputTokens: 512,
+            maxOutputTokens: 1024,
             responseMimeType: 'application/json',
           },
         }),
@@ -284,12 +301,44 @@ Return ONLY this JSON:
       const finalDrAcc = bestSupplierMatch ? bestSupplierMatch.code : String(suggestion.drAcc || '').trim();
       const finalDrHead = bestSupplierMatch ? bestSupplierMatch.name : String(suggestion.drHead || '').trim();
 
+      // ── 6a. Debit (supplier) lines only — the grid. The paying bank / cash
+      //    account is the header crAcc; credit lines and G/L codes are dropped.
+      const accByCode = new Map(mergedAccounts.map(r => [String(r.code).trim(), r.name]));
+      const supByCode = new Map(mergedSuppliers.map(r => [String(r.code).trim(), r.name]));
+      let lines = (Array.isArray(suggestion.lines) ? suggestion.lines : [])
+        .map(l => ({
+          acc: String(l?.acc || '').trim(),
+          head: String(l?.head || '').trim(),
+          dr: Number(l?.dr || 0) || 0,
+          cr: 0,
+          narration: String(l?.narration || '').trim().substring(0, 100),
+        }))
+        .filter(l => l.acc && l.dr > 0 && !accByCode.has(l.acc))
+        .map(l => ({ ...l, head: supByCode.get(l.acc) || l.head }));
+      if (bestSupplierMatch && lines.length <= 1) {
+        lines = lines.map(l => ({ ...l, acc: bestSupplierMatch.code, head: bestSupplierMatch.name }));
+      }
+      const sumDr = lines.reduce((t, l) => t + l.dr, 0);
+      const headerAmount = Number(suggestion.amount || 0) || sumDr;
+      if (!lines.length && finalDrAcc) {
+        lines.push({ acc: finalDrAcc, head: finalDrHead, dr: headerAmount, cr: 0, narration: '' });
+      }
+      if (lines.length === 1 && headerAmount) lines[0].dr = Number(headerAmount.toFixed(2));
+      const drTotal = Number(lines.reduce((t, l) => t + l.dr, 0).toFixed(2));
+      const amount = Number((lines.length === 1 ? lines[0].dr : (headerAmount || drTotal)).toFixed(2));
+      const mainDr = lines.reduce((big, l) => (!big || l.dr > big.dr ? l : big), null);
+
+      // Header paying account — must be a real G/L account
+      const crAccRaw = String(suggestion.crAcc || '').trim();
+      const crAcc = accByCode.has(crAccRaw) ? crAccRaw : '';
+
       res.json({
-        drAcc: finalDrAcc,
-        drHead: finalDrHead,
-        crAcc: String(suggestion.crAcc || '').trim(),
-        crHead: String(suggestion.crHead || '').trim(),
-        amount: Number(suggestion.amount || 0),
+        lines,                       // debit (supplier) lines only — the grid
+        drAcc: mainDr ? mainDr.acc : finalDrAcc,
+        drHead: mainDr ? mainDr.head : finalDrHead,
+        crAcc,                       // header bank / cash / PDC account
+        crHead: crAcc ? accByCode.get(crAcc) : '',
+        amount,
         cheques: Array.isArray(suggestion.cheques) ? suggestion.cheques : [],
         narration: String(suggestion.narration || '').substring(0, 100),
         confidence: bestSupplierMatch
@@ -353,7 +402,7 @@ RECEIPT TYPE: ${isBankRcpt ? 'Bank Receipt (may involve PDC cheques, bank transf
 CUSTOMER MASTER (CUST_CODE - CUST_NAME) — candidates extracted from the narration are listed first:
 ${custList}
 
-ACCOUNTS WHOSE NAME APPEARS IN THE NARRATION — prefer these for the debit side:
+ACCOUNTS WHOSE NAME APPEARS IN THE NARRATION — prefer these for the bank / cash account (drAcc):
 ${namedAccList}
 
 CHART OF ACCOUNTS (ACC_CODE - ACC_HEAD):
@@ -362,28 +411,31 @@ ${accList}
 COMMON UAE BANK ABBREVIATIONS (a hint only — always confirm against the account heads above):
 ${BANK_ALIAS_HINTS}
 
+HOW THIS VOUCHER IS ENTERED:
+The bank / cash account being debited sits in the voucher HEADER (drAcc). The lines grid holds ONLY the
+CREDIT lines — the customers paying us. Never put the bank / cash account, or any debit, in "lines".
+
 EXTRACTION RULES:
-1. crAcc / crHead  → Party paying us. Match customer name from narration against CUSTOMER MASTER. Pick the closest match. Return CUST_CODE as crAcc, CUST_NAME as crHead. NEVER return an ACC_CODE from the chart of accounts here — crAcc must always come from CUSTOMER MASTER, even if the match is imperfect.
-2. drAcc / drHead  → Debit side account from CHART OF ACCOUNTS (where the money lands):
+1. drAcc / drHead  → The ONE bank / cash account receiving the money, from CHART OF ACCOUNTS (header only):
    - If the narration NAMES a bank, use THAT bank's account. Check the abbreviation list above, then match it against the account heads. Never substitute a different bank because its name looks similar.
    - If a cheque / PDC / transfer / NEFT / wire is mentioned and no bank is named → find the BANK account.
    - If cash → find CASH IN HAND or PETTY CASH account.
-   - When the receipt is split across several accounts, drAcc is the LARGEST of them (it is only the voucher header; every split still goes in "lines").
-3. lines           → The full double entry, one object per ledger line:
-   { "acc": "", "head": "", "dr": 0, "cr": 0 }
-   - A receipt can land in MORE THAN ONE account. "8,000 into ENBD and 4,500 to cash" is TWO debit lines, not one. Emit one line per account named, each with its own amount.
-   - Debit account codes come from CHART OF ACCOUNTS; credit account codes come from CUSTOMER MASTER.
-   - Each line carries an amount in either dr or cr, never both.
-   - Total dr must equal total cr.
-   - Even a plain one-to-one receipt returns exactly two lines.
-4. amount          → Total receipt amount, i.e. the sum of the debit lines. 0 if not found.
+   - Leave both empty if the narration gives no clue — the user fills the header.
+2. lines           → CREDIT lines only, one per customer paying:
+   { "acc": "", "head": "", "cr": 0, "narration": "" }
+   - acc / head come from CUSTOMER MASTER (CUST_CODE / CUST_NAME) — NEVER an ACC_CODE from the chart of accounts.
+   - Usually one customer = one line. Several customers named, each with an amount → one line each.
+   - cr is that customer's amount; narration is a short line note (invoice / cheque reference) or "".
+   - No "dr" field and no debit lines.
+3. crAcc / crHead  → The main paying customer (the largest credit line) — CUST_CODE / CUST_NAME.
+4. amount          → Total receipt amount = the sum of the credit lines. 0 if not found.
 5. cheques         → Array of cheque objects extracted from narration. Each: { chqNo, chqDt (YYYY-MM-DD), amount (number) }. Empty array [] if none.
 6. narration       → Clean one-line voucher narration max 100 chars summarising the receipt.
 7. confidence      → "high" if customer + amount clearly found, "medium" if partial, "low" if guessed.
 
 Return ONLY this JSON:
 {
-  "lines": [{ "acc": "", "head": "", "dr": 0, "cr": 0 }],
+  "lines": [{ "acc": "", "head": "", "cr": 0, "narration": "" }],
   "drAcc": "",
   "drHead": "",
   "crAcc": "",
@@ -436,11 +488,10 @@ Return ONLY this JSON:
       const finalCrAcc = bestCustomerMatch ? bestCustomerMatch.code : String(suggestion.crAcc || '').trim();
       const finalCrHead = bestCustomerMatch ? bestCustomerMatch.name : String(suggestion.crHead || '').trim();
 
-      // ── 6a. Normalise the ledger lines ────────────────────────────────────
-      // The model is asked for a "lines" array so a receipt can be split over
-      // several bank/cash accounts. Everything here is defensive: a model that
-      // ignores the instruction, or an older deployment, still yields the plain
-      // two-line entry the screen has always handled.
+      // ── 6a. Normalise the credit lines ────────────────────────────────────
+      // The grid takes ONLY the customer (credit) lines; the bank / cash debit
+      // is the header account (drAcc). Any debit line the model still sends is
+      // dropped, and so is any "customer" code that is really a G/L account.
       const accByCode = new Map(mergedAccounts.map(r => [String(r.code).trim(), r.name]));
       const custByCode = new Map(mergedCustomers.map(r => [String(r.code).trim(), r.name]));
 
@@ -448,62 +499,52 @@ Return ONLY this JSON:
         .map(l => ({
           acc: String(l?.acc || '').trim(),
           head: String(l?.head || '').trim(),
-          dr: Number(l?.dr || 0) || 0,
+          dr: 0,
           cr: Number(l?.cr || 0) || 0,
+          narration: String(l?.narration || '').trim().substring(0, 100),
         }))
-        // a line must name an account and carry an amount on exactly one side
-        .filter(l => l.acc && (l.dr > 0) !== (l.cr > 0))
-        // trust the master tables over the model for the head text
-        .map(l => ({
-          ...l,
-          head: (l.cr > 0 ? custByCode.get(l.acc) : accByCode.get(l.acc)) || l.head,
-        }));
+        .filter(l => l.acc && l.cr > 0 && !accByCode.has(l.acc))
+        // trust the customer master over the model for the head text
+        .map(l => ({ ...l, head: custByCode.get(l.acc) || l.head }));
 
-      // The deterministic customer match wins on the credit side too.
-      if (bestCustomerMatch) {
-        lines = lines.map(l => (l.cr > 0
-          ? { ...l, acc: bestCustomerMatch.code, head: bestCustomerMatch.name }
-          : l));
+      // The deterministic customer match wins when there is one paying party.
+      if (bestCustomerMatch && lines.length <= 1) {
+        lines = lines.map(l => ({ ...l, acc: bestCustomerMatch.code, head: bestCustomerMatch.name }));
       }
 
-      const sumDr = lines.reduce((t, l) => t + l.dr, 0);
       const sumCr = lines.reduce((t, l) => t + l.cr, 0);
-      const headerAmount = Number(suggestion.amount || 0) || sumDr || sumCr;
+      const headerAmount = Number(suggestion.amount || 0) || sumCr;
 
-      // No usable lines came back — rebuild the classic single Dr / single Cr
-      // pair so the screen behaves exactly as it did before.
-      if (!lines.length) {
-        const dr = String(suggestion.drAcc || '').trim();
-        if (dr) lines.push({ acc: dr, head: accByCode.get(dr) || String(suggestion.drHead || '').trim(), dr: headerAmount, cr: 0 });
-        if (finalCrAcc) lines.push({ acc: finalCrAcc, head: finalCrHead, dr: 0, cr: headerAmount });
-      } else if (sumCr === 0 && finalCrAcc) {
-        // Debits only — the party line is implied.
-        lines.push({ acc: finalCrAcc, head: finalCrHead, dr: 0, cr: sumDr });
+      // No usable credit line came back — one line for the matched customer.
+      if (!lines.length && finalCrAcc) {
+        lines.push({ acc: finalCrAcc, head: finalCrHead, dr: 0, cr: headerAmount, narration: '' });
       }
 
-      // A receipt has one paying party, so a single credit line is simply the
-      // debit total. Anything more complicated is left alone and flagged.
-      const crLines = lines.filter(l => l.cr > 0);
-      const drTotal = lines.reduce((t, l) => t + l.dr, 0);
-      let balanced = false;
-      if (crLines.length === 1 && Math.abs(crLines[0].cr - drTotal) > 0.005) {
-        crLines[0].cr = Number(drTotal.toFixed(2));
-        balanced = true;
+      // One customer: its line is the receipt amount. Several: left as given and
+      // flagged if they do not add up to the amount.
+      const crTotal = Number(lines.reduce((t, l) => t + l.cr, 0).toFixed(2));
+      let adjusted = false;
+      if (lines.length === 1 && headerAmount && Math.abs(lines[0].cr - headerAmount) > 0.005) {
+        lines[0].cr = Number(headerAmount.toFixed(2));
+        adjusted = true;
       }
-      const crTotal = lines.reduce((t, l) => t + l.cr, 0);
+      const amount = Number((lines.length === 1 ? lines[0].cr : (headerAmount || crTotal)).toFixed(2));
 
-      // The header shows the largest debit — the main bank on a split receipt.
-      const biggestDr = lines
-        .filter(l => l.dr > 0)
-        .reduce((big, l) => (!big || l.dr > big.dr ? l : big), null);
+      // Header bank / cash account — must be a real G/L account
+      const drAccRaw = String(suggestion.drAcc || '').trim();
+      const drAcc = accByCode.has(drAccRaw) ? drAccRaw : '';
+      const drHead = drAcc ? accByCode.get(drAcc) : '';
+
+      // Header customer = the largest credit line
+      const mainCr = lines.reduce((big, l) => (!big || l.cr > big.cr ? l : big), null);
 
       res.json({
-        lines,
-        drAcc: biggestDr ? biggestDr.acc : String(suggestion.drAcc || '').trim(),
-        drHead: biggestDr ? biggestDr.head : String(suggestion.drHead || '').trim(),
-        crAcc: finalCrAcc,
-        crHead: finalCrHead,
-        amount: Number((drTotal || headerAmount).toFixed(2)),
+        lines,                       // credit (customer) lines only — the grid
+        drAcc,                       // header bank / cash account
+        drHead,
+        crAcc: mainCr ? mainCr.acc : finalCrAcc,
+        crHead: mainCr ? mainCr.head : finalCrHead,
+        amount,
         cheques: Array.isArray(suggestion.cheques) ? suggestion.cheques : [],
         narration: String(suggestion.narration || '').substring(0, 100),
         confidence: bestCustomerMatch
@@ -513,9 +554,10 @@ Return ONLY this JSON:
         // is missing from the Network-tab response entirely, the server is
         // still running an older copy of this file.
         _debug: {
-          version: 'gl-suggest-v3-lines',
+          version: 'gl-suggest-v4-credit-lines',
           lineCount: lines.length,
-          drTotal, crTotal, balanced,
+          crTotal, adjusted,
+          geminiDrAccRejected: drAccRaw && !drAcc ? drAccRaw : undefined,
           accountCandidates: accountCandidates.map(r => `${r.CODE} - ${r.NAME}`),
           geminiLines: suggestion.lines,
           geminiDrAcc: suggestion.drAcc,
