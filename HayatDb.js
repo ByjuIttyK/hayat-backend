@@ -7847,4 +7847,10 @@ app.use('/api', empLookupsApi(connection));
 const salaryJvApi = require('./routes/salaryJvApi');
 app.use('/api', salaryJvApi(connection));
 //
-app.use("/api", require("./routes/salaryRegister")(connection))
+app.use("/api", require("./routes/salaryRegister")(connection));
+//
+app.use("/api", require("./routes/attendanceRegister")(connection));
+//
+app.use("/api", require("./routes/otRegister")(connection));
+//
+app.use("/api", require("./routes/jobHoursRegister")(connection));

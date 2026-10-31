@@ -24,7 +24,7 @@ const BRK = {
 };
 
 // time_sheet_hdr.STATUS decode (D = Draft is the table default)
-const STATUS_TEXT = { D: "Draft", T: "Time Approved", J: "Job Approved" };
+const STATUS_TEXT = { D: "Draft", T: "Time Approved", A: "Job Approved" };
 
 // 'HHH:MM' varchar -> minutes (summable)
 const toMin = (col) =>
