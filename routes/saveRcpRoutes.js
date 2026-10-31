@@ -59,7 +59,8 @@ const begin    = (conn) => new Promise((ok, ko) => conn.beginTransaction((e) => 
 const commit   = (conn) => new Promise((ok, ko) => conn.commit((e) => (e ? ko(e) : ok())));
 const rollback = (conn) => new Promise((ok) => conn.rollback(() => ok()));
 const sleep    = (ms) => new Promise((r) => setTimeout(r, ms));
-
+//const { sendSqlError } = require('./utils/sqlError');
+const { sendSqlError } = require('../utils/sqlError');
 /** Thrown for an EDIT whose voucher no longer exists (deleted by someone else). */
 class NotFoundError extends Error {}
 
@@ -68,6 +69,7 @@ module.exports = function (connection, { allocateVchrNo } = {}) {
     throw new Error('saveRcpRoutes: allocateVchrNo must be passed in from HayatDb.js');
   }
   const router = express.Router();
+
 
   router.post('/save-rcp', (req, res) => {
     const {
@@ -266,17 +268,15 @@ module.exports = function (connection, { allocateVchrNo } = {}) {
           }
         }
       } catch (error) {
-        console.error('[save-rcp] failed, rolled back:', error);
         if (error instanceof NotFoundError) {
           return res.status(409).json({ message: error.message });
         }
-        const busy = isRetryable(error) || isDupVchr(error);
-        res.status(busy ? 409 : 500).json({
-          message: busy
-            ? 'Another user is saving receipts right now — please try Save again.'
-            : 'Receipt voucher save failed, rolled back',
-          error: error && error.message ? error.message : error,
-        });
+        if (isRetryable(error) || isDupVchr(error)) {
+          return res.status(409).json({
+            message: 'Another user is saving receipts right now — please try Save again.',
+          });
+        }
+        return sendSqlError(res, error, 'Receipt voucher save failed, rolled back');
       } finally {
         conn.release();
       }

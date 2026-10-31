@@ -7854,3 +7854,5 @@ app.use("/api", require("./routes/attendanceRegister")(connection));
 app.use("/api", require("./routes/otRegister")(connection));
 //
 app.use("/api", require("./routes/jobHoursRegister")(connection));
+//
+app.use("/api", require("./routes/periodLockApi")(connection));
