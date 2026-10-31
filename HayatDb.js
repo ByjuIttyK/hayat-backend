@@ -4702,7 +4702,7 @@ app.get("/api/drawingReg", function (req, res) {
             a.EXT_REV,
             DATE_FORMAT(a.APPROVAL_DATE, '%d/%m/%Y') AS APPROVAL_DATE
         FROM drawing_register a
-        LEFT JOIN Job_card  b on a.QUOTE_REF = b.QUOT_REF 
+        LEFT JOIN job_card  b on a.QUOTE_REF = b.QUOT_REF 
         ORDER BY  SL_NO DESC;
     `;
 
