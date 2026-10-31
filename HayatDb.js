@@ -6744,7 +6744,7 @@ app.get("/api/joblst", function (req, res) {
   // console.log("Job list ");
 
   connection.query(
-    `select  a.JOB_NO, a.PROJ_NAME, DATE_FORMAT(a.START_DATE,'d%m%Y') AS START_DATE, a.LPO_NO,
+    `select  a.JOB_NO, a.PROJ_NAME, DATE_FORMAT(a.START_DATE,'d%m%Y') AS START_DATE, a.LPO_NO,a.QUOT_REF,
     DATE_FORMAT(a.LPO_DATE,'d%m%Y') AS LPO_DATE ,a.CUST_CODE, a.MEANS_PAYMENTS, a.CONTACT_PER, a.MEANS_TRANSPORT ,
      a.PLACE_OF_DLV , a.SMAN_CODE FROM job_card as a  ORDER BY a.JOB_NO DESC;`,
 
