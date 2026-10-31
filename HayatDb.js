@@ -4687,21 +4687,22 @@ app.get("/api/drawingReg", function (req, res) {
   const { start_date, end_date } = req.query;
   const query = `
         SELECT 
-           srno_row_id,
-            SL_NO,
-            DATE_FORMAT(DRAW_DATE, '%d/%m/%Y')     AS DRAW_DATE,
-            CLIENT_NAME,
-            PROJECT_NAME,
-            QUOTE_REF,
-            COMPUTER_LOCATION,
-            DRAWN_NAME,
-            PANEL_REF,
-            DRAWING_NO,
-            DATE_FORMAT(DATE_OF_SUBM, '%d/%m/%Y')  AS DATE_OF_SUBM,
-            EXT_REV,
-            JOB_NO,
-            DATE_FORMAT(APPROVAL_DATE, '%d/%m/%Y') AS APPROVAL_DATE
-        FROM drawing_register
+           a.srno_row_id,
+            a.SL_NO,
+            DATE_FORMAT(a.DRAW_DATE, '%d/%m/%Y')     AS DRAW_DATE,
+            a.CLIENT_NAME,
+            a.PROJECT_NAME,
+            a.QUOTE_REF,
+            COALESCE(NULLIF(TRIM(a.JOB_NO), ''), b.JOB_NO) AS JOB_NO,
+            a.COMPUTER_LOCATION,
+            a.DRAWN_NAME,
+            a.PANEL_REF,
+            a.DRAWING_NO,
+            DATE_FORMAT(a.DATE_OF_SUBM, '%d/%m/%Y')  AS DATE_OF_SUBM,
+            a.EXT_REV,
+            DATE_FORMAT(a.APPROVAL_DATE, '%d/%m/%Y') AS APPROVAL_DATE
+        FROM drawing_register a
+        LEFT JOIN Job_card  b on a.QUOTE_REF = b.QUOT_REF 
         ORDER BY  SL_NO DESC;
     `;
 
