@@ -5184,16 +5184,24 @@ app.get("/api/lastdo-all", function (req, res) {
 // lat Inv list -jobs
 app.get("/api/jobRcp-all", function (req, res) {
   connection.query(
-    `SELECT f.JOB_NO,SUM(a.STLD_AMT) AS RCP_AMT
-FROM adj_dtl a
-INNER JOIN fab_inv_hdr f ON a.STLD_DOC = f.INV_NO
-WHERE  a.STLD_TYPE = '06' GROUP BY f.JOB_NO`,
+    `SELECT x.JOB_NO, SUM(v.AMOUNT_FRGN) AS RCP_AMT
+       FROM (SELECT DISTINCT f.JOB_NO, a.SOURCE_TYPE, a.SOURCE_DOC
+               FROM adj_dtl a
+               JOIN fab_inv_hdr f ON a.STLD_DOC = f.INV_NO
+              WHERE a.STLD_TYPE = '06') x
+       JOIN vouchers v
+         ON v.TRAN_TYPE = x.SOURCE_TYPE
+        AND v.VCHR_NO   = x.SOURCE_DOC
+      GROUP BY x.JOB_NO`,
     function (err, result) {
-      if (err) throw err;
+      if (err) {
+        console.error("jobRcp-all:", err);
+        return res.status(500).json({ error: err.message });
+      }
       res.json(result);
     }
   );
-})
+});
 
 app.get("/api/expaccjob/:Job", function (req, res) {
   connection.query(
