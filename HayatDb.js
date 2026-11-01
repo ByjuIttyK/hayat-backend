@@ -7856,3 +7856,15 @@ app.use("/api", require("./routes/otRegister")(connection));
 app.use("/api", require("./routes/jobHoursRegister")(connection));
 //
 app.use("/api", require("./routes/periodLockApi")(connection));
+//
+const empDocsApi = require("./routes/empDocsApi");
+app.use("/api", empDocsApi(connection));
+//
+const tradeMstApi = require("./routes/tradeMstApi");
+app.use("/api", tradeMstApi(connection));
+//
+const deptMstApi = require("./routes/deptMstApi");
+app.use("/api", deptMstApi(connection));
+//
+const empExtApi = require("./routes/empExtApi");
+app.use("/api", empExtApi(connection));
