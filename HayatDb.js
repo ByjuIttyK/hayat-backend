@@ -7868,3 +7868,6 @@ app.use("/api", deptMstApi(connection));
 //
 const empExtApi = require("./routes/empExtApi");
 app.use("/api", empExtApi(connection));
+//
+const dashApi = require("./routes/dashApi");
+app.use("/api", dashApi(connection));
