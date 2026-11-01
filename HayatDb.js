@@ -7874,3 +7874,5 @@ app.use("/api", dashApi(connection));
 //
 const hrReportsApi = require("./routes/hrReportsApi");
 app.use("/api", hrReportsApi(connection));
+//
+app.use("/api", require("./routes/leaveApi")(connection));
