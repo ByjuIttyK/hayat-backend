@@ -7871,3 +7871,6 @@ app.use("/api", empExtApi(connection));
 //
 const dashApi = require("./routes/dashApi");
 app.use("/api", dashApi(connection));
+//
+const hrReportsApi = require("./routes/hrReportsApi");
+app.use("/api", hrReportsApi(connection));
