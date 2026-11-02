@@ -27,8 +27,18 @@
 //   POST   /leave/appl/:no/resume      { resumeDt, remarks } A -> S  (ACT_DAYS = resume - from)
 //   POST   /leave/appl/:no/cancel      { remarks }          D/A -> C
 //   POST   /leave/appl/:no/revoke                           admin only: S -> A, A -> D
-//   GET    /leave/ledger/:code?from=yyyy-mm-dd&to=yyyy-mm-dd
+//   GET    /leave/ledger/:code?from=yyyy-mm-dd&to=yyyy-mm-dd[&type=ANNUAL|SL|UL...]
+//          type blank = all leave; ANNUAL (or AL / EL) = annual balance only;
+//          another type = that type only, with its per-calendar-year limit (MAX_DAYS_PA) as the balance
 //   GET    /leave/balance?catg=M,S,W&status=A,L&asOn=yyyy-mm-dd[&withSal=1]
+//   GET    /leave/salary/:no          detailed leave salary of one annual-type application
+//   (ledger also takes withSal=1 -> adds `rates` so the screen can value days taken and the balance)
+// Leave salary (UAE Art. 29: leave taken is paid at full wage):
+//   monthly wage = payroll_mst.BASIC_SAL + all emp_allow_mst lines;  daily rate = monthly × 12 / 365 (per line)
+//   paid days    = actual days (resumed) else applied days, limited to the annual balance available
+//                  before the leave; days beyond the balance are shown as not paid
+//   value of the balance left on exit = days × basic × 12 / 365 (basic only)
+//   Salary figures are the current ones on the employee master.
 // Employee status: approved leave that has started sets emp_mst.EMP_STATUS 'L'; resume / cancel puts it back to 'A'.
 const express = require("express");
 
@@ -139,6 +149,43 @@ function leaveLedger(emp, leaves, from, to) {
     rows.push({ ...e, balance: r2(bal) });
   });
   return { broughtForward: r2(bf), rows, closing: r2(bal) };
+}
+
+// one non-annual leave type: per calendar year, entitlement = limit (unused days lapse on 1 Jan);
+// without a limit (e.g. unpaid) the balance column is the days used so far in the year
+function typeLedger(leaves, limit, from, to) {
+  const ls = leaves.filter((l) => ["A", "S"].includes(l.STATUS) && l.FROM_DT <= to);
+  const y0 = Number((from || (ls[0] && ls[0].FROM_DT) || to).slice(0, 4));
+  const y1 = Number(to.slice(0, 4));
+  const ev = [];
+  for (let y = y0; y <= y1; y++) {
+    ev.push({ date: `${y}-01-01`, kind: "ENT", earned: limit || 0, taken: 0, other: 0,
+      particulars: limit ? `Entitlement for ${y} (${limit} days; unused days lapse)` : `Year ${y}` });
+  }
+  ls.filter((l) => Number(l.FROM_DT.slice(0, 4)) >= y0).forEach((l) => {
+    const days = l.STATUS === "S" ? Number(l.ACT_DAYS) || 0 : Number(l.DAYS) || 0;
+    const range = l.STATUS === "S"
+      ? `${dmy(l.FROM_DT)} – ${dmy(addDays(l.RESUME_DT, -1))}, resumed ${dmy(l.RESUME_DT)}`
+      : `${dmy(l.FROM_DT)} – ${dmy(l.TO_DT)}, not resumed yet`;
+    ev.push({ date: l.FROM_DT, kind: "TAKE", ref: l.LEAVE_NO, type: l.LEAVE_TYPE, status: l.STATUS,
+      particulars: `${l.LEAVE_NAME} (${range})`, earned: 0, taken: days, other: 0 });
+  });
+  ev.sort((a, b) => (a.date === b.date ? (a.kind === "ENT" ? -1 : 1) : a.date < b.date ? -1 : 1));
+  let bal = 0, bf = 0, used = 0;
+  const rows = [];
+  ev.forEach((e) => {
+    if (e.kind === "ENT") { bal = limit ? limit : 0; used = 0; }           // new year: reset
+    else { used += e.taken; bal = limit ? bal - e.taken : used; }
+    if (from && e.date < from) { bf = bal; return; }
+    rows.push({ ...e, balance: r2(bal) });
+  });
+  const yr = to.slice(0, 4);
+  const usedYr = r2(ls.filter((l) => l.FROM_DT.slice(0, 4) === yr)
+    .reduce((t, l) => t + (l.STATUS === "S" ? Number(l.ACT_DAYS) || 0 : Number(l.DAYS) || 0), 0));
+  return {
+    broughtForward: r2(bf), rows, closing: r2(bal),
+    typeBal: { year: yr, entitled: limit || null, used: usedYr, balance: limit ? r2(limit - usedYr) : null },
+  };
 }
 
 module.exports = function (connection) {
@@ -458,6 +505,60 @@ module.exports = function (connection) {
     } catch (e) { send(res, e); }
   });
 
+  // ---------------------------------------------------------------- salary rates (current master figures)
+  const ratesOf = async (code) => {
+    const p = await q("SELECT COALESCE(BASIC_SAL, 0) AS BASIC_SAL FROM payroll_mst WHERE EMP_CODE = ?", [code]);
+    let al = [];
+    try {
+      al = await q(`SELECT ea.allow_code AS CODE, ea.amount AS AMT, am.* FROM emp_allow_mst ea
+                     LEFT JOIN allow_mst am ON am.allow_code = ea.allow_code
+                    WHERE ea.emp_code = ? ORDER BY ea.allow_code`, [code]);
+    } catch (_) {                                                    // allow_mst shaped differently — codes only
+      al = await q("SELECT allow_code AS CODE, amount AS AMT FROM emp_allow_mst WHERE emp_code = ? ORDER BY allow_code", [code]);
+    }
+    const nameOf = (r) => {
+      const k = Object.keys(r).find((x) => /name|desc|head/i.test(x) && r[x]);
+      return k ? String(r[k]) : r.CODE;
+    };
+    const lines = [{ code: "BASIC", name: "Basic Salary", monthly: r2(p[0]?.BASIC_SAL) }]
+      .concat(al.filter((r) => Number(r.AMT)).map((r) => ({ code: String(r.CODE), name: nameOf(r), monthly: r2(r.AMT) })))
+      .map((l) => ({ ...l, daily: r2(l.monthly * 12 / 365) }));     // rounded per line, so the printed table adds up
+    const monthly = r2(lines.reduce((t, l) => t + l.monthly, 0));
+    return {
+      lines, monthly, basic: lines[0].monthly,
+      dailyFull: r2(lines.reduce((t, l) => t + l.daily, 0)), dailyBasic: lines[0].daily,
+    };
+  };
+
+  // ---------------------------------------------------------------- leave salary of one application (detailed)
+  router.get("/leave/salary/:no", async (req, res) => {
+    try {
+      const no = String(req.params.no).trim().toUpperCase();
+      const a = await applOf(no);
+      if (a.IS_ANNUAL !== "Y") throw fail(400, `${a.LEAVE_NAME} is not paid as leave salary — only annual-type leave is (other leave is paid through the monthly payroll as per its pay type)`);
+      const emp = await empOf(a.EMP_CODE);
+      const leaves = (await leavesOf([a.EMP_CODE])).filter((l) => l.LEAVE_NO !== no);
+      const before = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1));
+      const resumed = a.STATUS === "S";
+      const days = Number(resumed ? a.ACT_DAYS : a.DAYS) || 0;
+      const avail = Math.max(before.available, 0);
+      const paidDays = r2(Math.min(days, avail));
+      const unpaidDays = r2(days - paidDays);
+      const rates = await ratesOf(a.EMP_CODE);
+      const lines = rates.lines.map((l) => ({
+        ...l, daily: r2(l.daily), days: paidDays, amount: r2(r2(l.daily) * paidDays),   // ties to rate × days on paper
+      }));
+      const total = r2(lines.reduce((t, l) => t + l.amount, 0));
+      const after = r2(before.available - days);
+      res.json({
+        appl: a, emp, before, days, daysBasis: resumed ? "actual (resumed)" : "applied", paidDays, unpaidDays,
+        lines, monthly: rates.monthly, dailyFull: r2(rates.dailyFull), total,
+        balanceAfter: after,
+        exitValue: { days: Math.max(after, 0), dailyBasic: r2(rates.dailyBasic), amount: r2(Math.max(after, 0) * r2(rates.dailyBasic)) },
+      });
+    } catch (e) { send(res, e); }
+  });
+
   // ---------------------------------------------------------------- leave ledger
   router.get("/leave/ledger/:code", async (req, res) => {
     try {
@@ -466,12 +567,30 @@ module.exports = function (connection) {
       const from = isYmd(req.query.from) ? req.query.from : null;
       const emp = await empOf(code);
       const leaves = await leavesOf([code]);
-      const led = leaveLedger(emp, leaves, from, to);
       const bal = leaveBalance(emp, leaves, to);
+      let rates = null;
+      if (String(req.query.withSal || "") === "1") {
+        const r = await ratesOf(code);
+        rates = { monthly: r.monthly, basic: r.basic, dailyFull: r2(r.dailyFull), dailyBasic: r2(r.dailyBasic), lines: r.lines.map((l) => ({ ...l, daily: r2(l.daily) })) };
+      }
+      // one leave type only
+      let type = String(req.query.type || "").trim().toUpperCase();
+      if (type && type !== "ANNUAL") {
+        const lt = await q("SELECT LEAVE_TYPE, LEAVE_NAME, IS_ANNUAL, MAX_DAYS_PA FROM leave_type_mst WHERE LEAVE_TYPE = ?", [type]);
+        if (!lt.length) throw fail(400, `Leave type ${type} is not in the leave type master`);
+        if (lt[0].IS_ANNUAL === "Y") type = "ANNUAL";                  // AL / EL share the annual balance
+        else {
+          const limit = lt[0].MAX_DAYS_PA == null ? null : Number(lt[0].MAX_DAYS_PA);
+          const led = typeLedger(leaves.filter((l) => l.LEAVE_TYPE === type), limit, from, to);
+          return res.json({ emp, from, to, mode: "TYPE", type, typeName: lt[0].LEAVE_NAME, limit, ...led, bal, other: {} });
+        }
+      }
+      const led = leaveLedger(emp, leaves, from, to);
+      if (type === "ANNUAL") led.rows = led.rows.filter((r) => r.kind !== "OTHER");
       // other leave (not annual) in the period, by type
       const other = {};
       led.rows.filter((r) => r.kind === "OTHER").forEach((r) => { other[r.type] = r2((other[r.type] || 0) + r.other); });
-      res.json({ emp, from, to, ...led, bal, other });
+      res.json({ emp, from, to, mode: type === "ANNUAL" ? "ANNUAL" : "ALL", ...led, bal, other: type === "ANNUAL" ? {} : other, rates });
     } catch (e) { send(res, e); }
   });
 
@@ -520,4 +639,4 @@ module.exports = function (connection) {
 };
 
 // exported for testing
-module.exports.engine = { leaveEvents, leaveBalance, leaveLedger, monthsDone, addMonths, daysBetween };
+module.exports.engine = { leaveEvents, leaveBalance, leaveLedger, typeLedger, monthsDone, addMonths, daysBetween };
