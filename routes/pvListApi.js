@@ -1,9 +1,12 @@
 // routes/pvListApi.js
 // Payment Voucher list — TRAN_TYPE 02 (tran_acc lines) and 04 (vouchers + pdc_isu)
 // Mounted in HayatDb.js as: app.use("/api", require("./routes/pvListApi")(connection));
-// Endpoint: GET /api/pvlist/:tranId
+// Endpoint: GET /api/pvlist/:tranId[?fromDate=yyyy-MM-dd&toDate=yyyy-MM-dd]
+// Period: InfoGrid's period chip sends fromDate/toDate; without them the
+// current ac_period is used (utils/periodFilter.js).
 
 const express = require("express");
+const periodFilter = require("../utils/periodFilter");
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -12,6 +15,7 @@ module.exports = function (connection) {
     const tranId = String(req.params.tranId || "");
     const drMode = String(req.query.dr || "single").toLowerCase() === "all" ? "all" : "single";
     if (tranId === "02") {
+      const pf = periodFilter(req, "a.DATTE");
       connection.query(
         "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
         "       c.AC_HEAD AS ACC_HEAD, " +
@@ -22,9 +26,9 @@ module.exports = function (connection) {
         "    ON c.AC_CODE = a.ACC_CODE " +
         "  LEFT OUTER JOIN vouchers AS b " +
         "    ON b.TRAN_TYPE = a.TRAN_TYPE AND b.VCHR_NO = a.VCHR_NO " +
-        " WHERE a.TRAN_TYPE = ? " +
+        " WHERE a.TRAN_TYPE = ? " + pf.sql +
         " ORDER BY a.VCHR_NO DESC, a.SR_NO",
-        [tranId],
+        [tranId, ...pf.params],
         function (error, result) {
           if (error) {
             console.error("PV list 02 error:", error);
@@ -34,6 +38,7 @@ module.exports = function (connection) {
         }
       );
     } else if (tranId === "04") {
+      const pf = periodFilter(req, "v.DATTE");
 
       // Debit-side join, chosen by mode.
       //  single: the voucher's first debit line, i.e. the lowest SR_NO among DB_CR='D'.
@@ -90,13 +95,13 @@ module.exports = function (connection) {
         "    FROM tran_acc WHERE TRAN_TYPE = ? AND DB_CR = 'D' " +
         "   GROUP BY TRAN_TYPE, VCHR_NO) drc " +
         "  ON drc.TRAN_TYPE = v.TRAN_TYPE AND drc.VCHR_NO = v.VCHR_NO " +
-        "WHERE v.TRAN_TYPE = ? " +
+        "WHERE v.TRAN_TYPE = ? " + pf.sql +
         "ORDER BY v.VCHR_NO DESC, CAST(dr.SR_NO AS UNSIGNED)";
 
-      // Placeholders in SQL order: chq(2), [single-mode drJoin(2)], drc(1), where(1)
+      // Placeholders in SQL order: chq(2), [single-mode drJoin(2)], drc(1), where(1), period(2)
       const params = drMode === "all"
-        ? [tranId, tranId, tranId, tranId]
-        : [tranId, tranId, tranId, tranId, tranId, tranId];
+        ? [tranId, tranId, tranId, tranId, ...pf.params]
+        : [tranId, tranId, tranId, tranId, tranId, tranId, ...pf.params];
 
       connection.query(sql, params, function (error, result) {
         if (error) {

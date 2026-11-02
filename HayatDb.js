@@ -7876,3 +7876,6 @@ const hrReportsApi = require("./routes/hrReportsApi");
 app.use("/api", hrReportsApi(connection));
 //
 app.use("/api", require("./routes/leaveApi")(connection));
+//
+const acPeriodApi = require("./routes/acPeriodApi");
+app.use("/api", acPeriodApi(connection));
