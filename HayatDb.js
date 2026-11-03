@@ -7879,3 +7879,6 @@ app.use("/api", require("./routes/leaveApi")(connection));
 //
 const acPeriodApi = require("./routes/acPeriodApi");
 app.use("/api", acPeriodApi(connection));
+//
+const salSchemeApi = require('./routes/salSchemeApi');
+app.use('/api', salSchemeApi(connection));

@@ -42,9 +42,15 @@
 //   (A annual · F full · H half · U unpaid), which drive the salary (PayslipPrint.calcSalary).
 //   Punches on a leave day: the day is calculated as worked and marked "to check".
 //   Leaves are not stored on the sheet — every calculation reads them afresh.
+// 03-Nov-2026: salary calculation scheme (sal_scheme_mst, routes/salSchemeApi.js).
+//   computeSheet returns `scheme`: a Draft uses the employee category's scheme (or the default);
+//   a Time / Job approved sheet keeps the scheme stored on it (time_sheet_hdr.SAL_SCHEME).
+//   /tsht/save stores the scheme in Draft. /tsht/payslips sends it inside totals (totals.scheme)
+//   with monthDays and allowFixed, so PayslipPrint.calcSalary gives the same figures as the screen.
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
+const { loadScheme, resolveScheme } = require('./salSchemeApi');
 const fs = require('fs');
 // basic in force for a month (salary revisions); falls back to payroll_mst.BASIC_SAL if not installed
 let payAsOf = null;
@@ -371,7 +377,7 @@ module.exports = function timeSheetApi(connection) {
    * and its regular row(s). Day "last + 1" may hold the continuation of the last day's shift.
    * SEQ_NO is renumbered per day: continuation first, then regular rows.
    */
-  async function computeSheet({ tshtDate, empCode, rows }, conn = db) {
+  async function computeSheet({ tshtDate, empCode, rows, schemeCode }, conn = db) {
     const month = parseMonth(tshtDate);
     if (!month) throw httpErr(400, 'Invalid month');
     const emp = await loadEmp(empCode, conn);
@@ -467,7 +473,9 @@ module.exports = function timeSheetApi(connection) {
         });
       });
     }
-    return { month, emp, rows: out };
+    // salary scheme: the sheet's stored one (approved sheets) or the employee's current one
+    const scheme = schemeCode ? await loadScheme(conn, schemeCode) : await resolveScheme(conn, emp.EMP_CODE);
+    return { month, emp, rows: out, scheme };
   }
 
   /** "Day 15" or "Day 15 (cont.)" for messages */
@@ -571,7 +579,7 @@ module.exports = function timeSheetApi(connection) {
       const no = req.params.no;
       const [h] = await db.query(
         `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, REMARKS, STATUS,
-                CREATED_BY, EDITED_BY, TIME_APPR_BY, APPROVED_BY
+                CREATED_BY, EDITED_BY, TIME_APPR_BY, APPROVED_BY, SAL_SCHEME
            FROM time_sheet_hdr WHERE TSHT_NO = ?`,
         [no],
       );
@@ -602,8 +610,9 @@ module.exports = function timeSheetApi(connection) {
         tshtDate: hdr.TSHT_DATE,
         empCode: hdr.EMP_CODE,
         rows: dtl.map(dtlToRow),
+        schemeCode: hdr.STATUS !== 'D' ? hdr.SAL_SCHEME || 'A' : null, // approved: the scheme it was approved with
       });
-      res.json({ ok: true, hdr, emp, rows: calc.rows, allow, ded, canRevoke: canRevokeUser(req) });
+      res.json({ ok: true, hdr, emp, rows: calc.rows, allow, ded, scheme: calc.scheme, canRevoke: canRevokeUser(req) });
     } catch (e) {
       send(res, e);
     }
@@ -612,8 +621,8 @@ module.exports = function timeSheetApi(connection) {
   // ---------- calculate (Recalculate button, after AI read, after edits) ----------
   router.post('/tsht/calc', async (req, res) => {
     try {
-      const { rows } = await computeSheet(req.body);
-      res.json({ ok: true, rows });
+      const { rows, scheme } = await computeSheet({ ...req.body, schemeCode: null });
+      res.json({ ok: true, rows, scheme });
     } catch (e) {
       send(res, e);
     }
@@ -622,7 +631,7 @@ module.exports = function timeSheetApi(connection) {
   // ---------- stored rows of one sheet, recalculated ----------
   async function loadStoredSheet(no, conn = db, lock = false) {
     const [h] = await conn.query(
-      `SELECT DATE_FORMAT(TSHT_DATE, "%Y-%m-%d") AS TSHT_DATE, EMP_CODE, STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?${lock ? ' FOR UPDATE' : ''}`,
+      `SELECT DATE_FORMAT(TSHT_DATE, "%Y-%m-%d") AS TSHT_DATE, EMP_CODE, STATUS, SAL_SCHEME FROM time_sheet_hdr WHERE TSHT_NO = ?${lock ? ' FOR UPDATE' : ''}`,
       [no],
     );
     if (!h.length) throw httpErr(404, `Time sheet ${no} not found`);
@@ -636,6 +645,7 @@ module.exports = function timeSheetApi(connection) {
         tshtDate: h[0].TSHT_DATE,
         empCode: h[0].EMP_CODE,
         rows: dtl.map(dtlToRow),
+        schemeCode: h[0].STATUS !== 'D' ? h[0].SAL_SCHEME || 'A' : null,
       },
       conn,
     );
@@ -716,16 +726,16 @@ module.exports = function timeSheetApi(connection) {
       if (mode === 'ADD') {
         await conn.execute(
           `INSERT INTO time_sheet_hdr
-             (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, STATUS, CREATED_BY, ${TOT_COLS.join(', ')})
-           VALUES (?, ?, ?, ?, 'D', ?, ${TOT_COLS.map(() => '?').join(', ')})`,
-          [no, month.first, calc.emp.EMP_CODE, remarks || null, user, ...totVals],
+             (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, STATUS, CREATED_BY, SAL_SCHEME, ${TOT_COLS.join(', ')})
+           VALUES (?, ?, ?, ?, 'D', ?, ?, ${TOT_COLS.map(() => '?').join(', ')})`,
+          [no, month.first, calc.emp.EMP_CODE, remarks || null, user, calc.scheme.code, ...totVals],
         );
       } else {
         await conn.execute(
           `UPDATE time_sheet_hdr
-              SET REMARKS = ?, EDITED_BY = ?, EDITED_DT = NOW(), ${TOT_COLS.map((c) => `${c} = ?`).join(', ')}
+              SET REMARKS = ?, EDITED_BY = ?, EDITED_DT = NOW(), SAL_SCHEME = ?, ${TOT_COLS.map((c) => `${c} = ?`).join(', ')}
             WHERE TSHT_NO = ?`,
-          [remarks || null, user, ...totVals, no],
+          [remarks || null, user, calc.scheme.code, ...totVals, no],
         );
       }
 
@@ -863,7 +873,7 @@ module.exports = function timeSheetApi(connection) {
 
   // ---------- payslips of processed sheets (Payslip Print list) ----------
   /** Month totals exactly as useTimeSheet builds them on the screen. */
-  function sheetTotals(rows, allow, ded) {
+  function sheetTotals(rows, allow, ded, month, scheme) {
     const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
     const dayRows = rows.filter((r) => r.contFlag !== 'C');
     const days = (fn) => new Set(dayRows.filter(fn).map((r) => r.dayNo)).size;
@@ -883,7 +893,10 @@ module.exports = function timeSheetApi(connection) {
       paidLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'F'),
       unpaidLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'U') + days((r) => r.dayType === 'L' && r.leavePay === 'H') / 2,
       allow: allow.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
+      allowFixed: allow.filter((r) => r.TYPE !== 'V').reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0), // prorated by scheme
       ded: ded.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
+      monthDays: month ? month.days : undefined,
+      scheme,
     };
   }
 
@@ -909,7 +922,7 @@ module.exports = function timeSheetApi(connection) {
         }
         const { calc } = await loadStoredSheet(no);
         const [allow] = await db.query(
-          `SELECT a.ALLOW_CODE AS CODE, m.ALLOW_DESC AS DESCR, a.AMOUNT, a.REMARKS
+          `SELECT a.ALLOW_CODE AS CODE, m.ALLOW_DESC AS DESCR, m.ALLOW_TYPE AS TYPE, a.AMOUNT, a.REMARKS
              FROM tsht_allow a LEFT JOIN allow_mst m ON m.ALLOW_CODE = a.ALLOW_CODE
             WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
           [no],
@@ -935,7 +948,7 @@ module.exports = function timeSheetApi(connection) {
           tshtDate: hdr.TSHT_DATE,
           status: 'A', // processed: pay is fixed once the time is approved (same as the sheet's Print Payslip)
           employee: { EMP_CODE: emp.EMP_CODE, EMP_NAME: emp.EMP_NAME, CARD_NO: emp.CARD_NO, SHIFT_CODE: emp.SHIFT_CODE, BASIC_SAL: basic },
-          totals: sheetTotals(calc.rows, allow, ded),
+          totals: sheetTotals(calc.rows, allow, ded, calc.month, calc.scheme),
           allowances: allow.map(line),
           deductions: ded.map(line),
         });
