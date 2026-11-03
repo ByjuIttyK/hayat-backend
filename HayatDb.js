@@ -7892,3 +7892,5 @@ const salSchemeApi = require('./routes/salSchemeApi');
 app.use('/api', salSchemeApi(connection));
 //
 app.use('/api', require('./routes/vchrAuditApi')(connection));
+//
+app.use("/api", authMiddleware, require("./routes/jobCommissionRoutes")(connection));
