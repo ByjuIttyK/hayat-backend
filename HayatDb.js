@@ -5182,17 +5182,26 @@ app.get("/api/lastdo-all", function (req, res) {
     }
   );
 });
-// lat Inv list -jobs
+/// Received per job, in the receipt's currency (vouchers.AMOUNT_FRGN), counting only the part of
+// each R.V. settled against the job's (non-cancelled) invoices — adj_dtl.STLD_AMT, as in
+// JobFinancePanel. The settled part is converted with the R.V.'s own rate (AMOUNT_FRGN / AMOUNT).
+// (Before: the full AMOUNT_FRGN of every R.V. that touched the job — an R.V. paying several jobs
+//  was counted in full on each.)
 app.get("/api/jobRcp-all", function (req, res) {
   connection.query(
-    `SELECT x.JOB_NO, SUM(v.AMOUNT_FRGN) AS RCP_AMT
-       FROM (SELECT DISTINCT f.JOB_NO, a.SOURCE_TYPE, a.SOURCE_DOC
-               FROM adj_dtl a
-               JOIN fab_inv_hdr f ON a.STLD_DOC = f.INV_NO
-              WHERE a.STLD_TYPE = '06') x
-       JOIN vouchers v
-         ON v.TRAN_TYPE = x.SOURCE_TYPE
-        AND v.VCHR_NO   = x.SOURCE_DOC
+    `SELECT x.JOB_NO,
+            ROUND(SUM(CASE WHEN v.AMOUNT IS NULL OR v.AMOUNT = 0 OR v.AMOUNT_FRGN IS NULL
+                           THEN a.STLD_AMT
+                           ELSE a.STLD_AMT * v.AMOUNT_FRGN / v.AMOUNT END), 2) AS RCP_AMT
+       FROM (SELECT DISTINCT f.JOB_NO, f.INV_NO
+               FROM fab_inv_hdr f
+              WHERE COALESCE(f.INV_CANCELLED, 'N') <> 'Y') x
+       JOIN adj_dtl a
+         ON a.STLD_DOC  = x.INV_NO
+        AND a.STLD_TYPE = '06'
+       LEFT JOIN vouchers v
+         ON v.TRAN_TYPE = a.SOURCE_TYPE
+        AND v.VCHR_NO   = a.SOURCE_DOC
       GROUP BY x.JOB_NO`,
     function (err, result) {
       if (err) {
@@ -5203,7 +5212,6 @@ app.get("/api/jobRcp-all", function (req, res) {
     }
   );
 });
-
 app.get("/api/expaccjob/:Job", function (req, res) {
   connection.query(
     "select a.EXP_CODE,a.ACC_CODE , b.ACC_HEAD " +
