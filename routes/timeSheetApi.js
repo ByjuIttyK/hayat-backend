@@ -36,8 +36,15 @@
 //   In / Out are worked out here: In = first stamp, Out = last stamp. An early-morning stamp
 //   (before TSHT_CARRY_BEFORE, default 05:00) that ends the previous day's shift is moved to
 //   that day as its Out (earlier than In → the screen splits it at midnight).
+// 03-Nov-2026: approved leaves (leave_appl, via tsLeaveDays.js) — every calendar day inside an
+//   approved / resumed leave becomes dayType 'L' (Sundays and holidays too, as leave is in calendar
+//   days) instead of Absent / Weekly off / Holiday. Each row carries leaveNo, leaveName and leavePay
+//   (A annual · F full · H half · U unpaid), which drive the salary (PayslipPrint.calcSalary).
+//   Punches on a leave day: the day is calculated as worked and marked "to check".
+//   Leaves are not stored on the sheet — every calculation reads them afresh.
 // =====================================================================
 const express = require('express');
+const { loadLeaveDays } = require('./tsLeaveDays');
 const fs = require('fs');
 // basic in force for a month (salary revisions); falls back to payroll_mst.BASIC_SAL if not installed
 let payAsOf = null;
@@ -371,6 +378,7 @@ module.exports = function timeSheetApi(connection) {
     if (!emp) throw httpErr(404, `Employee ${padEmp(empCode)} not found`);
     const shifts = await loadShifts(conn);
     const holidays = await loadHolidays(month, conn);
+    const leaveDays = await loadLeaveDays(conn, emp.EMP_CODE, month.first, month.last);
     const empShift = emp.SHIFT_CODE || DEFAULT_SHIFT;
     const otEligible = emp.OT_ELIGIBLE !== 'N';
     const dateOf = (d) => {
@@ -428,12 +436,22 @@ module.exports = function timeSheetApi(connection) {
 
       const regs = regByDay.get(d) || [{}];
       const nextHasCont = (contByDay.get(d + 1) || []).length > 0;
+      // approved leave on this date: no punches → leave day; punches → worked day, to check
+      const leave = leaveDays.get(date) || null;
+      const punchedOnLeave = !!leave && regs.some((r) => toMin(r.timeIn) !== null || toMin(r.timeOut) !== null);
       regs.forEach((src, idx) => {
         const shiftCode = src.shiftCode || empShift;
         const isLastReg = idx === regs.length - 1;
         // runs on past midnight: 23:59 counts as 24:00 so no minute is lost at the split
         const outOverride = isLastReg && nextHasCont && toMin(src.timeOut) === 23 * 60 + 59 ? 24 * 60 : undefined;
         const calc = calcDay(date, src.timeIn, src.timeOut, shiftOf(shiftCode), holidays, otEligible, outOverride);
+        if (leave && !punchedOnLeave) calc.dayType = 'L';
+        Object.assign(calc, {
+          leaveNo: leave ? leave.leaveNo : null,
+          leaveName: leave ? leave.leaveName : null,
+          leavePay: leave && !punchedOnLeave ? leave.leavePay : null,
+          leaveConflict: punchedOnLeave,
+        });
         out.push({
           dayNo: d,
           seqNo: ++seq,
@@ -444,7 +462,7 @@ module.exports = function timeSheetApi(connection) {
           shiftCode,
           jobNo: src.jobNo || null,
           remarks: src.remarks ? String(src.remarks).slice(0, 30) : null,
-          needsCheck: !!src.needsCheck || !!calc.error,
+          needsCheck: !!src.needsCheck || !!calc.error || punchedOnLeave,
           ...calc,
         });
       });
@@ -859,6 +877,11 @@ module.exports = function timeSheetApi(connection) {
       offDays: days((r) => (r.dayType === 'S' || r.dayType === 'H') && !r.holidayOt),
       absentDays: days((r) => r.dayType === 'A'),
       lateDays: days((r) => r.lateMins > 0),
+      // approved leave (same as useTimeSheet totals)
+      leaveDays: days((r) => r.dayType === 'L'),
+      annualLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'A'),
+      paidLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'F'),
+      unpaidLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'U') + days((r) => r.dayType === 'L' && r.leavePay === 'H') / 2,
       allow: allow.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
       ded: ded.reduce((a, r) => a + (Number(r.AMOUNT) || 0), 0),
     };
