@@ -47,6 +47,11 @@
 //   a Time / Job approved sheet keeps the scheme stored on it (time_sheet_hdr.SAL_SCHEME).
 //   /tsht/save stores the scheme in Draft. /tsht/payslips sends it inside totals (totals.scheme)
 //   with monthDays and allowFixed, so PayslipPrint.calcSalary gives the same figures as the screen.
+// 03-Nov-2026: Normal / N.OT / H.OT of every row rounded to the nearest 5 minutes (2.5 min rounds up):
+//   2:57 → 2:55, 2:58 → 3:00, 2:59 → 3:00, 3:09 → 3:10. Punched In / Out times stay as on the card.
+//   Applies to every sheet (time sheets start Sep 2026). TSHT_ROUND_FROM=yyyy-mm-01 in .env limits
+//   it to sheets from that month on. A sheet approved before rounding: revoke, Recalculate, Save and
+//   approve again, so its stored totals carry the rounded hours too.
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
@@ -93,6 +98,11 @@ try {
 // AI read: a stamp before this time (minutes) can be the Out of the previous day's shift
 const CARRY_BEFORE_MIN = Number(process.env.TSHT_CARRY_BEFORE_MIN) || 300; // 05:00
 const STAMP_COLS = ['AM_IN', 'AM_OUT', 'PM_IN', 'PM_OUT', 'OT_IN', 'OT_OUT'];
+/** first sheet month whose hours are rounded to 5 minutes */
+const ROUND_FROM = process.env.TSHT_ROUND_FROM || '2000-01-01';
+const ROUND_TO = 5; // minutes
+/** nearest 5 minutes, the half-way point (x.5) rounds up: 27 → 25, 28 → 30, 179 → 180 */
+const round5 = (m) => (Number(m) > 0 ? Math.floor((Number(m) + ROUND_TO / 2) / ROUND_TO) * ROUND_TO : Number(m) || 0);
 const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 // time_sheet_hdr month totals — saved in Draft, frozen after Time approval
 //   hours as Hrs:Min text (e.g. "176:30"), wages to 2 decimals
@@ -472,6 +482,14 @@ module.exports = function timeSheetApi(connection) {
           ...calc,
         });
       });
+    }
+    // hours rounded to 5 minutes (sheets from ROUND_FROM on)
+    if (month.first >= ROUND_FROM) {
+      for (const r of out) {
+        r.normalHrs = round5(r.normalHrs);
+        r.normalOt = round5(r.normalOt);
+        r.holidayOt = round5(r.holidayOt);
+      }
     }
     // salary scheme: the sheet's stored one (approved sheets) or the employee's current one
     const scheme = schemeCode ? await loadScheme(conn, schemeCode) : await resolveScheme(conn, emp.EMP_CODE);
