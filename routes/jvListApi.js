@@ -18,9 +18,13 @@ module.exports = function (connection) {
     connection.query(
       "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
       "       c.AC_HEAD AS ACC_HEAD, " +
-      "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, a.NARRATION1, a.NARRATION2, a.DB_CR " +
+      "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, a.NARRATION1, a.NARRATION2, a.DB_CR, " +
+      // contra flag lives on the voucher header (vouchers.CONTRA_FLG)
+      "       COALESCE(v.CONTRA_FLG, 'N') AS CONTRA_FLG " +
       "  FROM tran_acc a " +
       "  LEFT OUTER JOIN ac_list AS c ON c.AC_CODE = a.ACC_CODE " +
+      "  LEFT OUTER JOIN vouchers AS v " +
+      "    ON v.TRAN_TYPE = a.TRAN_TYPE AND v.VCHR_NO = a.VCHR_NO " +
       " WHERE a.TRAN_TYPE = ? " + pf.sql +
       " ORDER BY a.VCHR_NO DESC",
       [tranType, ...pf.params],
