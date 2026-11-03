@@ -7890,3 +7890,5 @@ app.use("/api", acPeriodApi(connection));
 //
 const salSchemeApi = require('./routes/salSchemeApi');
 app.use('/api', salSchemeApi(connection));
+//
+app.use('/api', require('./routes/vchrAuditApi')(connection));
