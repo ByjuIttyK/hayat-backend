@@ -17,7 +17,7 @@ const jwt = require("jsonwebtoken");
 var bodyParser = require("body-parser");
 const { error } = require("console");
 const JWT_SECRET = process.env.JWT_SECRET;
-
+const auditContext = require("./auditContext");
 //const express = require('express');
 //const app = express();
 
@@ -68,7 +68,10 @@ var server = app.listen(3001, '0.0.0.0', function () {
 });
 
 const connection = require('./db/connection');
+auditContext.patchPool(connection);
+app.use(auditContext.middleware);
 const authMiddleware = require("./middleware/authMiddleware");
+
 
 
 
@@ -7900,3 +7903,6 @@ app.use("/api", authMiddleware, require("./routes/chqDupRoutes")(connection));
 app.use("/api", authMiddleware, require("./routes/contraRegRoutes")(connection));
 //
 app.use("/api", require("./routes/eosbProvApi")(connection));
+//
+
+app.use("/api", require("./routes/auditApi")(connection));
