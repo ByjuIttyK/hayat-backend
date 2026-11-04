@@ -7898,4 +7898,5 @@ app.use("/api", authMiddleware, require("./routes/jobCommissionRoutes")(connecti
 app.use("/api", authMiddleware, require("./routes/chqDupRoutes")(connection));
 //
 app.use("/api", authMiddleware, require("./routes/contraRegRoutes")(connection));
-
+//
+app.use("/api", require("./routes/eosbProvApi")(connection));
