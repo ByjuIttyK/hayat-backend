@@ -509,13 +509,13 @@ module.exports = function (connection) {
   const ratesOf = async (code) => {
     const p = await q("SELECT COALESCE(BASIC_SAL, 0) AS BASIC_SAL FROM payroll_mst WHERE EMP_CODE = ?", [code]);
     let al = [];
-    try {
+   /* try {
       al = await q(`SELECT ea.allow_code AS CODE, ea.amount AS AMT, am.* FROM emp_allow_mst ea
                      LEFT JOIN allow_mst am ON am.allow_code = ea.allow_code
                     WHERE ea.emp_code = ? ORDER BY ea.allow_code`, [code]);
     } catch (_) {                                                    // allow_mst shaped differently — codes only
       al = await q("SELECT allow_code AS CODE, amount AS AMT FROM emp_allow_mst WHERE emp_code = ? ORDER BY allow_code", [code]);
-    }
+    }*/
     const nameOf = (r) => {
       const k = Object.keys(r).find((x) => /name|desc|head/i.test(x) && r[x]);
       return k ? String(r[k]) : r.CODE;
