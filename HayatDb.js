@@ -306,7 +306,7 @@ app.get('/api/gridoptionsmst/:tableId', (req, res) => {
       console.error("Error executing query:", err);
       return res.status(500).json({ error: "Failed to fetch grid_Option_Mst data" });
     }
-    console.log('GRID =', rows);
+  //  console.log('GRID =', rows);
     res.json(rows);
   });
 });
@@ -321,7 +321,7 @@ app.get('/api/fetchentryform/:tableId/:submodule', (req, res) => {
       console.error("Error executing query:", err);
       return res.status(500).json({ error: "Failed to fetch grid_Option_Mst data" });
     }
-    console.log('fetchentryform =', rows);
+   // console.log('fetchentryform =', rows);
     res.json(rows);
   });
 });
@@ -434,7 +434,7 @@ ORDER BY a.JOB_NO DESC;
       console.error("job-list query error:", err);
       return res.status(500).json({ message: "Database error", error: err.message });
     }
-    console.log('job-list', rows);
+  //  console.log('job-list', rows);
     res.json(rows);
   });
 });
@@ -547,7 +547,7 @@ app.post("/api/jobcard-save", async (req, res) => {
               ],
               (err, result) => {
                 if (err) return reject(err);
-                console.log("JOB_CARD Insert/Update:", result);
+               // console.log("JOB_CARD Insert/Update:", result);
                 resolve(result);
               }
             );
@@ -630,7 +630,7 @@ app.get("/api/jobcard-nextno", function (req, res) {
       return res.status(500).json({ message: "Error fetching next job number" });
     }
     const nextJobNo = result?.[0]?.nextJobNo ?? 1;
-    console.log("➡️ Next JOB_NO:", nextJobNo);
+  //  console.log("➡️ Next JOB_NO:", nextJobNo);
     res.json({ jobNo: String(nextJobNo) });
   });
 });
@@ -1817,7 +1817,7 @@ app.get("/api/customers/:id", (req, res) => {
 
     if (result.length > 0) {
       const { START_DT, ...filteredResult } = result[0]; // Remove START_DT from the result
-      console.log('Customers:', result)
+    //  console.log('Customers:', result)
       res.json(filteredResult);
     } else {
       res.status(404).json({ error: "Customer not found" });
@@ -3046,7 +3046,7 @@ app.get("/api/accmst/:id", function (req, res) {
       if (error) {
         throw error;
       } else {
-        console.log(" Accmst edt", result);
+      //  console.log(" Accmst edt", result);
         res.json(result);
 
       }
@@ -3983,6 +3983,7 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
         console.error("Database Query Error:", err);
         res.status(500).json({ error: "Database query failed" });
       } else {
+       // console.error("Foreign Pur Inv",result);
         res.json(result);
       }
     }
@@ -4714,7 +4715,7 @@ app.get("/api/drawingReg", function (req, res) {
       console.error("Drawing register error:", error);
       res.status(500).json({ error: "Database query failed" });
     } else {
-      console.log("Drawing register:", result);
+      //console.log("Drawing register:", result);
       res.json(result);
     }
   });
@@ -5290,7 +5291,7 @@ app.get("/api/purfrgnhdr/:vch", function (req, res) {
       } else {
         //   console.log("Oracle Purchase LC LST", result.rows);
         res.json(result);
-        console.log("PURCHASE_HDR", result)
+      //  console.log("PURCHASE_HDR", result)
       }
     }
   );
@@ -5316,7 +5317,7 @@ app.get("/api/gittypesfp/:vch", function (req, res) {
         throw err;
       } else {
         res.json(result);
-        console.log("Git Types", result);
+      //  console.log("Git Types", result);
       }
     }
   );
@@ -5344,7 +5345,7 @@ app.get("/api/purfrgnitems/:vch", function (req, res) {
           AMOUNT: row.AMOUNT ? parseFloat(row.AMOUNT) : 0,
         }));
         res.json(result);
-        console.log("PUR_FRGN_ITEMS", result, req.params.vch)
+     //   console.log("PUR_FRGN_ITEMS", result, req.params.vch)
       }
     }
   );
@@ -5790,7 +5791,7 @@ app.get("/api/custsal", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("Cust.Sales ", result);
+     //   console.log("Cust.Sales ", result);
         res.json(result);
       }
 
@@ -5830,7 +5831,7 @@ app.get("/api/jobsal", function (req, res) {
       if (err) {
         throw err;
       } else {
-        console.log("Cust.Sales ", result);
+       // console.log("Cust.Sales ", result);
         res.json(result);
       }
 
@@ -6647,7 +6648,7 @@ app.get("/api/jobcard/:jobNo", function (req, res) {
       if (error) {
         throw error;
       } else {
-        console.log("Job Card", result);
+      //  console.log("Job Card", result);
         res.json(result);
 
       }
@@ -6694,7 +6695,7 @@ ORDER BY a.job_no DESC;
       if (error) {
         throw error;
       } else {
-        console.log("Job profit analysis :", result);
+     //   console.log("Job profit analysis :", result);
         res.json(result);
 
       }
@@ -6743,7 +6744,7 @@ app.get("/api/jobreg", function (req, res) {
       if (error) {
         throw error;
       } else {
-        console.log("Job Card", result);
+     //   console.log("Job Card", result);
         res.json(result);
 
       }
@@ -6763,7 +6764,7 @@ app.get("/api/joblst", function (req, res) {
       if (error) {
         throw error;
       } else {
-        console.log("joblst==>", result);
+     //   console.log("joblst==>", result);
         res.json(result);
 
       }
