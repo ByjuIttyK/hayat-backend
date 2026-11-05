@@ -651,7 +651,7 @@ router.get('/leave/matrix-ledger', async (req, res) => {
     let dbYears = rawYears.map(y => Number(y.yr || y)).filter(Boolean);
 
     // Minimum 4-year default range fallback
-    const defaultYears = [2022,2023, 2024, 2025, 2026,2027];
+    const defaultYears = [2022,2023, 2024, 2025, 2026];
     const years = Array.from(new Set([...defaultYears, ...dbYears])).sort((a, b) => a - b);
 
     // 2. Fetch employees
