@@ -635,7 +635,76 @@ module.exports = function (connection) {
     } catch (e) { send(res, e); }
   });
 
-  return router;
+// GET /api/leave/matrix-ledger
+// GET /api/leave/matrix-ledger
+router.get('/api/leave/matrix-ledger', async (req, res) => {
+  try {
+    // 1. Automatically fetch all unique years present in your leave applications table
+    const [yearRows] = await q(`
+      SELECT DISTINCT YEAR(FROM_DT) AS yr 
+      FROM leave_appl 
+      WHERE FROM_DT IS NOT NULL AND STATUS = 'A' AND LEAVE_TYPE = 'AL'
+      ORDER BY yr ASC;
+    `);
+
+    // Extract years array (fallback to default range if no leave records exist yet)
+    const years = yearRows.length > 0 ? yearRows.map(y => Number(y.yr)) : [2022, 2024, 2025, 2026];
+
+    // 2. Dynamically build SQL conditional aggregation clauses for whichever years exist
+    const sumCases = years.map(yr => `
+      MAX(CASE WHEN YEAR(l.FROM_DT) = ${yr} THEN DATE_FORMAT(l.FROM_DT, '%Y-%m-%d') END) AS y${yr}_from,
+      MAX(CASE WHEN YEAR(l.FROM_DT) = ${yr} THEN DATE_FORMAT(l.TO_DT, '%Y-%m-%d') END) AS y${yr}_to,
+      SUM(CASE WHEN YEAR(l.FROM_DT) = ${yr} THEN l.DAYS ELSE 0 END) AS y${yr}_days
+    `).join(',\n');
+
+    const totalSumExpression = years.map(yr => `COALESCE(SUM(CASE WHEN YEAR(l.FROM_DT) = ${yr} THEN l.DAYS ELSE 0 END), 0)`).join(' +\n          ');
+
+    // 3. Construct the dynamic master query
+    const query = `
+      SELECT 
+        e.EMP_CODE as empCode,
+        e.EMP_NAME as empName,
+        DATE_FORMAT(e.APPT_DT, '%Y-%m-%d') as joinDate,
+        ${sumCases},
+        (
+          ${totalSumExpression}
+        ) AS totalDays
+      FROM emp_mst e
+      LEFT JOIN leave_appl l ON e.EMP_CODE = l.EMP_CODE AND l.STATUS = 'A' AND l.LEAVE_TYPE = 'AL'
+      WHERE e.EMP_CODE IS NOT NULL AND e.EMP_CODE != ''
+      GROUP BY e.EMP_CODE, e.EMP_NAME, e.APPT_DT
+      ORDER BY e.EMP_CODE ASC;
+    `;
+
+    const [rows] = await q(query);
+
+    // 4. Map the flat SQL results dynamically into nested structures for the frontend
+    const formattedData = rows.map(row => {
+      const leaves = {};
+      years.forEach(yr => {
+        leaves[yr] = {
+          from: row[`y${yr}_from`] || null,
+          to: row[`y${yr}_to`] || null,
+          days: Number(row[`y${yr}_days`]) || 0
+        };
+      });
+
+      return {
+        code: row.empCode,
+        name: row.empName,
+        joinDate: row.joinDate || '',
+        leaves: leaves,
+        totalDays: Number(row.totalDays) || 0
+      };
+    });
+
+    // Send both the dynamic list of years and the data to the frontend
+    res.json({ success: true, years, data: formattedData });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+return router;
 };
 
 // exported for testing
