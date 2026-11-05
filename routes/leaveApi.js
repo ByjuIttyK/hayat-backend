@@ -636,19 +636,25 @@ module.exports = function (connection) {
   });
 
 // GET /api/leave/matrix-ledger
+
 router.get('/leave/matrix-ledger', async (req, res) => {
   try {
-    // 1. Fetch all unique active leave years dynamically
+    // 1. Fetch unique active leave years including 'A' and 'S' (Resumed)
     const yearResult = await q(`
       SELECT DISTINCT YEAR(FROM_DT) AS yr 
       FROM leave_appl 
-      WHERE FROM_DT IS NOT NULL AND STATUS = 'A' AND LEAVE_TYPE = 'AL'
+      WHERE FROM_DT IS NOT NULL AND STATUS IN ('A', 'S') AND LEAVE_TYPE = 'AL'
       ORDER BY yr ASC;
     `);
+    
     const rawYears = Array.isArray(yearResult) ? (Array.isArray(yearResult[0]) ? yearResult[0] : yearResult) : [];
-    const years = rawYears.length > 0 ? rawYears.map(y => Number(y.yr || y)) : [2022, 2024, 2025, 2026];
+    let dbYears = rawYears.map(y => Number(y.yr || y)).filter(Boolean);
 
-    // 2. Fetch all employees safely
+    // Minimum 4-year default range fallback
+    const defaultYears = [2022,2023, 2024, 2025, 2026,2027];
+    const years = Array.from(new Set([...defaultYears, ...dbYears])).sort((a, b) => a - b);
+
+    // 2. Fetch employees
     const empResult = await q(`
       SELECT EMP_CODE as empCode, EMP_NAME as empName, DATE_FORMAT(APPT_DT, '%Y-%m-%d') as joinDate 
       FROM emp_mst 
@@ -657,15 +663,15 @@ router.get('/leave/matrix-ledger', async (req, res) => {
     `);
     const empList = Array.isArray(empResult) ? (Array.isArray(empResult[0]) ? empResult[0] : empResult) : [];
 
-    // 3. Fetch all approved annual leave records safely
+    // 3. Fetch approved and resumed annual leave records
     const leaveResult = await q(`
       SELECT EMP_CODE as empCode, YEAR(FROM_DT) AS yr, DATE_FORMAT(FROM_DT, '%Y-%m-%d') AS fromDt, DATE_FORMAT(TO_DT, '%Y-%m-%d') AS toDt, DAYS as days
       FROM leave_appl 
-      WHERE STATUS = 'A' AND LEAVE_TYPE = 'AL';
+      WHERE STATUS IN ('A', 'S') AND LEAVE_TYPE = 'AL';
     `);
     const leaveList = Array.isArray(leaveResult) ? (Array.isArray(leaveResult[0]) ? leaveResult[0] : leaveResult) : [];
 
-    // 4. Index leave records by employee code and year in JavaScript
+    // 4. Index leave records by employee code and year
     const leaveMap = {};
     leaveList.forEach(l => {
       if (!leaveMap[l.empCode]) leaveMap[l.empCode] = {};
@@ -676,7 +682,7 @@ router.get('/leave/matrix-ledger', async (req, res) => {
       }
     });
 
-    // 5. Build structured response per employee
+    // 5. Build structured response per employee across all target years
     const formattedData = empList.map(emp => {
       const empLeaves = leaveMap[emp.empCode] || {};
       let totalDays = 0;
