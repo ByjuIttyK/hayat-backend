@@ -4013,33 +4013,53 @@ app.get("/api/srvlst/:dys", function (req, res) {
   );
 });
 
-app.get("/api/srvhdr/:srv", function (req, res) {
 
-  //console.log('SRV Hdr. no'||srv);
+app.get("/api/srvlstfp/:dys", function (req, res) {
 
   connection.query(
-    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') SRV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.NARRATION, a.PO_NO as LPO_NO, a.INV_NO, a.INV_DATE " +
-    " from srv_hdr a, sup_mst b where a.SUP_CODE =b.SUP_CODE and  a.SRV_NO= ? ",
-    [req.params.srv],
+    "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%Y') SRV_DATE, a.SUP_CODE," +
+    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT " +
+    " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
+    " LEFT OUTER JOIN  purchase_hdr c on (a.srv_no = c.srv_no) " +
+    " where a.PRCH_NO is not null and  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
+    " a.SUP_CODE = b.SUP_CODE ORDER BY a.SRV_NO DESC",
+    [req.params.dys],
 
     function (err, result) {
       if (err) {
         throw err;
       } else {
-        //    console.log("Oracle SRVHDR Read Data", result.rows);
+        //   console.log("srv list", result);
         res.json(result);
-
       }
     }
   );
 });
 
+app.get("/api/srvhdr/:srv", function (req, res) {
+  connection.query(
+    "SELECT a.SRV_NO, DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') SRV_DATE, a.SUP_CODE," +
+    "       b.SUP_NAME, a.NARRATION, a.PO_NO AS LPO_NO, a.INV_NO, a.INV_DATE, a.INV_AMOUNT," +
+    "       a.CURR_CODE, a.CONVERT_RATE," +
+    "       a.INV_AMT_FC, a.FREIGHT_FOB, a.INV_AMT_LOCAL, a.EXP_AMOUNT, a.EFF_RATE" +
+    "  FROM srv_hdr a, sup_mst b" +
+    " WHERE a.SUP_CODE = b.SUP_CODE AND a.SRV_NO = ?",
+    [req.params.srv],
+    function (err, result) {
+      if (err) {
+        // a bad request must not take the whole server down (was: throw err)
+        console.error("srvhdr:", err);
+        return res.status(500).json({ error: err.sqlMessage || err.message });
+      }
+      res.json(result);
+    }
+  );
+});
 app.get("/api/srvitems/:srv", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') AS SRV_DATE, a.LOC_CODE," +
-    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.COST as RATE, a.SRV_UNIT as UOM" +
+    "a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.COST as RATE, a.COST_FC as COST_FC,a.SRV_UNIT as UOM" +
     " from srv_items a left outer join  item_mst b on (a.ITEM_CODE =b.ITEM_CODE) where  a.SRV_NO= ? ORDER by a.Sr_no ",
     [req.params.srv],
 

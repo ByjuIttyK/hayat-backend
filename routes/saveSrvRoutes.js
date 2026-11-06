@@ -16,6 +16,16 @@
  *
  * netData.Mode: 'ADD' for a new SRV, 'EDIT' for an existing one.
  * Without Mode, an existing SRV is updated and a missing one is inserted.
+ *
+ * Foreign SRV (SrvEntFP.tsx, 06-Nov-2026) — recognised by expData being sent
+ * (the local SRV screen doesn't send it, so its saves are unchanged):
+ *   srv_hdr   CURR_CODE, CONVERT_RATE, INV_AMT_FC, FREIGHT_FOB, INV_AMT_LOCAL,
+ *             EXP_AMOUNT, EFF_RATE                  ← netData.CurrCd … EffRate
+ *   srv_items COST_FC (Rate F.C); COST = Rate Local (Rate F.C × Eff. Rate)
+ *   lcst_trn  the SRV's expense lines are replaced: DELETE by VCHR_NO, then
+ *             INSERT the lines on screen (lcst_trn has no unique key on
+ *             VCHR_NO + GIT_TYPE, so an upsert would only add rows)
+ * All inside the same transaction — a failure rolls the expenses back too.
  */
 
 const express = require('express');
@@ -57,6 +67,37 @@ const ITEMS_UPSERT = `
     QTY       = COALESCE(VALUES(QTY), QTY),
     COST      = COALESCE(VALUES(COST), COST)`;
 
+// ── Foreign SRV ──────────────────────────────────────────────────────────
+const HDR_FOREIGN_UPDATE = `
+  UPDATE srv_hdr
+     SET CURR_CODE=?, CONVERT_RATE=?, INV_AMT_FC=?, FREIGHT_FOB=?,
+         INV_AMT_LOCAL=?, EXP_AMOUNT=?, EFF_RATE=?
+   WHERE SRV_NO=?`;
+
+// Rate F.C is written as sent (not COALESCE'd), so a cleared rate is cleared.
+const ITEMS_UPSERT_FP = `
+  INSERT INTO srv_items (SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, QTY, COST, COST_FC)
+  VALUES ?
+  ON DUPLICATE KEY UPDATE
+    SRV_DATE  = COALESCE(VALUES(SRV_DATE), SRV_DATE),
+    ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE),
+    QTY       = COALESCE(VALUES(QTY), QTY),
+    COST      = COALESCE(VALUES(COST), COST),
+    COST_FC   = VALUES(COST_FC)`;
+
+const LCST_INSERT = `
+  INSERT INTO lcst_trn (VCHR_NO, GIT_TYPE, AMOUNT, ACC_CODE)
+  VALUES ?`;
+
+/** Landed-cost expense account: 506-007-0-0NN (pattern of the existing lcst_trn rows). */
+const expAccCode = (gitType) => `506-007-0-${String(gitType).trim().padStart(3, '0')}`;
+
+const numOrNull = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(String(v).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+
 /** Next SRV No after the highest one on file, same zero-padded width. */
 async function nextSrvNo(conn, width) {
   const rows = await q(conn, 'SELECT SRV_NO FROM srv_hdr ORDER BY SRV_NO DESC LIMIT 1 FOR UPDATE');
@@ -69,10 +110,30 @@ module.exports = function (connection) {
   const router = express.Router();
 
   router.post('/save-srv', (req, res) => {
-    const { netData, itemsData } = req.body || {};
+    const { netData, itemsData, expData } = req.body || {};
     if (!netData || !Array.isArray(itemsData) || itemsData.length === 0) {
       return res.status(400).json({ message: 'Invalid SRV data format' });
     }
+
+    // Foreign SRV screen sends expData ([] when all expenses are cleared)
+    const isForeign = Array.isArray(expData);
+    const foreignHdr = isForeign
+      ? [
+          (netData.CurrCd ?? '').toString().trim() || null,
+          numOrNull(netData.ConvRt),
+          numOrNull(netData.InvAmtFc),
+          numOrNull(netData.FreightFc),
+          numOrNull(netData.InvAmtLcl),
+          numOrNull(netData.ExpAmt),
+          numOrNull(netData.EffRate),
+        ]
+      : null;
+    // expense lines with a type and a non-zero amount
+    const expLines = isForeign
+      ? expData
+          .filter((r) => r && String(r.expCode ?? '').trim() && numOrNull(r.amount))
+          .map((r) => ({ type: String(r.expCode).trim(), amount: numOrNull(r.amount) }))
+      : [];
 
     const clientSrvNo = String(netData.SrvNo ?? '').trim();
     if (!clientSrvNo) {
@@ -131,10 +192,31 @@ module.exports = function (connection) {
         await q(conn, 'DELETE FROM srv_items WHERE SRV_NO = ?', [srvNo]);
       }
 
-      const values = itemsData.map((row) => [
-        srvNo, row.SRV_DATE || netData.SrvDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST,
-      ]);
-      await q(conn, ITEMS_UPSERT, [values]);
+      if (isForeign) {
+        // header: currency, rates, amounts (after the insert/update above)
+        await q(conn, HDR_FOREIGN_UPDATE, [...foreignHdr, srvNo]);
+
+        // lines: Rate F.C + Rate Local
+        const values = itemsData.map((row) => [
+          srvNo, row.SRV_DATE || netData.SrvDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST,
+          numOrNull(row.COST_FC),
+        ]);
+        await q(conn, ITEMS_UPSERT_FP, [values]);
+
+        // landed cost expenses: replace this SRV's lines (uses the SRV No actually
+        // saved — on ADD it may have moved on to the next free number)
+        await q(conn, 'DELETE FROM lcst_trn WHERE VCHR_NO = ?', [srvNo]);
+        if (expLines.length) {
+          await q(conn, LCST_INSERT, [
+            expLines.map((e) => [srvNo, e.type, e.amount, expAccCode(e.type)]),
+          ]);
+        }
+      } else {
+        const values = itemsData.map((row) => [
+          srvNo, row.SRV_DATE || netData.SrvDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST,
+        ]);
+        await q(conn, ITEMS_UPSERT, [values]);
+      }
 
       await commit(conn);
       return srvNo;

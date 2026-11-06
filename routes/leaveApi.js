@@ -646,8 +646,7 @@ router.get('/leave/matrix-ledger', async (req, res) => {
       WHERE FROM_DT IS NOT NULL AND STATUS IN ('A', 'S') AND LEAVE_TYPE = 'AL'
       ORDER BY yr ASC;
     `);
-    
-    const rawYears = Array.isArray(yearResult) ? (Array.isArray(yearResult[0]) ? yearResult[0] : yearResult) : [];
+        const rawYears = Array.isArray(yearResult) ? (Array.isArray(yearResult[0]) ? yearResult[0] : yearResult) : [];
     let dbYears = rawYears.map(y => Number(y.yr || y)).filter(Boolean);
 
     // Minimum 4-year default range fallback
