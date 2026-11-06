@@ -33,11 +33,11 @@
 //   GET    /leave/balance?catg=M,S,W&status=A,L&asOn=yyyy-mm-dd[&withSal=1]
 //   GET    /leave/salary/:no          detailed leave salary of one annual-type application
 //   (ledger also takes withSal=1 -> adds `rates` so the screen can value days taken and the balance)
-// Leave salary (UAE Art. 29: leave taken is paid at full wage):
-//   monthly wage = payroll_mst.BASIC_SAL + all emp_allow_mst lines;  daily rate = monthly × 12 / 365 (per line)
+// Leave salary (company rule: on basic salary only — allowances are not included):
+//   daily rate   = payroll_mst.BASIC_SAL × 12 / 365
 //   paid days    = actual days (resumed) else applied days, limited to the annual balance available
 //                  before the leave; days beyond the balance are shown as not paid
-//   value of the balance left on exit = days × basic × 12 / 365 (basic only)
+//   leave salary = daily rate × paid days;  value of the balance left on exit = days × daily rate
 //   Salary figures are the current ones on the employee master.
 // Employee status: approved leave that has started sets emp_mst.EMP_STATUS 'L'; resume / cancel puts it back to 'A'.
 const express = require("express");
@@ -505,28 +505,17 @@ module.exports = function (connection) {
     } catch (e) { send(res, e); }
   });
 
-  // ---------------------------------------------------------------- salary rates (current master figures)
+  // ---------------------------------------------------------------- salary rate (current master figure)
+  // Leave salary in this company is on basic salary only — allowances are not included.
+  // The shape (lines / monthly / dailyFull) is kept so the screens that read `rates` need no change;
+  // monthly = basic and dailyFull = dailyBasic.
   const ratesOf = async (code) => {
     const p = await q("SELECT COALESCE(BASIC_SAL, 0) AS BASIC_SAL FROM payroll_mst WHERE EMP_CODE = ?", [code]);
-    let al = [];
-   /* try {
-      al = await q(`SELECT ea.allow_code AS CODE, ea.amount AS AMT, am.* FROM emp_allow_mst ea
-                     LEFT JOIN allow_mst am ON am.allow_code = ea.allow_code
-                    WHERE ea.emp_code = ? ORDER BY ea.allow_code`, [code]);
-    } catch (_) {                                                    // allow_mst shaped differently — codes only
-      al = await q("SELECT allow_code AS CODE, amount AS AMT FROM emp_allow_mst WHERE emp_code = ? ORDER BY allow_code", [code]);
-    }*/
-    const nameOf = (r) => {
-      const k = Object.keys(r).find((x) => /name|desc|head/i.test(x) && r[x]);
-      return k ? String(r[k]) : r.CODE;
-    };
-    const lines = [{ code: "BASIC", name: "Basic Salary", monthly: r2(p[0]?.BASIC_SAL) }]
-      .concat(al.filter((r) => Number(r.AMT)).map((r) => ({ code: String(r.CODE), name: nameOf(r), monthly: r2(r.AMT) })))
-      .map((l) => ({ ...l, daily: r2(l.monthly * 12 / 365) }));     // rounded per line, so the printed table adds up
-    const monthly = r2(lines.reduce((t, l) => t + l.monthly, 0));
+    const basic = r2(p[0]?.BASIC_SAL);
+    const dailyBasic = r2(basic * 12 / 365);
     return {
-      lines, monthly, basic: lines[0].monthly,
-      dailyFull: r2(lines.reduce((t, l) => t + l.daily, 0)), dailyBasic: lines[0].daily,
+      lines: [{ code: "BASIC", name: "Basic Salary", monthly: basic, daily: dailyBasic }],
+      monthly: basic, basic, dailyFull: dailyBasic, dailyBasic,
     };
   };
 
@@ -545,16 +534,14 @@ module.exports = function (connection) {
       const paidDays = r2(Math.min(days, avail));
       const unpaidDays = r2(days - paidDays);
       const rates = await ratesOf(a.EMP_CODE);
-      const lines = rates.lines.map((l) => ({
-        ...l, daily: r2(l.daily), days: paidDays, amount: r2(r2(l.daily) * paidDays),   // ties to rate × days on paper
-      }));
-      const total = r2(lines.reduce((t, l) => t + l.amount, 0));
+      const total = r2(rates.dailyBasic * paidDays);                  // basic daily rate × paid days
+      const lines = rates.lines.map((l) => ({ ...l, days: paidDays, amount: total }));
       const after = r2(before.available - days);
       res.json({
         appl: a, emp, before, days, daysBasis: resumed ? "actual (resumed)" : "applied", paidDays, unpaidDays,
-        lines, monthly: rates.monthly, dailyFull: r2(rates.dailyFull), total,
+        lines, monthly: rates.basic, dailyFull: rates.dailyBasic, total,
         balanceAfter: after,
-        exitValue: { days: Math.max(after, 0), dailyBasic: r2(rates.dailyBasic), amount: r2(Math.max(after, 0) * r2(rates.dailyBasic)) },
+        exitValue: { days: Math.max(after, 0), dailyBasic: rates.dailyBasic, amount: r2(Math.max(after, 0) * rates.dailyBasic) },
       });
     } catch (e) { send(res, e); }
   });
@@ -571,7 +558,7 @@ module.exports = function (connection) {
       let rates = null;
       if (String(req.query.withSal || "") === "1") {
         const r = await ratesOf(code);
-        rates = { monthly: r.monthly, basic: r.basic, dailyFull: r2(r.dailyFull), dailyBasic: r2(r.dailyBasic), lines: r.lines.map((l) => ({ ...l, daily: r2(l.daily) })) };
+        rates = { monthly: r.monthly, basic: r.basic, dailyFull: r.dailyFull, dailyBasic: r.dailyBasic, lines: r.lines };
       }
       // one leave type only
       let type = String(req.query.type || "").trim().toUpperCase();
