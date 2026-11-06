@@ -7927,3 +7927,9 @@ app.use("/api", require("./routes/eosbProvApi")(connection));
 //
 
 app.use("/api", require("./routes/auditApi")(connection));
+//
+//const leaveApi = require("./routes/leaveApi");             // already there
+const leaveSalPayApi = require("./routes/leaveSalPayApi");  // new
+
+//app.use("/api", leaveApi(connection));                     // already there
+app.use("/api", leaveSalPayApi(connection));             

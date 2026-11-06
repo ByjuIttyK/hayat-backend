@@ -34,11 +34,15 @@
 //   GET    /leave/salary/:no          detailed leave salary of one annual-type application
 //   (ledger also takes withSal=1 -> adds `rates` so the screen can value days taken and the balance)
 // Leave salary (company rule: on basic salary only — allowances are not included):
-//   daily rate   = payroll_mst.BASIC_SAL × 12 / 365
-//   paid days    = actual days (resumed) else applied days, limited to the annual balance available
-//                  before the leave; days beyond the balance are shown as not paid
+//   daily rate   = payroll_mst.BASIC_SAL × 12 / 365   (the current basic on the employee master)
+//   paid days    = actual days (resumed) else applied days — all of them: days beyond the available balance
+//                  are advance leave, paid, and the annual balance goes negative (recovered from later
+//                  accruals, or on exit)
 //   leave salary = daily rate × paid days;  value of the balance left on exit = days × daily rate
-//   Salary figures are the current ones on the employee master.
+//                  (a negative balance on exit is an amount to recover)
+// Payments are made by a separate Leave Salary Payment voucher (routes/leaveSalPayApi.js, table leave_sal_pay):
+//   L for a leave (any time, also after resuming), E encashment (days sold — they reduce the annual balance,
+//   Leave Ledger row "ENC"), A advance against future leave (balance not touched; adjusted on a later L voucher).
 // Employee status: approved leave that has started sets emp_mst.EMP_STATUS 'L'; resume / cancel puts it back to 'A'.
 const express = require("express");
 
@@ -69,8 +73,9 @@ const dmy = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : 
 // ---------------------------------------------------------------- the leave engine (pure, no database)
 // emp:    { APPT_DT, LEAVE_OPBAL, LEAVE_OPBAL_DT, LEAVE_DAYS_PA }  (dates yyyy-mm-dd or null)
 // leaves: [{ LEAVE_NO, LEAVE_TYPE, LEAVE_NAME, IS_ANNUAL, STATUS, FROM_DT, TO_DT, RESUME_DT, DAYS, ACT_DAYS }]
-// Returns the dated events (opening, monthly credits, leaves) up to `upTo`.
-function leaveEvents(emp, leaves, upTo) {
+// encs:   [{ LS_NO, LS_DT, DAYS }]  leave salary encashments (leave_sal_pay type E) — they reduce the balance
+// Returns the dated events (opening, monthly credits, leaves, encashments) up to `upTo`.
+function leaveEvents(emp, leaves, upTo, encs = []) {
   const daysPa = Number(emp.LEAVE_DAYS_PA) || 0;
   const appt = emp.APPT_DT || null;
   const opDt = emp.LEAVE_OPBAL_DT || null;
@@ -108,7 +113,17 @@ function leaveEvents(emp, leaves, upTo) {
     });
   });
 
-  const order = { OPEN: 0, EARN: 1, TAKE: 2, OTHER: 3 };
+  encs.forEach((x) => {
+    if (x.LS_DT > upTo) return;
+    if (opDt && x.LS_DT < opDt) return;                           // inside the opening balance
+    const days = Number(x.DAYS) || 0;
+    ev.push({
+      date: x.LS_DT, kind: "ENC", ref: x.LS_NO, particulars: `Leave salary encashment — ${r2(days)} days (${x.LS_NO})`,
+      earned: 0, taken: days, other: 0,
+    });
+  });
+
+  const order = { OPEN: 0, EARN: 1, TAKE: 2, ENC: 3, OTHER: 4 };
   ev.sort((a, b) => (a.date === b.date ? order[a.kind] - order[b.kind] : a.date < b.date ? -1 : 1));
   return ev;
 }
@@ -122,24 +137,28 @@ function monthsDone(a, b) {
 }
 
 // balance figures as on a date
-function leaveBalance(emp, leaves, asOn) {
-  const ev = leaveEvents(emp, leaves, asOn);
-  let opening = 0, earned = 0, taken = 0;
+function leaveBalance(emp, leaves, asOn, encs = []) {
+  const ev = leaveEvents(emp, leaves, asOn, encs);
+  let opening = 0, earned = 0, taken = 0, encashed = 0;
   ev.forEach((e) => {
     if (e.kind === "OPEN") opening += e.earned;
     if (e.kind === "EARN") earned += e.earned;
     if (e.kind === "TAKE") taken += e.taken;
+    if (e.kind === "ENC") encashed += e.taken;
   });
   const booked = leaves
     .filter((l) => l.STATUS === "A" && l.IS_ANNUAL === "Y" && l.FROM_DT > asOn)
     .reduce((t, l) => t + (Number(l.DAYS) || 0), 0);
-  const balance = r2(opening + earned - taken);
-  return { asOn, opening: r2(opening), earned: r2(earned), taken: r2(taken), balance, booked: r2(booked), available: r2(balance - booked) };
+  const balance = r2(opening + earned - taken - encashed);       // can be negative (advance leave)
+  return {
+    asOn, opening: r2(opening), earned: r2(earned), taken: r2(taken), encashed: r2(encashed),
+    balance, booked: r2(booked), available: r2(balance - booked),
+  };
 }
 
 // ledger rows between from and to, with the running balance
-function leaveLedger(emp, leaves, from, to) {
-  const ev = leaveEvents(emp, leaves, to);
+function leaveLedger(emp, leaves, from, to, encs = []) {
+  const ev = leaveEvents(emp, leaves, to, encs);
   let bal = 0, bf = 0;
   const rows = [];
   ev.forEach((e) => {
@@ -270,6 +289,19 @@ module.exports = function (connection) {
     return rows[0];
   };
 
+  // leave salary payment vouchers (routes/leaveSalPayApi.js) — read here for encashments and payments;
+  // until sql/leave_sal_pay.sql is run the table is missing and these return nothing
+  const noTable = (e) => e && (e.code === "ER_NO_SUCH_TABLE" || e.errno === 1146);
+  const PAYS_SQL = `
+    SELECT LS_NO, EMP_CODE, DATE_FORMAT(LS_DT, '%Y-%m-%d') AS LS_DT, LS_TYPE, LEAVE_NO, DAYS, DAILY_RATE, AMOUNT, ADV_ADJ, NET_PAY
+      FROM leave_sal_pay WHERE EMP_CODE IN (?) ORDER BY LS_DT, LS_NO`;
+  const paysOf = async (codes, db = null) => {
+    if (!codes.length) return [];
+    try { return db ? await qc(db, PAYS_SQL, [codes]) : await q(PAYS_SQL, [codes]); }
+    catch (e) { if (noTable(e)) return []; throw e; }
+  };
+  const encOf = async (codes, db = null) => (await paysOf(codes, db)).filter((p) => p.LS_TYPE === "E");
+
   // employees whose approved leave has started -> 'L'; employees on 'L' with no running leave -> 'A'
   const syncOnLeave = async (db = null) => {
     const run = (sql) => (db ? qc(db, sql) : q(sql));
@@ -325,7 +357,7 @@ module.exports = function (connection) {
       const emp = await empOf(code);
       const leaves = (await leavesOf([code])).filter((l) => l.LEAVE_NO !== excl);
       // balance on the day before the leave starts
-      const bal = leaveBalance(emp, leaves, addDays(asOn, -1));
+      const bal = leaveBalance(emp, leaves, addDays(asOn, -1), await encOf([code]));
       // this calendar year's use of each leave type (approved + resumed, this application excluded)
       const yr = asOn.slice(0, 4);
       const yearUse = {};
@@ -366,7 +398,7 @@ module.exports = function (connection) {
     a.DAYS = daysBetween(a.FROM_DT, a.TO_DT) + 1;                 // calendar days
     // annual balance snapshot (day before the leave)
     const leaves = (await leavesOf([a.EMP_CODE], db)).filter((l) => l.LEAVE_NO !== exclNo);
-    a.BAL_ON_APPL = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1)).available;
+    a.BAL_ON_APPL = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1), await encOf([a.EMP_CODE], db)).available;
     return { emp, lt: lt[0] };
   };
 
@@ -454,7 +486,16 @@ module.exports = function (connection) {
           if (clash.length) throw fail(400, `Overlaps approved leave ${clash[0].LEAVE_NO}`);
           await qc(db, "UPDATE leave_appl SET STATUS='A', APPR_BY=?, APPR_DT=NOW(), APPR_REMARKS=? WHERE LEAVE_NO=?", [user, remarks, no]);
           await syncOnLeave(db);
-          return `Leave ${no} approved`;
+          // annual leave beyond the available balance is advance leave: allowed, the balance goes negative
+          let note = "";
+          if (cur.IS_ANNUAL === "Y") {
+            const emp = await empOf(cur.EMP_CODE, db);
+            const ls = (await leavesOf([cur.EMP_CODE], db)).filter((l) => l.LEAVE_NO !== no);
+            const b = leaveBalance(emp, ls, addDays(cur.FROM_DT, -1), await encOf([cur.EMP_CODE], db));
+            const over = r2(Math.min(Number(cur.DAYS), Number(cur.DAYS) - b.available));
+            if (over > 0) note = ` — ${over} day${over === 1 ? "" : "s"} beyond the available ${b.available} taken as advance leave (annual balance goes negative)`;
+          }
+          return `Leave ${no} approved${note}`;
         }
         if (action === "reject") {
           need(["D"], "reject");
@@ -527,21 +568,29 @@ module.exports = function (connection) {
       if (a.IS_ANNUAL !== "Y") throw fail(400, `${a.LEAVE_NAME} is not paid as leave salary — only annual-type leave is (other leave is paid through the monthly payroll as per its pay type)`);
       const emp = await empOf(a.EMP_CODE);
       const leaves = (await leavesOf([a.EMP_CODE])).filter((l) => l.LEAVE_NO !== no);
-      const before = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1));
+      const pays = await paysOf([a.EMP_CODE]);
+      const before = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1), pays.filter((p) => p.LS_TYPE === "E"));
       const resumed = a.STATUS === "S";
       const days = Number(resumed ? a.ACT_DAYS : a.DAYS) || 0;
-      const avail = Math.max(before.available, 0);
-      const paidDays = r2(Math.min(days, avail));
-      const unpaidDays = r2(days - paidDays);
+      // advance leave: every day taken is paid; days beyond the available balance take the balance negative
+      const paidDays = r2(days);
+      const advanceDays = r2(Math.max(Math.min(days, days - before.available), 0));
       const rates = await ratesOf(a.EMP_CODE);
       const total = r2(rates.dailyBasic * paidDays);                  // basic daily rate × paid days
       const lines = rates.lines.map((l) => ({ ...l, days: paidDays, amount: total }));
       const after = r2(before.available - days);
+      // payments: L vouchers for this leave, and the employee's advance not yet adjusted
+      const forThis = pays.filter((p) => p.LS_TYPE === "L" && p.LEAVE_NO === no);
+      const paid = r2(forThis.reduce((t, p) => t + Number(p.AMOUNT), 0));
+      const openAdvance = r2(pays.filter((p) => p.LS_TYPE === "A").reduce((t, p) => t + Number(p.AMOUNT), 0)
+        - pays.filter((p) => p.LS_TYPE === "L").reduce((t, p) => t + Number(p.ADV_ADJ), 0));
       res.json({
-        appl: a, emp, before, days, daysBasis: resumed ? "actual (resumed)" : "applied", paidDays, unpaidDays,
+        appl: a, emp, before, days, daysBasis: resumed ? "actual (resumed)" : "applied", paidDays, advanceDays,
         lines, monthly: rates.basic, dailyFull: rates.dailyBasic, total,
         balanceAfter: after,
-        exitValue: { days: Math.max(after, 0), dailyBasic: rates.dailyBasic, amount: r2(Math.max(after, 0) * rates.dailyBasic) },
+        // negative days / amount = advance leave not yet earned back: recoverable on exit
+        exitValue: { days: after, dailyBasic: rates.dailyBasic, amount: r2(after * rates.dailyBasic) },
+        pay: { paid, due: r2(total - paid), openAdvance, vouchers: forThis },
       });
     } catch (e) { send(res, e); }
   });
@@ -554,7 +603,8 @@ module.exports = function (connection) {
       const from = isYmd(req.query.from) ? req.query.from : null;
       const emp = await empOf(code);
       const leaves = await leavesOf([code]);
-      const bal = leaveBalance(emp, leaves, to);
+      const encs = await encOf([code]);
+      const bal = leaveBalance(emp, leaves, to, encs);
       let rates = null;
       if (String(req.query.withSal || "") === "1") {
         const r = await ratesOf(code);
@@ -572,8 +622,8 @@ module.exports = function (connection) {
           return res.json({ emp, from, to, mode: "TYPE", type, typeName: lt[0].LEAVE_NAME, limit, ...led, bal, other: {} });
         }
       }
-      const led = leaveLedger(emp, leaves, from, to);
-      if (type === "ANNUAL") led.rows = led.rows.filter((r) => r.kind !== "OTHER");
+      const led = leaveLedger(emp, leaves, from, to, encs);
+      if (type === "ANNUAL") led.rows = led.rows.filter((r) => r.kind !== "OTHER");   // encashments (ENC) stay
       // other leave (not annual) in the period, by type
       const other = {};
       led.rows.filter((r) => r.kind === "OTHER").forEach((r) => { other[r.type] = r2((other[r.type] || 0) + r.other); });
@@ -599,10 +649,15 @@ module.exports = function (connection) {
       const leaves = await leavesOf(emps.map((e) => e.EMP_CODE));
       const byEmp = new Map();
       leaves.forEach((l) => { if (!byEmp.has(l.EMP_CODE)) byEmp.set(l.EMP_CODE, []); byEmp.get(l.EMP_CODE).push(l); });
+      const encByEmp = new Map();
+      (await encOf(emps.map((e) => e.EMP_CODE))).forEach((x) => {
+        if (!encByEmp.has(x.EMP_CODE)) encByEmp.set(x.EMP_CODE, []);
+        encByEmp.get(x.EMP_CODE).push(x);
+      });
       const yr = asOn.slice(0, 4);
       const rows = emps.map((e) => {
         const ls = byEmp.get(e.EMP_CODE) || [];
-        const b = leaveBalance(e, ls, asOn);
+        const b = leaveBalance(e, ls, asOn, encByEmp.get(e.EMP_CODE) || []);
         const yearOf = (pred) => r2(ls.filter((l) => l.FROM_DT.slice(0, 4) === yr && l.FROM_DT <= asOn && pred(l))
           .reduce((t, l) => t + Number(l.STATUS === "S" ? l.ACT_DAYS : l.DAYS), 0));
         const onLeave = ls.find((l) => l.STATUS === "A" && l.FROM_DT <= asOn);
@@ -614,7 +669,7 @@ module.exports = function (connection) {
         };
         if (withSal) {
           row.DAY_RATE = r2(Number(e.BASIC_SAL) * 12 / 365);
-          row.LEAVE_SAL = r2(row.DAY_RATE * Math.max(b.balance, 0));
+          row.LEAVE_SAL = r2(row.DAY_RATE * b.balance);             // negative balance = advance leave to recover
         }
         return row;
       });
