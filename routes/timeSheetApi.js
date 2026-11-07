@@ -80,6 +80,15 @@
 //     Stored in time_sheet_dtl.HRS_EDITED ('Y'); edited hours are not rounded to 5 minutes.
 //     Changing In / Out on the screen clears the flag (the row is calculated again).
 //     DB: ALTER TABLE time_sheet_dtl ADD COLUMN HRS_EDITED CHAR(1) NULL AFTER HOLIDAY_OT;
+// 07-Nov-2026: Attendance Register and Absent / Short Time Register (screens AttRegister, AbsentRegister)
+//   GET /tsht/reg-catg                      employee categories (emp_catg_mst) for the filter
+//   GET /tsht/register?month=YYYY-MM&catg=W&approved=Y
+//     every time sheet of the month (optionally one category, optionally Time / Job approved only),
+//     each recalculated exactly as when it is opened (loadStoredSheet), summed per day:
+//       mark  P present · A absent · WO weekly off · H holiday · OW worked on a weekly off / holiday
+//             L leave (paid) · UL unpaid leave · ? day with an error (punch missing etc.)
+//       late / short minutes, Normal / N.OT / H.OT (↪ rows count on their own date)
+//     plus month totals per employee. Both registers use this one route.
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
@@ -96,6 +105,9 @@ const path = require('path');
 
 // ---- adjust these to your schema if names differ --------------------
 const JOB_SQL = 'SELECT JOB_NO, PROJ_NAME FROM job_card ORDER BY JOB_NO DESC';
+// employee category: emp_mst column and master (registers)
+const EMP_CATG_COL = 'EMP_CATG';
+const CATG_SQL = 'SELECT CATG_CODE, CATG_NAME FROM emp_catg_mst ORDER BY CATG_CODE';
 const HOLIDAY_SQL = 'SELECT DATE_FORMAT(HOL_DATE, "%Y-%m-%d") AS D FROM holiday_mst WHERE HOL_DATE BETWEEN ? AND ?';
 const DEFAULT_SHIFT = 'GEN';
 const ATT_MODULE = 'TIMESHEET';
@@ -443,6 +455,72 @@ function applyHrsEdit(src, calc, sh, otEligible, isCont, onlyPair) {
   }
   // one pair on a working day: Short follows the edited Normal (Normal + Late + Short = standard day)
   if (!offDay && !isCont && onlyPair) calc.shortMins = Math.max(0, sh.std - n - (calc.lateMins || 0));
+}
+
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * One employee's month for the registers: a mark per day plus month totals.
+ * rows = computeSheet rows (continuation rows count on their own date; day "last + 1" only adds hours).
+ */
+function registerOf(rows, month) {
+  const sumOf = (list, k) => list.reduce((t, r) => t + (Number(r[k]) || 0), 0);
+  const tot = {
+    present: 0, absent: 0, weekOff: 0, holiday: 0, offWorked: 0, leave: 0, unpaidLeave: 0, toCheck: 0,
+    lateDays: 0, shortDays: 0, lateMins: 0, shortMins: 0,
+    normalHrs: sumOf(rows, 'normalHrs'), normalOt: sumOf(rows, 'normalOt'), holidayOt: sumOf(rows, 'holidayOt'),
+  };
+  const days = [];
+  for (let d = 1; d <= month.days; d++) {
+    const dayRows = rows.filter((r) => r.dayNo === d);
+    const regs = dayRows.filter((r) => r.contFlag !== 'C');
+    const first = regs[0] || {};
+    const last = regs[regs.length - 1] || {};
+    const punched = regs.some((r) => r.timeIn || r.timeOut);
+    const err = regs.find((r) => r.error);
+    const late = sumOf(regs, 'lateMins');
+    const short = sumOf(regs, 'shortMins');
+    const hot = sumOf(dayRows, 'holidayOt');
+    let mark;
+    if (err) mark = '?';
+    else if (first.dayType === 'L') mark = first.leavePay === 'U' ? 'UL' : 'L';
+    else if (first.dayType === 'A') mark = 'A';
+    // worked on an off day = a punch on the day itself (a ↪ row from the night before only adds hours)
+    else if (first.dayType === 'S' || first.dayType === 'H') mark = punched ? 'OW' : first.dayType === 'S' ? 'WO' : 'H';
+    else mark = punched ? 'P' : 'A';
+
+    if (mark === 'P') tot.present++;
+    else if (mark === 'A') tot.absent++;
+    else if (mark === 'WO') tot.weekOff++;
+    else if (mark === 'H') tot.holiday++;
+    else if (mark === 'OW') tot.offWorked++;
+    else if (mark === 'L') tot.leave++;
+    else if (mark === 'UL') tot.unpaidLeave++;
+    else tot.toCheck++;
+    if (late > 0) tot.lateDays++;
+    if (short > 0) tot.shortDays++;
+    tot.lateMins += late;
+    tot.shortMins += short;
+
+    const date = `${month.first.slice(0, 8)}${pad2(d)}`;
+    days.push({
+      dayNo: d,
+      date,
+      weekday: WEEKDAY_SHORT[new Date(`${date}T00:00:00Z`).getUTCDay()],
+      mark,
+      timeIn: first.timeIn || null,
+      timeOut: last.timeOut || null,
+      late,
+      short,
+      normalHrs: sumOf(dayRows, 'normalHrs'),
+      normalOt: sumOf(dayRows, 'normalOt'),
+      holidayOt: hot,
+      leaveName: first.dayType === 'L' ? first.leaveName || null : null,
+      leaveNo: first.leaveNo || null,
+      remarks: (err && err.error) || first.remarks || null,
+    });
+  }
+  return { days, tot };
 }
 
 module.exports = function timeSheetApi(connection) {
@@ -1026,6 +1104,65 @@ module.exports = function timeSheetApi(connection) {
       scheme,
     };
   }
+
+  // ---------- registers: Attendance Register / Absent & Short Time Register ----------
+  router.get('/tsht/reg-catg', async (req, res) => {
+    try {
+      const [rows] = await db.query(CATG_SQL);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      send(res, e);
+    }
+  });
+
+  router.get('/tsht/register', async (req, res) => {
+    try {
+      const month = parseMonth(`${String(req.query.month || '').slice(0, 7)}-01`);
+      if (!month) throw httpErr(400, 'Month must be YYYY-MM');
+      const catg = String(req.query.catg || '').trim();
+      const approvedOnly = req.query.approved === 'Y';
+      const where = ['h.TSHT_DATE = ?'];
+      const args = [month.first];
+      if (catg) {
+        where.push(`e.${EMP_CATG_COL} = ?`);
+        args.push(catg);
+      }
+      if (approvedOnly) where.push("h.STATUS IN ('T', 'A')");
+      const [hdrs] = await db.query(
+        `SELECT h.TSHT_NO, h.EMP_CODE, h.STATUS, e.EMP_NAME, e.${EMP_CATG_COL} AS CATG_CODE, c.CATG_NAME
+           FROM time_sheet_hdr h
+           JOIN emp_mst e ON e.EMP_CODE = h.EMP_CODE
+           LEFT JOIN emp_catg_mst c ON c.CATG_CODE = e.${EMP_CATG_COL}
+          WHERE ${where.join(' AND ')}
+          ORDER BY e.${EMP_CATG_COL}, h.EMP_CODE`,
+        args,
+      );
+      // each sheet recalculated as when it is opened — a few at a time
+      const out = [];
+      for (let i = 0; i < hdrs.length; i += 4) {
+        const part = await Promise.all(
+          hdrs.slice(i, i + 4).map(async (h) => {
+            const { calc } = await loadStoredSheet(h.TSHT_NO);
+            const { days, tot } = registerOf(calc.rows, month);
+            return {
+              tshtNo: h.TSHT_NO,
+              empCode: h.EMP_CODE,
+              empName: h.EMP_NAME,
+              catgCode: h.CATG_CODE || '',
+              catgName: h.CATG_NAME || '',
+              status: h.STATUS,
+              days,
+              tot,
+            };
+          }),
+        );
+        out.push(...part);
+      }
+      res.json({ ok: true, month: month.first, monthDays: month.days, rows: out });
+    } catch (e) {
+      send(res, e);
+    }
+  });
 
   router.post('/tsht/payslips', async (req, res) => {
     try {
