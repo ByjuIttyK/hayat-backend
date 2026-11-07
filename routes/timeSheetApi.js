@@ -52,6 +52,34 @@
 //   Applies to every sheet (time sheets start Sep 2026). TSHT_ROUND_FROM=yyyy-mm-01 in .env limits
 //   it to sheets from that month on. A sheet approved before rounding: revoke, Recalculate, Save and
 //   approve again, so its stored totals carry the rounded hours too.
+// 07-Nov-2026:
+//   - Continuation row (00:00 → out after a shift past midnight): minutes are classified by the row's
+//     OWN date — weekly off / holiday → H.OT, working day → N.OT (was: by the day the shift started).
+//   - Several In / Out pairs on one day: late is judged on the day's first regular row only, short
+//     on its last regular row only. A second pair (e.g. back at 23:45 for overtime) is no longer
+//     "late" against the 08:00 shift start.
+//   - Late / short no longer count break time: short = time from Out to shift end LESS the breaks in
+//     it (lunch / tea not worked are not "short"), late likewise. So Normal + Late + Short = the
+//     standard day (8:00) — e.g. 08:00–13:00 with lunch 12:30–13:30: Normal 4:15, Short 3:45
+//     (was 4:30, so 45 minutes too much was deducted).
+//   - Half day (later the same day): an employee who leaves before the end of lunch (shift_mst
+//     LUNCH_FROM / LUNCH_TO, now 13:00–14:00) is not cut the morning tea break — 08:00–13:00 = Normal
+//     5:00; staying into lunch adds nothing (lunch is unpaid), so 08:00–13:30 is also 5:00.
+//     On a day with one In / Out pair, Short = standard day − Normal − Late, so the hours still add
+//     up to 8:00 (08:00–13:00 → Short 3:00).
+//   - Hours edited by hand: Normal / N.OT / H.OT of a row can be typed on the screen (Draft only).
+//     The row comes with hrsEdited = true and its own normalHrs / normalOt / holidayOt (minutes);
+//     computeSheet keeps them instead of the calculated figures, after validation (applyHrsEdit):
+//       · In and Out must be punched; hours ≥ 0; Normal ≤ standard day (STD_MINS)
+//       · weekly off / holiday / ↪ continuation row: no Normal, no N.OT (H.OT only on an off day)
+//       · working day: no H.OT
+//       · no OT for an employee who is not OT eligible
+//       · Normal + N.OT + H.OT ≤ the time between In and Out
+//     A failing row gets row.error, so Save / Time approval are refused until it is corrected.
+//     On a working day with one In / Out pair, Short follows the edited Normal: 8:00 − Normal − Late.
+//     Stored in time_sheet_dtl.HRS_EDITED ('Y'); edited hours are not rounded to 5 minutes.
+//     Changing In / Out on the screen clears the flag (the row is calculated again).
+//     DB: ALTER TABLE time_sheet_dtl ADD COLUMN HRS_EDITED CHAR(1) NULL AFTER HOLIDAY_OT;
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
@@ -169,6 +197,8 @@ function prepShift(r) {
     round: Math.max(1, Number(r.OT_ROUND_MINS) || 1),
     lateFromMrg: r.LATE_FROM_MRG === 'Y',
     weekOff: Number(r.WEEK_OFF_DAY) || 1,
+    lunchFrom: toMin(r.LUNCH_FROM),
+    lunchTo: toMin(r.LUNCH_TO), // leaving by the end of lunch = half day: morning tea not cut
     breaks,
   };
 }
@@ -181,7 +211,7 @@ const breakMins = (from, to, sh) => sh.breaks.reduce((t, [f, e]) => t + overlap(
  *  - Breaks are always deducted from regular time; from OT only if OT_BREAK_DEDUCT = 'Y'.
  *  - OT is rounded down to OT_ROUND_MINS.
  */
-function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride) {
+function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride, judge = { late: true, short: true }) {
   const dow = new Date(`${date}T00:00:00Z`).getUTCDay() + 1; // 1 = Sunday (MySQL DAYOFWEEK)
   const isWeekOff = dow === sh.weekOff;
   const isHol = isWeekOff || holidays.has(date);
@@ -221,7 +251,13 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride
 
   const rs = Math.max(effIn, sh.sin);
   const re = Math.min(effOut, sh.sout);
-  if (re > rs) res.normalHrs = Math.min(sh.std, Math.max(0, re - rs - breakMins(rs, re, sh)));
+  if (re > rs) {
+    // half day — left before the end of lunch: the morning tea break is not cut; only the part of
+    // the lunch hour he stayed through (unpaid) comes off, so 13:00 and 13:30 both give 5:00
+    const halfDay = sh.lunchFrom !== null && sh.lunchTo !== null && effOut <= sh.lunchTo;
+    const brk = halfDay ? overlap(rs, re, sh.lunchFrom, sh.lunchTo) : breakMins(rs, re, sh);
+    res.normalHrs = Math.min(sh.std, Math.max(0, re - rs - brk));
+  }
 
   let ot = 0;
   if (effIn < sh.sin) {
@@ -234,8 +270,24 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride
   }
   res.normalOt = otEligible ? roundDown(Math.max(0, ot)) : 0;
 
-  if (effIn > sh.sin) res.lateMins = Math.max(0, effIn - (sh.lateFromMrg ? sh.sin + sh.inLate : sh.sin));
-  if (effOut < sh.sout) res.shortMins = Math.max(0, (sh.lateFromMrg ? sh.sout - sh.outEarly : sh.sout) - effOut);
+  // late / short: only on the day's first (late) / last (short) In-Out pair; breaks inside the
+  // missed time are not counted, so Normal + Late + Short adds up to the standard day
+  if (judge.late && effIn > sh.sin) {
+    const from = sh.lateFromMrg ? sh.sin + sh.inLate : sh.sin;
+    res.lateMins = Math.max(0, effIn - from - breakMins(from, effIn, sh));
+  }
+  if (judge.short && effOut < sh.sout) {
+    if (judge.late) {
+      // one In / Out pair: short = standard day − normal − late (as worked from the shift start),
+      // so Normal + Late + Short = 8:00 even when a break was not cut (half day)
+      const lateRaw = effIn > sh.sin ? Math.max(0, effIn - sh.sin - breakMins(sh.sin, effIn, sh)) : 0;
+      res.shortMins = Math.max(0, sh.std - res.normalHrs - lateRaw);
+    } else {
+      // last of several pairs: time from Out to shift end, breaks in it not counted
+      const to = sh.lateFromMrg ? sh.sout - sh.outEarly : sh.sout;
+      res.shortMins = Math.max(0, to - effOut - breakMins(effOut, to, sh));
+    }
+  }
   return res;
 }
 
@@ -318,13 +370,14 @@ function stampsToDays(aiDays, monthDays) {
 
 /**
  * Continuation row (00:00 → out) of a shift that started the day before.
- * All minutes are OT, classified by the START day: week off / holiday → H.OT, else N.OT.
- * Never late, short or absent. dayType shows the row's own date (W / S / H).
+ * All minutes are OT, classified by the row's OWN date (07-Nov-2026): weekly off / holiday → H.OT,
+ * working day → N.OT. Never late, short or absent. dayType shows the row's own date (W / S / H).
+ * prevDate is kept in the signature for callers; it no longer decides N.OT / H.OT.
  */
 function calcCont(prevDate, ownDate, timeIn, timeOut, sh, holidays, otEligible) {
   const dowOf = (d) => new Date(`${d}T00:00:00Z`).getUTCDay() + 1;
-  const prevHol = dowOf(prevDate) === sh.weekOff || holidays.has(prevDate);
   const ownWeekOff = dowOf(ownDate) === sh.weekOff;
+  const ownHol = ownWeekOff || holidays.has(ownDate);
   const res = {
     dayType: ownWeekOff ? 'S' : holidays.has(ownDate) ? 'H' : 'W',
     effIn: null, effOut: null, normalHrs: 0, normalOt: 0, holidayOt: 0, lateMins: 0, shortMins: 0, error: null,
@@ -344,9 +397,52 @@ function calcCont(prevDate, ownDate, timeIn, timeOut, sh, holidays, otEligible) 
   const mins = otEligible ? Math.floor(Math.max(0, w) / sh.round) * sh.round : 0;
   res.effIn = i;
   res.effOut = o;
-  if (prevHol) res.holidayOt = mins;
+  if (ownHol) res.holidayOt = mins; // the hours fall on a weekly off / holiday
   else res.normalOt = mins;
   return res;
+}
+
+/** Edited minutes from the screen: a whole number ≥ 0, else null. */
+const editedMins = (v) => {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+};
+
+/**
+ * Hours typed on the screen for one row (src.hrsEdited): validated, then they replace the calculated
+ * Normal / N.OT / H.OT in `calc`. A broken rule sets calc.error (Save / approval are refused).
+ *   isCont    ↪ continuation row (00:00 → out): OT only
+ *   onlyPair  the day has one In / Out pair → Short follows the edited Normal
+ */
+function applyHrsEdit(src, calc, sh, otEligible, isCont, onlyPair) {
+  calc.hrsEdited = true;
+  const n = editedMins(src.normalHrs);
+  const not = editedMins(src.normalOt);
+  const hot = editedMins(src.holidayOt);
+  if (n === null || not === null || hot === null) {
+    calc.error = 'Edited hours: enter them as H:MM';
+    return;
+  }
+  calc.normalHrs = n;
+  calc.normalOt = not;
+  calc.holidayOt = hot;
+  const offDay = calc.dayType === 'S' || calc.dayType === 'H';
+  const span = calc.effIn !== null && calc.effOut !== null ? calc.effOut - calc.effIn : null;
+  let err = null;
+  if (span === null || calc.error) err = calc.error || 'Edited hours: punch In and Out first';
+  else if (n > sh.std) err = `Edited hours: Normal is more than ${hhmm(sh.std)}`;
+  else if (n && (offDay || isCont)) err = isCont ? 'Edited hours: no Normal on a continuation row' : 'Edited hours: no Normal on a weekly off / holiday';
+  else if (not && offDay) err = 'Edited hours: use H.OT on a weekly off / holiday';
+  else if (hot && !offDay) err = 'Edited hours: H.OT only on a weekly off / holiday';
+  else if ((not || hot) && !otEligible) err = 'Edited hours: employee is not OT eligible';
+  else if (n + not + hot > span) err = `Edited hours: more than the In–Out time (${hhmm(span)})`;
+  if (err) {
+    calc.error = err;
+    return;
+  }
+  // one pair on a working day: Short follows the edited Normal (Normal + Late + Short = standard day)
+  if (!offDay && !isCont && onlyPair) calc.shortMins = Math.max(0, sh.std - n - (calc.lateMins || 0));
 }
 
 module.exports = function timeSheetApi(connection) {
@@ -434,6 +530,8 @@ module.exports = function timeSheetApi(connection) {
         const prevSrc = prevRows[prevRows.length - 1] || {};
         const shiftCode = c.shiftCode || prevSrc.shiftCode || empShift;
         const calc = calcCont(dateOf(d - 1), date, c.timeIn, c.timeOut, shiftOf(shiftCode), holidays, otEligible);
+        calc.hrsEdited = false;
+        if (c.hrsEdited) applyHrsEdit(c, calc, shiftOf(shiftCode), otEligible, true, false);
         out.push({
           dayNo: d,
           seqNo: ++seq,
@@ -460,7 +558,13 @@ module.exports = function timeSheetApi(connection) {
         const isLastReg = idx === regs.length - 1;
         // runs on past midnight: 23:59 counts as 24:00 so no minute is lost at the split
         const outOverride = isLastReg && nextHasCont && toMin(src.timeOut) === 23 * 60 + 59 ? 24 * 60 : undefined;
-        const calc = calcDay(date, src.timeIn, src.timeOut, shiftOf(shiftCode), holidays, otEligible, outOverride);
+        // late on the first pair of the day only, short on the last pair only
+        const calc = calcDay(date, src.timeIn, src.timeOut, shiftOf(shiftCode), holidays, otEligible, outOverride, {
+          late: idx === 0,
+          short: isLastReg,
+        });
+        calc.hrsEdited = false;
+        if (src.hrsEdited) applyHrsEdit(src, calc, shiftOf(shiftCode), otEligible, false, regs.length === 1);
         if (leave && !punchedOnLeave) calc.dayType = 'L';
         Object.assign(calc, {
           leaveNo: leave ? leave.leaveNo : null,
@@ -486,6 +590,7 @@ module.exports = function timeSheetApi(connection) {
     // hours rounded to 5 minutes (sheets from ROUND_FROM on)
     if (month.first >= ROUND_FROM) {
       for (const r of out) {
+        if (r.hrsEdited) continue; // hours typed by hand stay as entered
         r.normalHrs = round5(r.normalHrs);
         r.normalOt = round5(r.normalOt);
         r.holidayOt = round5(r.holidayOt);
@@ -502,6 +607,9 @@ module.exports = function timeSheetApi(connection) {
   const dtlToRow = (r) => ({
     dayNo: r.DAY_NO, seqNo: r.SEQ_NO, contFlag: r.CONT_FLAG, timeIn: r.TIME_IN, timeOut: r.TIME_OUT,
     shiftCode: r.SHIFT_CODE, jobNo: r.JOB_NO, remarks: r.REMARKS,
+    // hours typed by hand are kept (others are recalculated from In / Out)
+    hrsEdited: r.HRS_EDITED === 'Y',
+    normalHrs: r.NORMAL_HRS, normalOt: r.NORMAL_OT, holidayOt: r.HOLIDAY_OT,
   });
 
   function httpErr(status, message) {
@@ -607,7 +715,7 @@ module.exports = function timeSheetApi(connection) {
       const [dtl] = await db.query(
         `SELECT DAY_NO, SEQ_NO, CONT_FLAG, DATE_FORMAT(ATT_DATE, '%Y-%m-%d') AS ATT_DATE,
                 TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
-                SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, REMARKS
+                SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, HRS_EDITED, REMARKS
            FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO, SEQ_NO`,
         [no],
       );
@@ -655,7 +763,8 @@ module.exports = function timeSheetApi(connection) {
     if (!h.length) throw httpErr(404, `Time sheet ${no} not found`);
     const [dtl] = await conn.query(
       `SELECT DAY_NO, SEQ_NO, CONT_FLAG, TIME_FORMAT(TIME_IN, '%H:%i') AS TIME_IN, TIME_FORMAT(TIME_OUT, '%H:%i') AS TIME_OUT,
-              SHIFT_CODE, JOB_NO, REMARKS FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO, SEQ_NO`,
+              SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, HRS_EDITED, REMARKS
+         FROM time_sheet_dtl WHERE TSHT_NO = ? ORDER BY DAY_NO, SEQ_NO`,
       [no],
     );
     const calc = await computeSheet(
@@ -761,11 +870,11 @@ module.exports = function timeSheetApi(connection) {
       for (const r of calc.rows) {
         await conn.execute(
           `INSERT INTO time_sheet_dtl
-             (TSHT_NO, ATT_DATE, DAY_NO, SEQ_NO, CONT_FLAG, TIME_IN, TIME_OUT, SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, REMARKS)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (TSHT_NO, ATT_DATE, DAY_NO, SEQ_NO, CONT_FLAG, TIME_IN, TIME_OUT, SHIFT_CODE, JOB_NO, NORMAL_HRS, NORMAL_OT, HOLIDAY_OT, HRS_EDITED, REMARKS)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             no, r.attDate, r.dayNo, r.seqNo, r.contFlag, toTime(toMin(r.timeIn)), toTime(toMin(r.timeOut)),
-            r.shiftCode, r.jobNo, r.normalHrs, r.normalOt, r.holidayOt, r.remarks,
+            r.shiftCode, r.jobNo, r.normalHrs, r.normalOt, r.holidayOt, r.hrsEdited ? 'Y' : null, r.remarks,
           ],
         );
       }
