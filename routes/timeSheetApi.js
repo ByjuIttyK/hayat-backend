@@ -89,6 +89,9 @@
 //             L leave (paid) · UL unpaid leave · ? day with an error (punch missing etc.)
 //       late / short minutes, Normal / N.OT / H.OT (↪ rows count on their own date)
 //     plus month totals per employee. Both registers use this one route.
+// 07-Nov-2026: leave pay from leave_type_mst.PAY_FLAG, read in tsLeaveDays.js (no hard-coded PAY_TYPE
+//     mapping): PAY_FLAG N → U (unpaid, deducted) · Y → A when IS_ANNUAL = 'Y', else F (paid).
+//     leave_pay_type_mst and the applyLeavePayFlags patch here are no longer used.
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
@@ -647,6 +650,7 @@ module.exports = function timeSheetApi(connection) {
         Object.assign(calc, {
           leaveNo: leave ? leave.leaveNo : null,
           leaveName: leave ? leave.leaveName : null,
+          leaveType: leave ? leave.leaveType || null : null,
           leavePay: leave && !punchedOnLeave ? leave.leavePay : null,
           leaveConflict: punchedOnLeave,
         });

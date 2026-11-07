@@ -9,15 +9,15 @@
 //   Applied (D), Rejected (R) and Cancelled (C) leaves are ignored.
 // Leave is in calendar days, so Sundays and holidays inside the leave are leave days too.
 //
-// Pay per leave type (leave_type_mst)
-//   IS_ANNUAL = 'Y'  → 'A'  annual leave: off the month's salary, paid by Leave Salary
-//   PAY_TYPE  = 'F'  → 'F'  full pay: no deduction
-//   PAY_TYPE  = 'H'  → 'H'  half pay: half a day deducted
-//   any other        → 'U'  unpaid: a full day deducted
+// Pay per leave type (leave_type_mst.PAY_FLAG, 07-Nov-2026 — replaces the PAY_TYPE mapping)
+//   PAY_FLAG  = 'N'  → 'U'  unpaid: a full day deducted
+//   PAY_FLAG  = 'Y'  → 'A'  when IS_ANNUAL = 'Y': annual leave, off the month's salary, paid by Leave Salary
+//                    → 'F'  otherwise: paid leave, no deduction (Sick, Maternity …)
+//   PAY_FLAG empty → treated as 'Y' (paid). Add the column before using this file.
 // =====================================================================
 
 const LEAVE_SQL = `
-  SELECT a.LEAVE_NO, a.LEAVE_TYPE, t.LEAVE_NAME, t.IS_ANNUAL, t.PAY_TYPE, a.STATUS,
+  SELECT a.LEAVE_NO, a.LEAVE_TYPE, t.LEAVE_NAME, t.IS_ANNUAL, t.PAY_FLAG, a.STATUS,
          DATE_FORMAT(a.FROM_DT, '%Y-%m-%d') AS FROM_DT,
          DATE_FORMAT(CASE WHEN a.STATUS = 'S' AND a.RESUME_DT IS NOT NULL
                           THEN DATE_SUB(a.RESUME_DT, INTERVAL 1 DAY) ELSE a.TO_DT END, '%Y-%m-%d') AS END_DT
@@ -30,8 +30,11 @@ const LEAVE_SQL = `
                THEN DATE_SUB(a.RESUME_DT, INTERVAL 1 DAY) ELSE a.TO_DT END) >= ?
    ORDER BY a.FROM_DT`;
 
-/** 'A' annual · 'F' full pay · 'H' half pay · 'U' unpaid */
-const payOf = (r) => (r.IS_ANNUAL === 'Y' ? 'A' : r.PAY_TYPE === 'F' ? 'F' : r.PAY_TYPE === 'H' ? 'H' : 'U');
+/** 'A' annual · 'F' paid · 'U' unpaid — from leave_type_mst.PAY_FLAG (Y / N) */
+const payOf = (r) => {
+  if (String(r.PAY_FLAG || 'Y').trim().toUpperCase() === 'N') return 'U';
+  return String(r.IS_ANNUAL || '').trim().toUpperCase() === 'Y' ? 'A' : 'F';
+};
 
 const addDays = (ymd, n) => {
   const d = new Date(`${ymd}T00:00:00Z`);
