@@ -68,6 +68,7 @@ var server = app.listen(3001, '0.0.0.0', function () {
 });
 
 const connection = require('./db/connection');
+
 auditContext.patchPool(connection);
 app.use(auditContext.middleware);
 const authMiddleware = require("./middleware/authMiddleware");
@@ -438,29 +439,38 @@ ORDER BY a.JOB_NO DESC;
     res.json(rows);
   });
 });
-
 app.post("/api/jobcard-save", async (req, res) => {
   try {
     console.log("jobcard-save ==>", req.body);
 
     const { jobCard, jobPanel } = req.body;
-    console.log("save -1");
-    console.log("jobNo:", jobCard.jobNo);
-    console.log("Full jobCard:", JSON.stringify(jobCard, null, 2));
 
     if (!jobCard || !jobCard.jobNo) {
       return res.status(400).json({ message: "Invalid job card data format" });
     }
-    console.log('Save-2');
-    console.log("Job Card Data ==>", jobCard);
-    console.log('Save-3');
-    console.log('Job Card -Panels===>>', jobPanel);
+    const jobNo = jobCard.jobNo;
+
+    // currency: AED when blank; rate 1 for AED, else what the screen sent (NULL if none)
+    const currCode = String(jobCard.currCode || 'AED').trim().toUpperCase() || 'AED';
+    const hasRate = jobCard.convertRate !== undefined && jobCard.convertRate !== null && String(jobCard.convertRate).trim() !== '';
+    const convertRate = hasRate ? Number(jobCard.convertRate) : (currCode === 'AED' ? 1 : null);
+
+    // panels sent by the screen (rows without a Panel No are ignored)
+    const panels = ((jobPanel && jobPanel.panels) || []).filter((p) => String(p.srNo ?? '').trim() !== '');
+    const newSrNos = panels.map((p) => String(p.srNo).trim());
+    const dupSrNo = newSrNos.find((s, i) => newSrNos.indexOf(s) !== i);
+    if (dupSrNo) {
+      return res.status(400).json({ message: `Panel No ${dupSrNo} appears twice — each panel needs its own number. Nothing was saved.` });
+    }
 
     connection.getConnection((err, conn) => {
       if (err) {
         console.error("Error getting connection:", err);
         return res.status(500).json({ message: "Error getting connection" });
       }
+
+      const q = (sql, params) =>
+        new Promise((resolve, reject) => conn.query(sql, params, (e, r) => (e ? reject(e) : resolve(r))));
 
       conn.beginTransaction(async (err) => {
         if (err) {
@@ -470,6 +480,7 @@ app.post("/api/jobcard-save", async (req, res) => {
         }
 
         try {
+          // ---------- Step 1: Insert/Update job_card ----------
           const jobCardQuery = `
             INSERT INTO job_card (
               JOB_NO, START_DATE, CUST_CODE, LPO_NO, LPO_DATE,
@@ -502,8 +513,8 @@ app.post("/api/jobcard-save", async (req, res) => {
               CONTACT_PER       = VALUES(CONTACT_PER),
               CONTACT_NO        = VALUES(CONTACT_NO),
               ALLOTTED_MAT_COST = VALUES(ALLOTTED_MAT_COST),
-              JOB_APPROVED      = VALUES(JOB_APPROVED),
-              APPROVED_BY       = VALUES(APPROVED_BY),
+              JOB_APPROVED      = COALESCE(VALUES(JOB_APPROVED), JOB_APPROVED),
+              APPROVED_BY       = COALESCE(VALUES(APPROVED_BY), APPROVED_BY),
               COMMISSION_AMT    = VALUES(COMMISSION_AMT),
               CURR_CODE         = VALUES(CURR_CODE),
               FOR_AMOUNT        = VALUES(FOR_AMOUNT),
@@ -512,83 +523,81 @@ app.post("/api/jobcard-save", async (req, res) => {
               CONSULTANT        = VALUES(CONSULTANT);
           `;
 
-          // Step 1: Insert/Update job_card
-          await new Promise((resolve, reject) => {
-            conn.query(
-              jobCardQuery,
-              [
-                jobCard.jobNo,
-                toMySQLDate(jobCard.startDate),
-                jobCard.customerCode || null,
-                jobCard.lpoNo || null,
-                toMySQLDate(jobCard.lpoDate),
-                jobCard.contractAmountGross || null,
-                jobCard.engineerDesigner || null,
-                jobCard.duration || null,
-                jobCard.project || null,
-                toMySQLDate(jobCard.dateOfApproval) || null,
-                jobCard.sManCode || null,
-                jobCard.revisionNo || null,
-                jobCard.quotationRef || null,
-                jobCard.placeOfDelivery || null,
-                jobCard.meansOfTransport || null,
-                jobCard.meansOfPayment || null,
-                jobCard.contactPerson || null,
-                jobCard.contactNo || null,
-                jobCard.allottedMatCost || null,
-                jobCard.jobApproved || null,
-                jobCard.approvedBy || null,
-                jobCard.commissionAgreed || null,
-                jobCard.currCode || null,
-                jobCard.contractAmountGrossDHS || null,
-                jobCard.convertRate || null,
-                jobCard.vatPercent || null,
-                jobCard.consultant || null,
-              ],
-              (err, result) => {
-                if (err) return reject(err);
-               // console.log("JOB_CARD Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-
-          // Step 2: Delete and re-insert job_panels
-          const values = jobPanel.panels.map(row => [
-            jobPanel.jobNo, row.srNo, row.panelRef, row.qty, row.drawNo,
-            toMySQLDate(row.deliveryReq), row.remarks
+          await q(jobCardQuery, [
+            jobNo,
+            toMySQLDate(jobCard.startDate),
+            jobCard.customerCode || null,
+            jobCard.lpoNo || null,
+            toMySQLDate(jobCard.lpoDate),
+            jobCard.contractAmountGrossDHS || null,   // CONTRACT_AMT = Amount Gross (DHS)
+            jobCard.engineerDesigner || null,
+            jobCard.duration || null,
+            jobCard.project || null,
+            toMySQLDate(jobCard.dateOfApproval) || null,
+            jobCard.sManCode || null,
+            jobCard.revisionNo || null,
+            jobCard.quotationRef || null,
+            jobCard.placeOfDelivery || null,
+            jobCard.meansOfTransport || null,
+            jobCard.meansOfPayment || null,
+            jobCard.contactPerson || null,
+            jobCard.contactNo || null,
+            jobCard.allottedMatCost || null,
+            jobCard.jobApproved || null,
+            jobCard.approvedBy || null,
+            jobCard.commissionAgreed || null,
+            currCode,                                  // CURR_CODE
+            jobCard.contractAmountGross || null,       // FOR_AMOUNT = Cont.Amt. Frgn Curr
+            convertRate,                               // CONVERT_RATE
+            jobCard.vatPercent || null,
+            jobCard.consultant || null,
           ]);
 
-          console.log("Panel values to insert:", values);
+          // ---------- Step 2: job_panels — update / insert / delete only what changed ----------
+          const existingRows = await q(`SELECT SR_NO FROM job_panels WHERE JOB_NO = ?`, [jobNo]);
+          const existingSrNos = new Set(existingRows.map((r) => String(r.SR_NO).trim()));
 
-          await new Promise((resolve, reject) => {
-            conn.query(
-              `DELETE FROM job_panels WHERE JOB_NO = ?`,
-              [jobPanel.jobNo],
-              (err) => {
-                if (err) return reject(err);
+          // 2a. panels taken off the grid — delete one by one so a panel in use can be named
+          const removedSrNos = [...existingSrNos].filter((s) => !newSrNos.includes(s));
+          const blocked = [];
+          for (const srNo of removedSrNos) {
+            try {
+              await q(`DELETE FROM job_panels WHERE JOB_NO = ? AND SR_NO = ?`, [jobNo, srNo]);
+            } catch (e) {
+              if (e.code === 'ER_ROW_IS_REFERENCED_2' || e.errno === 1451) blocked.push(srNo);
+              else throw e;
+            }
+          }
+          if (blocked.length) {
+            const err409 = new Error('panel in use');
+            err409.status = 409;
+            err409.userMessage =
+              `Panel ${blocked.join(', ')} of job ${jobNo} cannot be removed — already used in purchases or other transactions. ` +
+              `Put the panel back (same Panel No) and save again. Nothing was saved.`;
+            throw err409;
+          }
 
-                if (!values || values.length === 0) {
-                  console.log("No panels to insert, skipping.");
-                  return resolve();
-                }
+          // 2b. existing panels updated in place (keeps links from purchases etc.), new ones inserted
+          for (const p of panels) {
+            const srNo = String(p.srNo).trim();
+            const vals = [p.panelRef ?? null, p.qty ?? null, p.drawNo ?? null, toMySQLDate(p.deliveryReq), p.remarks ?? null];
+            if (existingSrNos.has(srNo)) {
+              await q(
+                `UPDATE job_panels SET PANEL_REF = ?, QTY = ?, DRAW_NO = ?, DELIVERY_REQ = ?, REMARKS = ?
+                  WHERE JOB_NO = ? AND SR_NO = ?`,
+                [...vals, jobNo, srNo],
+              );
+            } else {
+              await q(
+                `INSERT INTO job_panels (JOB_NO, SR_NO, PANEL_REF, QTY, DRAW_NO, DELIVERY_REQ, REMARKS)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [jobNo, srNo, ...vals],
+              );
+            }
+          }
+          console.log(`job_panels ${jobNo}: ${panels.length} kept/added, ${removedSrNos.length} removed`);
 
-                const itemsQuery = `
-                  INSERT INTO job_panels (JOB_NO, SR_NO, PANEL_REF, QTY, DRAW_NO, DELIVERY_REQ, REMARKS)
-                  VALUES ?
-                `;
-                conn.query(itemsQuery, [values], (err, result) => {
-                  if (err) return reject(err);
-                  console.log("Job Panels Insert:", result);
-                  resolve(result);
-                });
-              }
-            );
-          });
-
-          console.log("*** passed Job_panels*****");
-
-          // Step 3: Commit — always reached regardless of panels
+          // ---------- Step 3: Commit ----------
           conn.commit((err) => {
             if (err) {
               console.error("Commit Error:", err);
@@ -606,7 +615,10 @@ app.post("/api/jobcard-save", async (req, res) => {
           console.error("Query Error:", queryErr);
           conn.rollback(() => {
             conn.release();
-            res.status(500).json({ message: "Query error", error: queryErr });
+            if (queryErr.userMessage) {
+              return res.status(queryErr.status || 400).json({ message: queryErr.userMessage });
+            }
+            res.status(500).json({ message: queryErr.sqlMessage || "Query error", error: queryErr });
           });
         }
       });
@@ -617,7 +629,6 @@ app.post("/api/jobcard-save", async (req, res) => {
     res.status(500).json({ message: "Server error", error: err });
   }
 });
-
 
 // ✅ Returns the next available JOB_NO (plain number, e.g. "1025") for
 // pre-filling a new Job Card in ADD mode. CAST(...AS UNSIGNED) guards
