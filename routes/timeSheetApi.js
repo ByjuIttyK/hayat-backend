@@ -92,6 +92,7 @@
 // 07-Nov-2026: leave pay from leave_type_mst.PAY_FLAG, read in tsLeaveDays.js (no hard-coded PAY_TYPE
 //     mapping): PAY_FLAG N → U (unpaid, deducted) · Y → A when IS_ANNUAL = 'Y', else F (paid).
 //     leave_pay_type_mst and the applyLeavePayFlags patch here are no longer used.
+// 07-Nov-2026: register days also carry leaveType and leavePay (Leave Register, LeaveRegister.tsx).
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
@@ -520,6 +521,9 @@ function registerOf(rows, month) {
       holidayOt: hot,
       leaveName: first.dayType === 'L' ? first.leaveName || null : null,
       leaveNo: first.leaveNo || null,
+      // Leave Register: leave type code and pay (A annual · F paid · H half · U unpaid)
+      leaveType: first.dayType === 'L' ? first.leaveType || null : null,
+      leavePay: first.dayType === 'L' ? first.leavePay || null : null,
       remarks: (err && err.error) || first.remarks || null,
     });
   }
