@@ -20,7 +20,12 @@ module.exports = function (connection) {
       "       c.AC_HEAD AS ACC_HEAD, " +
       "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, a.NARRATION1, a.NARRATION2, a.DB_CR, " +
       // contra flag lives on the voucher header (vouchers.CONTRA_FLG)
-      "       COALESCE(v.CONTRA_FLG, 'N') AS CONTRA_FLG " +
+      "       COALESCE(v.CONTRA_FLG, 'N') AS CONTRA_FLG ," +
+       " v.CREATED_BY," +
+        " DATE_FORMAT(v.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+        " v.LAST_EDITED_BY," +
+        " DATE_FORMAT(v.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
+ 
       "  FROM tran_acc a " +
       "  LEFT OUTER JOIN ac_list AS c ON c.AC_CODE = a.ACC_CODE " +
       "  LEFT OUTER JOIN vouchers AS v " +
