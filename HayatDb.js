@@ -4840,7 +4840,9 @@ app.get("/api/pinvlst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " a.PO_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE , a.NARRATION, " +
-    "  a.SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF" +
+    "  a.SRV_NO,b.SUP_NAME, a.INV_AMOUNT, a.VAT_PERC,  a.DISCOUNT,a.RND_OFF," +
+    " a.CREATED_BY,DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY,DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from purchase_hdr a, sup_mst b where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.PJV_NO DESC",
     [req.params.dys],
@@ -5430,7 +5432,9 @@ app.get("/api/prethdr/:vch", function (req, res) {
 app.get("/api/nstklst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.INV_NET_AMT, a.LPO_NO,a.DR_CODE,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
+    " b.SUP_NAME, a.INV_NET_AMT, a.LPO_NO,a.DR_CODE,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION ," +
+     " a.CREATED_BY,DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY,DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from purchase_hdr_ns a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
     " where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY   " +
     " ORDER BY a.PJV_NO DESC",
@@ -5454,7 +5458,9 @@ app.get("/api/nstklst/:dys", function (req, res) {
 app.get("/api/ngplst/:dys", function (req, res) {
   connection.query(
     "select a.PRCH_NO,DATE_FORMAT(a.PRCH_DATE,'%d/%m/%Y') PRCH_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.AMOUNT, a.LPO_NO,a.JOB_NO,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION " +
+    " b.SUP_NAME, a.AMOUNT, a.LPO_NO,a.JOB_NO,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION , " +
+    " a.CREATED_BY,DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY,DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from ngp_net a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
     " where  a.PRCH_DATE >= CURDATE() - INTERVAL ? DAY   " +
     " ORDER BY a.PRCH_NO DESC",
@@ -5562,7 +5568,7 @@ app.get("/api/dolist/:dys", function (req, res) {
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ,a.PROJECT_DETAIL," +
     " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE, a.CONTACT_PERSON ," +
-     " a.CREATED_BY," +
+    " a.CREATED_BY," +
     " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
     " a.LAST_EDITED_BY," +
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
@@ -5613,7 +5619,7 @@ app.get("/api/fabdohdr/:doNo", function (req, res) {
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
     "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, a.PROJECT_DETAIL," +
     "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.DO_APPROVED, " +
-       "FROM fab_do_hdr a " +
+    "FROM fab_do_hdr a " +
     "left outer join cus_mst b on a.cust_code = b.cust_code " +
     "WHERE a.INV_NO = ?",
     [req.params.doNo],   // <-- Missing comma before!

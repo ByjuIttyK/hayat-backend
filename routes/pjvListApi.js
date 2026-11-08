@@ -40,7 +40,11 @@ module.exports = function (connection) {
              DATE_FORMAT(h.INV_DATE, '%d/%m/%Y') AS INV_DATE,
              h.SUP_CODE,
              s.SUP_NAME,
-             h.INV_AMOUNT
+             h.INV_AMOUNT,
+             v.CREATED_BY,
+DATE_FORMAT(v.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON,
+v.LAST_EDITED_BY,
+DATE_FORMAT(v.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON
         FROM purchase_hdr h
         LEFT JOIN sup_mst s ON s.SUP_CODE = h.SUP_CODE
        ${where.length ? "WHERE " + where.join(" AND ") : ""}

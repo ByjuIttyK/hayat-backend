@@ -189,8 +189,8 @@ module.exports = function (connection) {
       res.status(500).json({ message: 'Server error', error: err.message });
     }
   });
-//
-// ── Proforma Invoice browser list (module_name = 'PFINV') ──
+  //
+  // ── Proforma Invoice browser list (module_name = 'PFINV') ──
   router.get('/pf-invlst', async (_req, res) => {
     try {
       const [rows] = await db.query(
@@ -204,7 +204,11 @@ module.exports = function (connection) {
                 h.LPO_NO,
                 h.CURR_ENCY,
                 h.BANK_CODE,
-                h.AMOUNT,h.CONTRACT_AMT_PERCENT
+                h.AMOUNT,h.CONTRACT_AMT_PERCENT,
+                h.CREATED_BY,
+                DATE_FORMAT(h.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON,
+                h.LAST_EDITED_BY,
+                DATE_FORMAT(h.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON
            FROM pfinv_net h
            LEFT JOIN cus_mst c ON c.CUST_CODE = h.CUST_CODE
           WHERE IFNULL(h.CANCELLED, 'N') <> 'Y'
@@ -350,8 +354,8 @@ module.exports = function (connection) {
       const r2 = (n) => Math.round(((Number(n) || 0) + Number.EPSILON) * 100) / 100;
       const items = rows.map((it) => {
         const amount = r2((Number(it.QTY) || 0) * (Number(it.RATE) || 0));
-        const disc   = r2(it.DISCOUNT);
-        const net    = r2(amount - disc);
+        const disc = r2(it.DISCOUNT);
+        const net = r2(amount - disc);
         const vatAmt = r2(net * ((Number(it.VAT_PERC) || 0) / 100));
         return {
           ...it,
@@ -369,7 +373,7 @@ module.exports = function (connection) {
       // rows saved before the totals columns were populated.
       const lineNet = r2(items.reduce((a, i) => a + i.NET_AMOUNT, 0));
       const lineVat = r2(items.reduce((a, i) => a + i.VAT_AMOUNT, 0));
-      header.AMOUNT     = header.AMOUNT     != null ? r2(header.AMOUNT)     : lineNet;
+      header.AMOUNT = header.AMOUNT != null ? r2(header.AMOUNT) : lineNet;
       header.VAT_AMOUNT = header.VAT_AMOUNT != null ? r2(header.VAT_AMOUNT) : lineVat;
       header.NET_AMOUNT = r2(header.AMOUNT + header.VAT_AMOUNT);
 
