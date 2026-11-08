@@ -5499,7 +5499,11 @@ app.get("/api/pretlst/:dys", function (req, res) {
   connection.query(
     "select a.VCHR_NO, DATE_FORMAT(a.VCHR_DATE,'%d/%m/%Y') VCHR_DATE," +
     "a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.INV_AMOUNT,  VAT_PERC,NARRATION ,DISCOUNT" +
+    " b.SUP_NAME, a.INV_AMOUNT,  VAT_PERC,NARRATION ,DISCOUNT," +
+    " a.CREATED_BY, " +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON, " +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from pret_hdr a left outer join sup_mst b ON  a.SUP_CODE = b.SUP_CODE " +
     " where  a.VCHR_DATE >= CURDATE() - INTERVAL ? DAY " +
     " ORDER BY a.VCHR_NO DESC",
