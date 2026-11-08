@@ -4006,7 +4006,11 @@ app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SRV_NO,DATE_FORMAT(a.SRV_DATE,'%d/%m/%Y') SRV_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT " +
+    " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT, " +
+    " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " LEFT OUTER JOIN  purchase_hdr c on (a.srv_no = c.srv_no) " +
     " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
@@ -4092,7 +4096,11 @@ app.get("/api/sivlst/:dys", function (req, res) {
 
   connection.query(
     "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y')  as SIV_DATE, a.COST_CODE," +
-    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO ,a.TOTAL_COST" +
+    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO ,a.TOTAL_COST," +
+    " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from siv_hdr a " +
     " left outer join job_card j on (a.job_no = j.job_no) " +
     " left outer join cus_mst b  ON (j.CUST_CODE = b.CUST_CODE) " +
@@ -5433,7 +5441,7 @@ app.get("/api/nstklst/:dys", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.INV_NET_AMT, a.LPO_NO,a.DR_CODE,a.INV_NO,DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE,a.NARRATION ," +
-     " a.CREATED_BY,DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.CREATED_BY,DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
     " a.LAST_EDITED_BY,DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from purchase_hdr_ns a left outer join sup_mst b on b.SUP_CODE = a.SUP_CODE  " +
     " where  a.PJV_DATE >= CURDATE() - INTERVAL ? DAY   " +
