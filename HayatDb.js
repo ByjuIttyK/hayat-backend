@@ -3905,7 +3905,11 @@ app.get("/api/joblistQuote/:jobNo", function (req, res) {
 app.get("/api/fpolst/:dys", function (req, res) {
   connection.query(
     "select DISTINCT a.FPO_NO,DATE_FORMAT(a.FPO_DATE,'%d/%m/%Y') FPO_DATE, a.SUP_CODE," +
-    " b.SUP_NAME, a.AMOUNT, a.YR_REF_NO, a.PAY_TERMS,a.CANCELLED, a.REQ_NO, a.PREPARED_BY,a.FPO_NOTES" +
+    " b.SUP_NAME, a.AMOUNT, a.YR_REF_NO, a.PAY_TERMS,a.CANCELLED, a.REQ_NO, a.PREPARED_BY,a.FPO_NOTES, " +
+    "a.CREATED_BY, " +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON, " +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from fpo_net a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
     "  WHERE  a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
 
