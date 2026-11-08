@@ -93,10 +93,34 @@
 //     mapping): PAY_FLAG N → U (unpaid, deducted) · Y → A when IS_ANNUAL = 'Y', else F (paid).
 //     leave_pay_type_mst and the applyLeavePayFlags patch here are no longer used.
 // 07-Nov-2026: register days also carry leaveType and leavePay (Leave Register, LeaveRegister.tsx).
+// 08-Nov-2026: salary snapshot on time_sheet_hdr — a month's pay is frozen on its own sheet, so a
+//   payslip of an old month never picks up a later increment from payroll_mst / salary revisions.
+//   SNAP_COLS (BASIC_SAL, HOURLY_RATE, DAYS_IN_MONTH, DAY_RATE, RATE_EFF_DATE) saved in Draft from
+//   req.body.totals beside the wages; SAL_SCHEME was already stored. The basic the screen used is
+//   checked against the basic in force for the month (monthPay): a mismatch is refused (409) so a
+//   salary revision entered meanwhile cannot slip into an approved sheet with stale figures.
+//   /tsht/sheet returns the snapshot in hdr; /tsht/payslips uses the stored BASIC_SAL.
+//   tsht_allow / tsht_ded.SRC_FLAG: 'M' = line from the employee master, 'U' = added / changed on the sheet.
+//   Revoke of the time approval is refused once the month's Salary JV has posted the sheet (JV_POSTED_SQL).
+//   DB:
+//     ALTER TABLE time_sheet_hdr
+//       ADD COLUMN BASIC_SAL DECIMAL(12,3) NULL, ADD COLUMN HOURLY_RATE DECIMAL(10,2) NULL,
+//       ADD COLUMN DAYS_IN_MONTH TINYINT NULL, ADD COLUMN DAY_RATE DECIMAL(10,2) NULL,
+//       ADD COLUMN RATE_EFF_DATE DATE NULL;
+//     ALTER TABLE tsht_allow ADD COLUMN SRC_FLAG CHAR(1) NOT NULL DEFAULT 'M';
+//     ALTER TABLE tsht_ded   ADD COLUMN SRC_FLAG CHAR(1) NOT NULL DEFAULT 'M';
+// 08-Nov-2026: payroll month close (payrollPeriod.js) — a month whose payroll is closed refuses Save,
+//   Time approval, revoke to Draft, delete and card images; a month whose job allocation is closed
+//   refuses Job approval, revoke of the Job approval and Job No changes (423).
 // =====================================================================
 const express = require('express');
 const { loadLeaveDays } = require('./tsLeaveDays');
 const { loadScheme, resolveScheme } = require('./salSchemeApi');
+const { assertPayrollOpen, assertJobAllocOpen } = require('./payrollPeriod');
+/** query function for the payroll-period checks, on a mysql2 promise connection / pool */
+const runOn = (c) => (sql, params) => c.query(sql, params).then(([rows]) => rows);
+/** 1st of the month of a time sheet no. (yyyy-mm-EMP) */
+const monthOfNo = (no) => `${String(no).slice(0, 7)}-01`;
 const fs = require('fs');
 // basic in force for a month (salary revisions); falls back to payroll_mst.BASIC_SAL if not installed
 let payAsOf = null;
@@ -153,6 +177,12 @@ const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SE
 const HRS_COLS = ['TOT_NORMAL_HRS', 'TOT_NOT_HRS', 'TOT_HOT_HRS'];
 const WAGE_COLS = ['NORMAL_WAGES', 'NOT_WAGES', 'HOT_WAGES', 'TOTAL_SALARY'];
 const TOT_COLS = [...HRS_COLS, ...WAGE_COLS];
+// salary snapshot — the pay the month was calculated with (SAL_SCHEME is stored separately)
+const SNAP_COLS = ['BASIC_SAL', 'HOURLY_RATE', 'DAYS_IN_MONTH', 'DAY_RATE', 'RATE_EFF_DATE'];
+/** Salary JV posted for this sheet? (tran_acc tran type 15, Narration 2 = TSHT_NO). Adjust to your schema. */
+const JV_POSTED_SQL = 'SELECT 1 FROM tran_acc WHERE TRAN_TYPE = 15 AND NARRATION2 = ? LIMIT 1';
+const srcFlag = (v) => (v === 'U' ? 'U' : 'M');
+const num = (v, dec) => (v === null || v === undefined || v === '' || isNaN(Number(v)) ? null : Math.round(Number(v) * 10 ** dec) / 10 ** dec);
 /** minutes -> "H:MM" (hours not limited to 24), e.g. 10590 -> "176:30" */
 const totHrsMin = (mins) => `${Math.floor((Number(mins) || 0) / 60)}:${String((Number(mins) || 0) % 60).padStart(2, '0')}`;
 // ---------------------------------------------------------------------
@@ -562,6 +592,22 @@ module.exports = function timeSheetApi(connection) {
     return rows[0] || null;
   }
 
+  /** Basic in force for the month (salary revisions), else payroll_mst.BASIC_SAL. */
+  async function monthPay(emp, monthFirst, conn = db) {
+    let basic = Number(emp.BASIC_SAL) || 0;
+    let effDate = null;
+    if (payAsOf) {
+      try {
+        const p = await payAsOf((c, sql, params) => c.query(sql, params).then(([rows]) => rows), conn, emp.EMP_CODE, monthFirst);
+        basic = Number(p.basic);
+        effDate = p.effDate || p.EFF_DATE || null;
+      } catch (e) {
+        console.warn('[tsht] month basic not read, using payroll_mst:', e.code || e.message);
+      }
+    }
+    return { basic, effDate };
+  }
+
   /**
    * Builds one full month of computed rows from the screen's rows.
    * Rows are matched by day no.; a day may have a continuation row (contFlag 'C', listed first)
@@ -791,7 +837,8 @@ module.exports = function timeSheetApi(connection) {
       const no = req.params.no;
       const [h] = await db.query(
         `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, REMARKS, STATUS,
-                CREATED_BY, EDITED_BY, TIME_APPR_BY, APPROVED_BY, SAL_SCHEME
+                CREATED_BY, EDITED_BY, TIME_APPR_BY, APPROVED_BY, SAL_SCHEME,
+                BASIC_SAL, HOURLY_RATE, DAYS_IN_MONTH, DAY_RATE, DATE_FORMAT(RATE_EFF_DATE, '%Y-%m-%d') AS RATE_EFF_DATE
            FROM time_sheet_hdr WHERE TSHT_NO = ?`,
         [no],
       );
@@ -806,13 +853,13 @@ module.exports = function timeSheetApi(connection) {
         [no],
       );
       const [allow] = await db.query(
-        `SELECT a.ALLOW_CODE AS CODE, m.ALLOW_DESC AS DESCR, m.ALLOW_TYPE AS TYPE, a.AMOUNT, a.REMARKS
+        `SELECT a.ALLOW_CODE AS CODE, m.ALLOW_DESC AS DESCR, m.ALLOW_TYPE AS TYPE, a.AMOUNT, a.REMARKS, a.SRC_FLAG
            FROM tsht_allow a LEFT JOIN allow_mst m ON m.ALLOW_CODE = a.ALLOW_CODE
           WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
         [no],
       );
       const [ded] = await db.query(
-        `SELECT a.DED_CODE AS CODE, m.DED_DESC AS DESCR, m.DED_TYPE AS TYPE, a.AMOUNT, a.REMARKS
+        `SELECT a.DED_CODE AS CODE, m.DED_DESC AS DESCR, m.DED_TYPE AS TYPE, a.AMOUNT, a.REMARKS, a.SRC_FLAG
            FROM tsht_ded a LEFT JOIN ded_mst m ON m.DED_CODE = a.DED_CODE
           WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
         [no],
@@ -886,6 +933,8 @@ module.exports = function timeSheetApi(connection) {
       if (mode !== 'ADD' && !ex.length) throw httpErr(404, `Time sheet ${no} not found`);
       const status = ex.length ? ex[0].STATUS : 'D';
       if (status === 'A') throw httpErr(423, `Time sheet ${no} is job-approved and locked`);
+      if (status === 'T') await assertJobAllocOpen(runOn(conn), month.first, 'Changing Job No');
+      else await assertPayrollOpen(runOn(conn), month.first, 'Saving this time sheet');
 
       // ---- Time approved: Job No only ----
       if (status === 'T') {
@@ -936,19 +985,33 @@ module.exports = function timeSheetApi(connection) {
         ...WAGE_COLS.map((c) => Math.round((Number(wages[c]) || 0) * 100) / 100),
       ];
 
+      // salary snapshot: the basic must be the one in force for the month — the wages were worked out with it
+      const pay = await monthPay(calc.emp, month.first, conn);
+      const sentBasic = num(wages.BASIC_SAL, 3);
+      if (sentBasic !== null && sentBasic !== num(pay.basic, 3)) {
+        throw httpErr(409, `The basic for ${month.first.slice(5, 7)}/${month.first.slice(0, 4)} is now ${num(pay.basic, 3)} (screen used ${sentBasic}) — a salary revision changed it. Press Recalculate / reopen the sheet, check the salary and save again.`);
+      }
+      const snapVals = [
+        num(pay.basic, 3),
+        num(wages.HOURLY_RATE, 2) ?? num((pay.basic * 12) / 365 / 8, 2),
+        month.days,
+        num(wages.DAY_RATE, 2),
+        wages.RATE_EFF_DATE || pay.effDate || null,
+      ];
+
       if (mode === 'ADD') {
         await conn.execute(
           `INSERT INTO time_sheet_hdr
-             (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, STATUS, CREATED_BY, SAL_SCHEME, ${TOT_COLS.join(', ')})
-           VALUES (?, ?, ?, ?, 'D', ?, ?, ${TOT_COLS.map(() => '?').join(', ')})`,
-          [no, month.first, calc.emp.EMP_CODE, remarks || null, user, calc.scheme.code, ...totVals],
+             (TSHT_NO, TSHT_DATE, EMP_CODE, REMARKS, STATUS, CREATED_BY, SAL_SCHEME, ${TOT_COLS.join(', ')}, ${SNAP_COLS.join(', ')})
+           VALUES (?, ?, ?, ?, 'D', ?, ?, ${[...TOT_COLS, ...SNAP_COLS].map(() => '?').join(', ')})`,
+          [no, month.first, calc.emp.EMP_CODE, remarks || null, user, calc.scheme.code, ...totVals, ...snapVals],
         );
       } else {
         await conn.execute(
           `UPDATE time_sheet_hdr
-              SET REMARKS = ?, EDITED_BY = ?, EDITED_DT = NOW(), SAL_SCHEME = ?, ${TOT_COLS.map((c) => `${c} = ?`).join(', ')}
+              SET REMARKS = ?, EDITED_BY = ?, EDITED_DT = NOW(), SAL_SCHEME = ?, ${[...TOT_COLS, ...SNAP_COLS].map((c) => `${c} = ?`).join(', ')}
             WHERE TSHT_NO = ?`,
-          [remarks || null, user, calc.scheme.code, ...totVals, no],
+          [remarks || null, user, calc.scheme.code, ...totVals, ...snapVals, no],
         );
       }
 
@@ -968,15 +1031,15 @@ module.exports = function timeSheetApi(connection) {
       await conn.execute('DELETE FROM tsht_allow WHERE TSHT_NO = ?', [no]);
       for (const a of allow) {
         await conn.execute(
-          'INSERT INTO tsht_allow (TSHT_NO, TSHT_DATE, EMP_CODE, ALLOW_CODE, AMOUNT, REMARKS, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, user],
+          'INSERT INTO tsht_allow (TSHT_NO, TSHT_DATE, EMP_CODE, ALLOW_CODE, AMOUNT, REMARKS, SRC_FLAG, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, srcFlag(a.src), user],
         );
       }
       await conn.execute('DELETE FROM tsht_ded WHERE TSHT_NO = ?', [no]);
       for (const a of ded) {
         await conn.execute(
-          'INSERT INTO tsht_ded (TSHT_NO, TSHT_DATE, EMP_CODE, DED_CODE, AMOUNT, REMARKS, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, user],
+          'INSERT INTO tsht_ded (TSHT_NO, TSHT_DATE, EMP_CODE, DED_CODE, AMOUNT, REMARKS, SRC_FLAG, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, srcFlag(a.src), user],
         );
       }
 
@@ -1001,6 +1064,14 @@ module.exports = function timeSheetApi(connection) {
       await conn.beginTransaction();
       const { hdr, calc } = await loadStoredSheet(no, conn, true);
       if (hdr.STATUS !== 'D') throw httpErr(409, `Time sheet ${no} is already time-approved`);
+      await assertPayrollOpen(runOn(conn), hdr.TSHT_DATE, 'Time approval');
+      // the stored pay must still be the pay in force for the month (no salary revision since the last save)
+      const [snap] = await conn.query('SELECT BASIC_SAL FROM time_sheet_hdr WHERE TSHT_NO = ?', [no]);
+      const pay = await monthPay(calc.emp, hdr.TSHT_DATE, conn);
+      if (snap[0].BASIC_SAL === null) throw httpErr(409, `Time sheet ${no} has no salary stored — save it again, then approve`);
+      if (num(snap[0].BASIC_SAL, 3) !== num(pay.basic, 3)) {
+        throw httpErr(409, `The basic for this month is now ${num(pay.basic, 3)} but the sheet was saved with ${num(snap[0].BASIC_SAL, 3)} — recalculate, check the salary and save before approving`);
+      }
       const bad = calc.rows.find((r) => r.error);
       if (bad) throw httpErr(400, `${dayLabel(bad)}: ${bad.error}`);
       for (const r of calc.rows) {
@@ -1031,6 +1102,7 @@ module.exports = function timeSheetApi(connection) {
       const { hdr, calc } = await loadStoredSheet(no, conn, true);
       if (hdr.STATUS === 'D') throw httpErr(409, `Approve the time for ${no} first`);
       if (hdr.STATUS === 'A') throw httpErr(409, `Time sheet ${no} is already job-approved`);
+      await assertJobAllocOpen(runOn(conn), hdr.TSHT_DATE, 'Job approval');
       const noJob = [...new Set(calc.rows.filter((r) => r.normalHrs + r.normalOt + r.holidayOt > 0 && !r.jobNo).map((r) => r.dayNo))];
       if (noJob.length) throw httpErr(400, `Enter a Job No on every worked day first (days ${noJob.join(', ')})`);
       await conn.execute('UPDATE time_sheet_hdr SET STATUS = "A", APPROVED_BY = ?, APPROVED_DT = NOW() WHERE TSHT_NO = ?', [user, no]);
@@ -1058,12 +1130,22 @@ module.exports = function timeSheetApi(connection) {
       const { hdr } = await loadStoredSheet(no, conn, true);
       let newStatus;
       if (hdr.STATUS === 'A') {
+        await assertJobAllocOpen(runOn(conn), hdr.TSHT_DATE, 'Revoking the job approval');
         newStatus = 'T';
         await conn.execute(
           'UPDATE time_sheet_hdr SET STATUS = "T", APPROVED_BY = NULL, APPROVED_DT = NULL, REVOKED_BY = ?, REVOKED_DT = NOW() WHERE TSHT_NO = ?',
           [user, no],
         );
       } else if (hdr.STATUS === 'T') {
+        await assertPayrollOpen(runOn(conn), hdr.TSHT_DATE, 'Revoking the time approval');
+        // salary already posted to the G/L: the time approval stays (reverse the Salary JV first)
+        try {
+          const [jv] = await conn.query(JV_POSTED_SQL, [no]);
+          if (jv.length) throw httpErr(423, `The salary of ${no} is posted in the Salary JV — delete that JV first, then revoke`);
+        } catch (e) {
+          if (e.status) throw e;
+          console.warn('[tsht] revoke: Salary JV check skipped:', e.code || e.message);
+        }
         newStatus = 'D';
         await conn.execute(
           'UPDATE time_sheet_hdr SET STATUS = "D", TIME_APPR_BY = NULL, TIME_APPR_DT = NULL, REVOKED_BY = ?, REVOKED_DT = NOW() WHERE TSHT_NO = ?',
@@ -1180,7 +1262,7 @@ module.exports = function timeSheetApi(connection) {
       const skipped = [];
       for (const no of nos) {
         const [h] = await db.query(
-          `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?`,
+          `SELECT TSHT_NO, DATE_FORMAT(TSHT_DATE, '%Y-%m-%d') AS TSHT_DATE, EMP_CODE, STATUS, BASIC_SAL FROM time_sheet_hdr WHERE TSHT_NO = ?`,
           [no],
         );
         if (!h.length) {
@@ -1206,14 +1288,8 @@ module.exports = function timeSheetApi(connection) {
           [no],
         );
         const emp = calc.emp;
-        let basic = emp.BASIC_SAL;
-        if (payAsOf) {
-          try {
-            basic = (await payAsOf((c, sql, params) => c.query(sql, params).then(([rows]) => rows), db, emp.EMP_CODE, hdr.TSHT_DATE)).basic;
-          } catch (e) {
-            console.warn('[tsht] payslips: month basic not read, using payroll_mst:', e.code || e.message);
-          }
-        }
+        // the basic stored with the sheet; sheets saved before the snapshot: the basic in force for the month
+        const basic = hdr.BASIC_SAL !== null ? Number(hdr.BASIC_SAL) : (await monthPay(emp, hdr.TSHT_DATE)).basic;
         const line = (a) => ({ code: a.CODE, descr: a.DESCR || '', amount: Number(a.AMOUNT) || 0, remarks: a.REMARKS || '' });
         slips.push({
           tshtNo: hdr.TSHT_NO,
@@ -1237,6 +1313,7 @@ module.exports = function timeSheetApi(connection) {
       const [h] = await db.query('SELECT STATUS FROM time_sheet_hdr WHERE TSHT_NO = ?', [req.params.no]);
       if (!h.length) return res.status(404).json({ ok: false, error: 'Not found' });
       if (h[0].STATUS !== 'D') return res.status(423).json({ ok: false, error: 'Approved time sheets cannot be deleted' });
+      await assertPayrollOpen(runOn(db), monthOfNo(req.params.no), 'Deleting this time sheet');
       await db.query('DELETE FROM time_sheet_hdr WHERE TSHT_NO = ?', [req.params.no]); // dtl / allow / ded cascade
       res.json({ ok: true });
     } catch (e) {
@@ -1482,6 +1559,7 @@ Days with no stamps can be left out. Return only JSON.`;
       const user = String(userOf(req)).slice(0, 30);
       const files = (req.body && req.body.files) || [];
       if (!files.length) throw httpErr(400, 'No files sent');
+      await assertPayrollOpen(runOn(db), monthOfNo(no), 'Adding card images');
       const dir = path.join(UPLOAD_DIR, no.slice(0, 4), no.slice(5, 7));
       fs.mkdirSync(dir, { recursive: true });
       const saved = [];
@@ -1531,6 +1609,7 @@ Days with no stamps can be left out. Return only JSON.`;
       );
       if (!rows.length) return res.status(404).json({ ok: false, error: 'Not found' });
       if (rows[0].STATUS === 'T' || rows[0].STATUS === 'A') return res.status(423).json({ ok: false, error: 'Time sheet is approved — card images can no longer be removed' });
+      await assertPayrollOpen(runOn(db), monthOfNo(rows[0].REF_NO), 'Removing card images');
       await db.query('DELETE FROM doc_attachments WHERE ID = ?', [req.params.id]);
       const r = rows[0];
       fs.rm(path.join(UPLOAD_DIR, r.REF_NO.slice(0, 4), r.REF_NO.slice(5, 7), path.basename(r.STORED_NAME)), () => { });

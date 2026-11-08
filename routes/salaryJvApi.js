@@ -19,11 +19,16 @@
 //   POST /api/salary-jv/delete  { vchrNo }      header + tran_acc lines, one transaction
 //   GET  /api/salary-jv/print/:vchrNo           { data: { hdr, items } } for ErpPdfTemplates docType SALJV
 //
+// 08-Nov-2026: payroll month close (payrollPeriod.js) — the Salary JV of a month whose payroll is closed
+//   cannot be added, changed or deleted.
+//
 // Register in HayatDb.js:
 //   const salaryJvApi = require('./routes/salaryJvApi');
 //   app.use('/api', salaryJvApi(connection));
 // =====================================================================
 const express = require('express');
+
+const { assertPayrollOpen } = require('./payrollPeriod');
 
 const SALARY_JV_TYPE = '15';
 
@@ -239,6 +244,7 @@ module.exports = function (connection) {
     for (let attempt = 0; ; attempt += 1) {
       try {
         await q(conn, 'START TRANSACTION');
+        await assertPayrollOpen((sql, p) => q(conn, sql, p), month, mode === 'ADD' ? 'Posting a Salary JV' : 'Changing this Salary JV');
         let vchrNo = mode === 'EDIT' ? String(b.vchrNo).trim() : '';
         let vchrDate = b.vchrDate;
 
@@ -325,6 +331,16 @@ module.exports = function (connection) {
     const vchrNo = String((req.body || {}).vchrNo || '').trim();
     if (!vchrNo) throw fail(400, 'Voucher number missing');
     await q(conn, 'START TRANSACTION');
+    // salary month of the voucher: its header, else its first time sheet
+    const [m] = await q(
+      conn,
+      `SELECT DATE_FORMAT(IFNULL(h.SAL_MONTH, ts.TSHT_DATE), '%Y-%m-%d') AS SAL_MONTH
+         FROM (SELECT MIN(NARRATION2) AS FIRST_TSHT FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ?) a
+         LEFT JOIN salary_jv_hdr h  ON h.TRAN_TYPE = ? AND h.VCHR_NO = ?
+         LEFT JOIN time_sheet_hdr ts ON ts.TSHT_NO = a.FIRST_TSHT`,
+      [SALARY_JV_TYPE, vchrNo, SALARY_JV_TYPE, vchrNo],
+    );
+    if (m && m.SAL_MONTH) await assertPayrollOpen((sql, p) => q(conn, sql, p), m.SAL_MONTH, `Deleting Salary JV ${vchrNo}`);
     const del = await q(conn, 'DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ?', [SALARY_JV_TYPE, vchrNo]);
     const delH = await q(conn, 'DELETE FROM salary_jv_hdr WHERE TRAN_TYPE = ? AND VCHR_NO = ?', [SALARY_JV_TYPE, vchrNo]);
     if (!del.affectedRows && !delH.affectedRows) throw fail(404, `Salary JV ${vchrNo} not found`);

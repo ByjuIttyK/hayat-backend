@@ -44,7 +44,12 @@
 //   L for a leave (any time, also after resuming), E encashment (days sold — they reduce the annual balance,
 //   Leave Ledger row "ENC"), A advance against future leave (balance not touched; adjusted on a later L voucher).
 // Employee status: approved leave that has started sets emp_mst.EMP_STATUS 'L'; resume / cancel puts it back to 'A'.
+// 08-Nov-2026: payroll month close (payrollPeriod.js) — a leave application whose dates touch a month with its
+//   payroll closed cannot be added, edited, deleted, approved, rejected, cancelled or revoked. Resume checks
+//   only the days it changes (between the planned end and the day before resuming), so a leave that started
+//   in a closed month can still be resumed in an open one.
 const express = require("express");
+const { assertPayRangeOpen } = require("./payrollPeriod");
 
 const STATUSES = ["A", "L", "R", "T", "X"];
 const ADMIN_USERS = ["admin"];
@@ -69,6 +74,11 @@ const addMonths = (s, k) => {
 };
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const dmy = (s) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : "");
+/** Dates a leave application covers: from .. the later of its planned end and the day before resuming */
+const spanOf = (l) => {
+  const last = l.RESUME_DT ? addDays(l.RESUME_DT, -1) : l.TO_DT;
+  return [l.FROM_DT, last && last > l.TO_DT ? last : l.TO_DT];
+};
 
 // ---------------------------------------------------------------- the leave engine (pure, no database)
 // emp:    { APPT_DT, LEAVE_OPBAL, LEAVE_OPBAL_DT, LEAVE_DAYS_PA }  (dates yyyy-mm-dd or null)
@@ -412,6 +422,7 @@ module.exports = function (connection) {
         try {
           no = await tx(async (db) => {
             await validate(db, a, null);
+            await assertPayRangeOpen((sql, p) => qc(db, sql, p), a.FROM_DT, a.TO_DT, "A leave application on these dates");
             const pre = `LV${a.APPL_DT.slice(0, 4)}-`;
             const m = await qc(db, "SELECT MAX(CAST(SUBSTRING(LEAVE_NO, 8) AS UNSIGNED)) n FROM leave_appl WHERE LEAVE_NO LIKE ?", [pre + "%"]);
             const newNo = pre + String((Number(m[0].n) || 0) + 1).padStart(4, "0");
@@ -439,6 +450,9 @@ module.exports = function (connection) {
         const cur = await applOf(no, db);
         if (cur.STATUS !== "D") throw fail(400, `Leave ${no} is ${STATUS_TXT[cur.STATUS]} — only an applied (not yet approved) leave can be edited`);
         await validate(db, a, no);
+        const run = (sql, p) => qc(db, sql, p);
+        await assertPayRangeOpen(run, ...spanOf(cur), `Changing leave ${no}`);
+        await assertPayRangeOpen(run, a.FROM_DT, a.TO_DT, `Moving leave ${no} to these dates`);
         await qc(db,
           `UPDATE leave_appl SET APPL_DT=?, EMP_CODE=?, LEAVE_TYPE=?, FROM_DT=?, TO_DT=?, DAYS=?, REASON=?, CONTACT_ADDR=?,
                   CONTACT_PHONE=?, RELIEVER_CODE=?, TICKET_REQ=?, ADV_SAL_REQ=?, BAL_ON_APPL=?, MODIFIED_BY=?
@@ -456,6 +470,7 @@ module.exports = function (connection) {
       await tx(async (db) => {
         const cur = await applOf(no, db);
         if (cur.STATUS !== "D") throw fail(400, `Leave ${no} is ${STATUS_TXT[cur.STATUS]} — cancel it instead of deleting`);
+        await assertPayRangeOpen((sql, p) => qc(db, sql, p), ...spanOf(cur), `Deleting leave ${no}`);
         await qc(db, "DELETE FROM leave_appl WHERE LEAVE_NO = ?", [no]);
       });
       res.json({ ok: true, message: `Leave application ${no} deleted` });
@@ -476,6 +491,9 @@ module.exports = function (connection) {
       const msg = await tx(async (db) => {
         const cur = await applOf(no, db);
         const need = (ok, what) => { if (!ok.includes(cur.STATUS)) throw fail(400, `Leave ${no} is ${STATUS_TXT[cur.STATUS]} — cannot ${what}`); };
+        const run = (sql, p) => qc(db, sql, p);
+        const verb = { approve: "Approving", reject: "Rejecting", cancel: "Cancelling", revoke: "Revoking" }[action];
+        if (verb) await assertPayRangeOpen(run, ...spanOf(cur), `${verb} leave ${no}`);
 
         if (action === "approve") {
           need(["D"], "approve");
@@ -508,6 +526,10 @@ module.exports = function (connection) {
           const rd = req.body?.resumeDt;
           if (!isYmd(rd)) throw fail(400, "Resumption date is not valid");
           if (rd <= cur.FROM_DT) throw fail(400, "Resumption date must be after the leave start date");
+          // only the days whose leave status changes: between the planned end and the day before resuming
+          const lastDay = addDays(rd, -1);
+          const [chgFrom, chgTo] = lastDay < cur.TO_DT ? [rd, cur.TO_DT] : [addDays(cur.TO_DT, 1), lastDay];
+          if (chgFrom <= chgTo) await assertPayRangeOpen(run, chgFrom, chgTo, `Resuming on ${dmy(rd)}`);
           const act = daysBetween(cur.FROM_DT, rd);
           await qc(db, "UPDATE leave_appl SET STATUS='S', RESUME_DT=?, ACT_DAYS=?, RESUME_REMARKS=?, RESUMED_BY=? WHERE LEAVE_NO=?",
             [rd, act, remarks, user, no]);

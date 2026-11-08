@@ -11,12 +11,18 @@
 // transaction. Allowed only while the sheet is Time approved (STATUS 'T').
 // approve = true also checks every day tallies and sets STATUS 'A' (Job approved).
 //
+// 08-Nov-2026: job cost basic = time_sheet_hdr.BASIC_SAL (salary snapshot stored with the sheet), so hours
+//   allocated after a later increment are still costed at that month's rate; sheets saved before the
+//   snapshot fall back to the pay in force for the month. Save refused when the month's job allocation
+//   is closed (payroll month close, payrollPeriod.js).
+//
 // Register in HayatDb.js:
 //   const tsJobAllocApi = require('./routes/tsJobAllocApi');
 //   app.use('/api', tsJobAllocApi(connection));
 // =====================================================================
 const express = require('express');
 const { payAsOf } = require('./salRevPay'); // basic in force for the sheet's month (salary revisions)
+const { assertJobAllocOpen } = require('./payrollPeriod');
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -36,7 +42,7 @@ module.exports = function (connection) {
     q(
       conn,
       `SELECT h.TSHT_NO, DATE_FORMAT(h.TSHT_DATE,'%Y-%m-%d') AS TSHT_DATE, h.EMP_CODE, e.EMP_NAME, h.STATUS,
-              IFNULL(p.BASIC_SAL,0) AS BASIC_SAL,
+              IFNULL(p.BASIC_SAL,0) AS BASIC_SAL, h.BASIC_SAL AS SNAP_BASIC,
               IFNULL(h.NORMAL_WAGES,0) AS NORMAL_WAGES, IFNULL(h.NOT_WAGES,0) AS NOT_WAGES, IFNULL(h.HOT_WAGES,0) AS HOT_WAGES
          FROM time_sheet_hdr h
          LEFT JOIN emp_mst e     ON e.EMP_CODE = h.EMP_CODE
@@ -44,10 +50,13 @@ module.exports = function (connection) {
         WHERE h.TSHT_NO = ?`,
       [tshtNo],
     ).then((r) => r[0] || null);
-  // Basic = pay in force for the sheet's month (employee master + approved salary revisions)
+  // Basic = the one stored with the time sheet; else the pay in force for the sheet's month
   const loadHeader = async (conn, tshtNo) => {
     const hdr = await loadHeaderRaw(conn, tshtNo);
-    if (hdr && hdr.TSHT_DATE) hdr.BASIC_SAL = (await payAsOf(q, conn, hdr.EMP_CODE, `${hdr.TSHT_DATE.slice(0, 8)}01`)).basic;
+    if (!hdr) return hdr;
+    if (hdr.SNAP_BASIC !== null && hdr.SNAP_BASIC !== undefined) hdr.BASIC_SAL = Number(hdr.SNAP_BASIC);
+    else if (hdr.TSHT_DATE) hdr.BASIC_SAL = (await payAsOf(q, conn, hdr.EMP_CODE, `${hdr.TSHT_DATE.slice(0, 8)}01`)).basic;
+    delete hdr.SNAP_BASIC;
     return hdr;
   };
 
@@ -148,8 +157,9 @@ module.exports = function (connection) {
       conn = await getConn();
       await q(conn, 'START TRANSACTION');
 
-      const hdr = (await q(conn, `SELECT STATUS FROM time_sheet_hdr WHERE TSHT_NO = ? FOR UPDATE`, [tshtNo]))[0];
+      const hdr = (await q(conn, `SELECT STATUS, DATE_FORMAT(TSHT_DATE,'%Y-%m-%d') AS TSHT_DATE FROM time_sheet_hdr WHERE TSHT_NO = ? FOR UPDATE`, [tshtNo]))[0];
       if (!hdr) throw new Error(`Time sheet ${tshtNo} not found`);
+      await assertJobAllocOpen((sql, p) => q(conn, sql, p), hdr.TSHT_DATE, approve ? 'Job approval' : 'Saving the job allocation');
       if (hdr.STATUS === 'D') throw new Error('Approve the time on the time sheet first');
       if (hdr.STATUS === 'A') throw new Error('Jobs are already approved — revoke the job approval on the time sheet to change them');
 
@@ -212,7 +222,7 @@ module.exports = function (connection) {
     } catch (err) {
       if (conn) await q(conn, 'ROLLBACK').catch(() => {});
       console.error('save-ts-job-alloc:', err);
-      res.status(400).json({ ok: false, error: err.message });
+      res.status(err.status || 400).json({ ok: false, error: err.message });
     } finally {
       if (conn) conn.release();
     }

@@ -20,7 +20,11 @@ module.exports = function (connection) {
         "SELECT a.TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%Y') AS DATTE, '' AS CUST_CODE, " +
         "       c.AC_HEAD AS ACC_HEAD, " +
         "       a.ACC_CODE, '' AS CHEQUE_NO, a.AMOUNT, b.PAID_TO, a.NARRATION1, a.NARRATION2, " +
-        "       a.DB_CR ,b.CONTRA_FLG " +
+        "       a.DB_CR ,b.CONTRA_FLG ," +
+        " b.CREATED_BY," +
+        " DATE_FORMAT(b.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+        " b.LAST_EDITED_BY," +
+        " DATE_FORMAT(b.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
         "  FROM tran_acc a " +
         "  LEFT OUTER JOIN ac_list AS c " +
         "    ON c.AC_CODE = a.ACC_CODE " +
@@ -75,6 +79,11 @@ module.exports = function (connection) {
         "v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
         "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, v.CONTRA_FLG, " +
         "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN, " +
+        " v.CREATED_BY," +
+        " DATE_FORMAT(v.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+        " v.LAST_EDITED_BY," +
+        " DATE_FORMAT(v.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON ," +
+
         "dr.SR_NO AS DR_SR_NO, dr.ACC_CODE AS DR_CODE, dra.AC_HEAD AS DR_HEAD, " +
         "dr.AMOUNT AS DR_AMOUNT, drc.DR_COUNT " +
         "FROM vouchers AS v " +

@@ -22,7 +22,11 @@ module.exports = function (connection) {
       "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT, chq.CHQ_COUNT, " +
       "v.AMOUNT, v.BANK_NAME, v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
       "v.PAID_TO, v.CAN_CEL, " +
-      "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN " +
+      "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN ," +
+       " v.CREATED_BY," +
+        " DATE_FORMAT(v.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+        " v.LAST_EDITED_BY," +
+        " DATE_FORMAT(v.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
       "FROM vouchers AS v " +
       "LEFT OUTER JOIN ac_list " +
       "  ON ac_list.AC_CODE = COALESCE(v.ACC_CODE, v.CUST_CODE) " +

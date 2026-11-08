@@ -307,7 +307,7 @@ app.get('/api/gridoptionsmst/:tableId', (req, res) => {
       console.error("Error executing query:", err);
       return res.status(500).json({ error: "Failed to fetch grid_Option_Mst data" });
     }
-  //  console.log('GRID =', rows);
+    //  console.log('GRID =', rows);
     res.json(rows);
   });
 });
@@ -322,7 +322,7 @@ app.get('/api/fetchentryform/:tableId/:submodule', (req, res) => {
       console.error("Error executing query:", err);
       return res.status(500).json({ error: "Failed to fetch grid_Option_Mst data" });
     }
-   // console.log('fetchentryform =', rows);
+    // console.log('fetchentryform =', rows);
     res.json(rows);
   });
 });
@@ -435,7 +435,7 @@ ORDER BY a.JOB_NO DESC;
       console.error("job-list query error:", err);
       return res.status(500).json({ message: "Database error", error: err.message });
     }
-  //  console.log('job-list', rows);
+    //  console.log('job-list', rows);
     res.json(rows);
   });
 });
@@ -641,7 +641,7 @@ app.get("/api/jobcard-nextno", function (req, res) {
       return res.status(500).json({ message: "Error fetching next job number" });
     }
     const nextJobNo = result?.[0]?.nextJobNo ?? 1;
-  //  console.log("➡️ Next JOB_NO:", nextJobNo);
+    //  console.log("➡️ Next JOB_NO:", nextJobNo);
     res.json({ jobNo: String(nextJobNo) });
   });
 });
@@ -1828,7 +1828,7 @@ app.get("/api/customers/:id", (req, res) => {
 
     if (result.length > 0) {
       const { START_DT, ...filteredResult } = result[0]; // Remove START_DT from the result
-    //  console.log('Customers:', result)
+      //  console.log('Customers:', result)
       res.json(filteredResult);
     } else {
       res.status(404).json({ error: "Customer not found" });
@@ -3057,7 +3057,7 @@ app.get("/api/accmst/:id", function (req, res) {
       if (error) {
         throw error;
       } else {
-      //  console.log(" Accmst edt", result);
+        //  console.log(" Accmst edt", result);
         res.json(result);
 
       }
@@ -3994,7 +3994,7 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
         console.error("Database Query Error:", err);
         res.status(500).json({ error: "Database query failed" });
       } else {
-       // console.error("Foreign Pur Inv",result);
+        // console.error("Foreign Pur Inv",result);
         res.json(result);
       }
     }
@@ -4461,7 +4461,11 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
     " b.CUST_NAME, a.CASH_CUST_NAME,a.JOB_NO, a.DO_NO,  a.PAYMENT_TERMS, a.DISCOUNT, a.VAT_PERC, " +
     "  a.DO_NO,a.LPO_DATE, INV_CANCELLED ,a.CURR_CODE," +
     " a.LPO_NO,a.NET_AMT AMOUNT, a.INV_UPLOAD_FILE," +
-    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,b.NATION_CODE " +
+    " a.CONTRACT_AMT_PERCENT,a.INV_ACK,b.NATION_CODE ," +
+    " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from fab_inv_hdr a    " +
     " left outer join cus_mst b on b.cust_code = a.cust_code " +
     " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  ORDER BY a.INV_NO DESC",
@@ -5322,7 +5326,7 @@ app.get("/api/purfrgnhdr/:vch", function (req, res) {
       } else {
         //   console.log("Oracle Purchase LC LST", result.rows);
         res.json(result);
-      //  console.log("PURCHASE_HDR", result)
+        //  console.log("PURCHASE_HDR", result)
       }
     }
   );
@@ -5348,7 +5352,7 @@ app.get("/api/gittypesfp/:vch", function (req, res) {
         throw err;
       } else {
         res.json(result);
-      //  console.log("Git Types", result);
+        //  console.log("Git Types", result);
       }
     }
   );
@@ -5376,7 +5380,7 @@ app.get("/api/purfrgnitems/:vch", function (req, res) {
           AMOUNT: row.AMOUNT ? parseFloat(row.AMOUNT) : 0,
         }));
         res.json(result);
-     //   console.log("PUR_FRGN_ITEMS", result, req.params.vch)
+        //   console.log("PUR_FRGN_ITEMS", result, req.params.vch)
       }
     }
   );
@@ -5557,8 +5561,14 @@ app.get("/api/dolist/:dys", function (req, res) {
   connection.query(
     "select a.INV_NO DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') DO_DATE, a.CUST_CODE," +
     " b.CUST_NAME, a.JOB_NO, a.DO_NO INV_NO, a.DO_APPROVED, a.QUOT_NO ,a.PROJECT_DETAIL," +
-    " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE, a.CONTACT_PERSON " +
+    " a.LPO_NO, DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE, a.CONTACT_PERSON ," +
+     " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
+
     " from fab_do_hdr a LEFT OUTER JOIN cus_mst b  ON (a.CUST_CODE = b.CUST_CODE) " +
+
     " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  " +
     "  ORDER BY a.INV_NO DESC",
     [req.params.dys],
@@ -5602,8 +5612,8 @@ app.get("/api/fabdohdr/:doNo", function (req, res) {
   connection.query(
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
     "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, a.PROJECT_DETAIL," +
-    "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.DO_APPROVED " +
-    "FROM fab_do_hdr a " +
+    "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE , a.DO_APPROVED, " +
+       "FROM fab_do_hdr a " +
     "left outer join cus_mst b on a.cust_code = b.cust_code " +
     "WHERE a.INV_NO = ?",
     [req.params.doNo],   // <-- Missing comma before!
@@ -5822,7 +5832,7 @@ app.get("/api/custsal", function (req, res) {
       if (err) {
         throw err;
       } else {
-     //   console.log("Cust.Sales ", result);
+        //   console.log("Cust.Sales ", result);
         res.json(result);
       }
 
@@ -5862,7 +5872,7 @@ app.get("/api/jobsal", function (req, res) {
       if (err) {
         throw err;
       } else {
-       // console.log("Cust.Sales ", result);
+        // console.log("Cust.Sales ", result);
         res.json(result);
       }
 
@@ -6679,7 +6689,7 @@ app.get("/api/jobcard/:jobNo", function (req, res) {
       if (error) {
         throw error;
       } else {
-      //  console.log("Job Card", result);
+        //  console.log("Job Card", result);
         res.json(result);
 
       }
@@ -6726,7 +6736,7 @@ ORDER BY a.job_no DESC;
       if (error) {
         throw error;
       } else {
-     //   console.log("Job profit analysis :", result);
+        //   console.log("Job profit analysis :", result);
         res.json(result);
 
       }
@@ -6775,7 +6785,7 @@ app.get("/api/jobreg", function (req, res) {
       if (error) {
         throw error;
       } else {
-     //   console.log("Job Card", result);
+        //   console.log("Job Card", result);
         res.json(result);
 
       }
@@ -6795,7 +6805,7 @@ app.get("/api/joblst", function (req, res) {
       if (error) {
         throw error;
       } else {
-     //   console.log("joblst==>", result);
+        //   console.log("joblst==>", result);
         res.json(result);
 
       }
@@ -7943,4 +7953,10 @@ app.use("/api", require("./routes/auditApi")(connection));
 const leaveSalPayApi = require("./routes/leaveSalPayApi");  // new
 
 //app.use("/api", leaveApi(connection));                     // already there
-app.use("/api", leaveSalPayApi(connection));             
+app.use("/api", leaveSalPayApi(connection));
+//
+const payrollPeriodApi = require('./routes/payrollPeriodApi');
+app.use('/api', payrollPeriodApi(connection));
+//
+const leaveTypeApi = require('./routes/leaveTypeApi');
+app.use('/api', leaveTypeApi(connection));     

@@ -16,6 +16,9 @@
 //   Allowance / deduction codes for F9 come from /api/allow-ded-codes (empAllowDedApi.js).
 //   Rule: apply from the 1st (salRevPay.js). Back-dating: approval refused when a time sheet of the
 //   employee for the APPLY_FROM month or later is already Time / Job approved.
+//   08-Nov-2026: payroll month close (payrollPeriod.js) — a revision applies from APPLY_FROM to every later
+//   month, so save / approve / revoke are refused when any month from APPLY_FROM on has its payroll closed.
+//   A back-dated increment goes in with an APPLY_FROM in the open month; the difference is paid as arrears.
 //
 // Register in HayatDb.js:
 //   const salRevApi = require('./routes/salRevApi');
@@ -23,6 +26,8 @@
 // =====================================================================
 const express = require('express');
 const { applyFromOf, payAsOf, applyDue } = require('./salRevPay');
+const { assertPayRangeOpen } = require('./payrollPeriod');
+const LAST_MONTH = '9999-12-01'; // "from APPLY_FROM on"
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -45,6 +50,9 @@ module.exports = function (connection) {
   };
   const isIso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 
+  /** refuse when payroll is closed for the APPLY_FROM month or any later one */
+  const assertRevOpen = (conn, applyFrom, what) => assertPayRangeOpen((sql, p) => q(conn, sql, p), applyFrom, LAST_MONTH, what);
+
   const withConn = (fn) => async (req, res) => {
     let conn;
     try {
@@ -53,7 +61,7 @@ module.exports = function (connection) {
     } catch (err) {
       if (conn) await q(conn, 'ROLLBACK').catch(() => {});
       console.error('salRevApi:', err);
-      res.status(400).json({ ok: false, message: err.message });
+      res.status(err.status || 400).json({ ok: false, message: err.message });
     } finally {
       if (conn) conn.release();
     }
@@ -180,6 +188,7 @@ module.exports = function (connection) {
     if (!isIso(hdr.EFF_DATE)) throw new Error('Effective date missing');
     const clean = cleanLines(lines);
     const applyFrom = applyFromOf(hdr.EFF_DATE);
+    await assertRevOpen(conn, applyFrom, 'A salary revision applying from this date');
     const who = userOf(req);
     const year = hdr.REV_DATE.slice(0, 4);
 
@@ -227,6 +236,7 @@ module.exports = function (connection) {
     const h = (await q(conn, `SELECT EMP_CODE, STATUS, DATE_FORMAT(APPLY_FROM,'%Y-%m-%d') APPLY_FROM FROM sal_rev_hdr WHERE REV_NO = ? FOR UPDATE`, [revNo]))[0];
     if (!h) throw new Error(`Revision ${revNo} not found`);
     if (h.STATUS !== 'D') throw new Error('Already approved');
+    await assertRevOpen(conn, h.APPLY_FROM, `Approving revision ${revNo}`);
 
     // no back-dating into approved time sheets
     const locked = await q(
@@ -275,6 +285,7 @@ module.exports = function (connection) {
     ))[0];
     if (!h) throw new Error(`Revision ${revNo} not found`);
     if (h.STATUS !== 'A') throw new Error('This revision is a draft — nothing to revoke');
+    await assertRevOpen(conn, h.APPLY_FROM, `Revoking revision ${revNo}`);
 
     const later = await q(
       conn,
