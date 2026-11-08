@@ -7187,7 +7187,12 @@ app.get("/api/pcashlst/:id", function (req, res) {
   console.log('Petty cash ');
   connection.query(
     "SELECT VCHR_NO, DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, BATCH_NO, BATCH_SR, PAY_VCHR_NO, PAY_VCHR_DATE, " +
-    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION FROM pcashexp_hdr  order by vchr_no desc",
+    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION , "+
+    " CREATED_BY," +
+    " DATE_FORMAT(CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " LAST_EDITED_BY," +
+    " DATE_FORMAT(LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
+    "FROM pcashexp_hdr  order by vchr_no desc",
     function (error, result) {
       if (error) {
         //  throw error;
