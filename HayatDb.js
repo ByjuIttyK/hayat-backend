@@ -3667,7 +3667,10 @@ app.get("/api/lpolst/:dys", function (req, res) {
     `SELECT a.LPO_NO, DATE_FORMAT(a.LPO_DATE, '%d/%m/%Y') AS LPO_DATE, a.JOB_NO, a.SUP_CODE, a.LPO_TYPE,
             b.SUP_NAME, a.PLACE_DLV, a.PAY_TERMS, a.DELIVERY_REQ, a.AMOUNT, a.ATTN, a.CANCELLED,
             a.REQ_NO, a.SMAN_CODE, a.NARRATION,
-                    
+                  " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON ," +  
             IFNULL(p.TOT_LPO_QTY, 0)  AS TOT_LPO_QTY,
             IFNULL(p.TOT_RCVD_QTY, 0) AS TOT_RCVD_QTY,
             IFNULL(p.PENDING_QTY, 0)  AS PENDING_QTY
@@ -7187,7 +7190,7 @@ app.get("/api/pcashlst/:id", function (req, res) {
   console.log('Petty cash ');
   connection.query(
     "SELECT VCHR_NO, DATE_FORMAT(VCHR_DATE,'%d/%m/%Y') VCHR_DATE, BATCH_NO, BATCH_SR, PAY_VCHR_NO, PAY_VCHR_DATE, " +
-    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION , "+
+    "AMOUNT, ACC_CODE_CR, DE_CR, RG_PTYPE, NARRATION , " +
     " CREATED_BY," +
     " DATE_FORMAT(CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
     " LAST_EDITED_BY," +
