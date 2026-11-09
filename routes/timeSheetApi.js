@@ -117,6 +117,15 @@
 //     (dayType 'L', leavePay 'A' — paid by Leave Salary, taken off the month like any annual leave).
 //   Only days with no punch change type; late / short is cleared on every day before the start date.
 //   Totals / payslips: notJoinedDays. Registers: mark 'NJ'.
+// 09-Nov-2026: several In / Out pairs on a working day — Short is worked out for the whole day:
+//   Short = standard day − Normal of all the day's pairs − late (as worked from the shift start),
+//   so time away BETWEEN pairs counts too (e.g. 08:00–09:30 + 13:00–20:30 → Normal 4:45, Short 3:15;
+//   before, only the time from the last Out to the shift end was short and the gap was lost).
+//   The day's Short is put on its last pair inside the shift; other pairs carry none.
+//   A later pair starting at / after the shift end (e.g. back at 23:45) is flagged afterShift — the
+//   screen labels it "Overtime after regular shift". It adds no Normal, so the earlier pair's early
+//   leaving is now counted as Short as well. Not on weekly off / holiday / leave / before the start date,
+//   nor when a pair of the day has an error.
 // 08-Nov-2026: payroll month close (payrollPeriod.js) — a month whose payroll is closed refuses Save,
 //   Time approval, revoke to Draft, delete and card images; a month whose job allocation is closed
 //   refuses Job approval, revoke of the Job approval and Job No changes (423).
@@ -705,6 +714,7 @@ module.exports = function timeSheetApi(connection) {
       const punchedDay = regs.some((r) => toMin(r.timeIn) !== null || toMin(r.timeOut) !== null);
       const beforeJoin = !!emp.APPT_DT && date < emp.APPT_DT;
       const beforeResume = !beforeJoin && !!emp.LAST_RESUME_DT && date < emp.LAST_RESUME_DT;
+      const dayStart = out.length; // first regular row of this day in `out`
       regs.forEach((src, idx) => {
         const shiftCode = src.shiftCode || empShift;
         const isLastReg = idx === regs.length - 1;
@@ -753,9 +763,12 @@ module.exports = function timeSheetApi(connection) {
           jobNo: src.jobNo || null,
           remarks: src.remarks ? String(src.remarks).slice(0, 30) : calc.dayType === 'J' ? 'Before joining' : null,
           needsCheck: !!src.needsCheck || !!calc.error || punchedOnLeave,
+          // a later pair starting at / after the shift end — overtime after the regular shift
+          afterShift: idx > 0 && toMin(src.timeIn) !== null && toMin(src.timeIn) >= shiftOf(shiftCode).sout,
           ...calc,
         });
       });
+      dayShortAcrossPairs(out.slice(dayStart), beforeJoin || beforeResume, shifts);
     }
     // hours rounded to 5 minutes (sheets from ROUND_FROM on)
     if (month.first >= ROUND_FROM) {
@@ -769,6 +782,29 @@ module.exports = function timeSheetApi(connection) {
     // salary scheme: the sheet's stored one (approved sheets) or the employee's current one
     const scheme = schemeCode ? await loadScheme(conn, schemeCode) : await resolveScheme(conn, emp.EMP_CODE);
     return { month, emp, rows: out, scheme };
+  }
+
+  /**
+   * Several In / Out pairs on a working day (09-Nov-2026): Short for the whole day =
+   * standard day − Normal of all pairs − late (as from the shift start), so a gap between pairs
+   * counts. Put on the day's last pair inside the shift; the other pairs carry none.
+   */
+  function dayShortAcrossPairs(allRows, noJudge, shifts) {
+    if (allRows.length < 2 || noJudge) return;
+    const dayRows = allRows.filter((r) => r.timeIn || r.timeOut); // a blank inserted row does not count
+    if (!dayRows.length) return;
+    if (dayRows.some((r) => r.error || r.dayType !== 'W')) return; // off day / holiday / leave / errors
+    const first = dayRows[0];
+    const sh = shifts.get(first.shiftCode);
+    if (!sh || first.effIn === null || first.effIn === undefined) return;
+    const normal = dayRows.reduce((t, r) => t + (Number(r.normalHrs) || 0), 0);
+    const lateRaw = first.effIn > sh.sin ? Math.max(0, first.effIn - sh.sin - breakMins(sh.sin, first.effIn, sh)) : 0;
+    const short = Math.max(0, sh.std - normal - lateRaw);
+    const inShift = dayRows.filter((r) => !r.afterShift);
+    const target = inShift[inShift.length - 1] || dayRows[dayRows.length - 1];
+    allRows.forEach((r) => {
+      r.shortMins = r === target ? short : 0;
+    });
   }
 
   /** "Day 15" or "Day 15 (cont.)" for messages */
