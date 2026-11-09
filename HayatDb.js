@@ -7990,4 +7990,6 @@ const payrollPeriodApi = require('./routes/payrollPeriodApi');
 app.use('/api', payrollPeriodApi(connection));
 //
 const leaveTypeApi = require('./routes/leaveTypeApi');
-app.use('/api', leaveTypeApi(connection));     
+app.use('/api', leaveTypeApi(connection));
+//
+app.use('/api', authMiddleware, require('./routes/fabDoQuotItems')(connection));
