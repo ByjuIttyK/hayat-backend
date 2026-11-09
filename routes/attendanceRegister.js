@@ -4,6 +4,11 @@
 //   GET /api/attendance-register?month=YYYY-MM&catg=ALL|<code>&draft=Y|N
 //   GET /api/attendance-register/excel?...same...&view=C|H|B   (Codes / Hours / Both)
 //
+// 09-Nov-2026 Weekly off from shift_mst.WEEK_OFF_DAY (MySQL DAYOFWEEK: 1 = Sunday), the same rule
+//   the time sheet uses (timeSheetApi.prepShift) — was hard-coded to Friday. Each employee is judged
+//   by the weekly off of his shift (payroll_mst.SHIFT_CODE, default GEN); the day columns are shaded
+//   by the GEN shift's weekly off.
+//
 // Register in HayatDb.js:
 //   const attendanceRegister = require("./routes/attendanceRegister");
 //   app.use("/api", attendanceRegister(connection));
@@ -15,8 +20,9 @@ const ExcelJS = require("exceljs");
 const EMP = { table: "emp_mst", code: "EMP_CODE", name: "EMP_NAME", catg: "EMP_CATG", card: "CARD_NO" };
 const CATG = { table: "emp_catg_mst", code: "CATG_CODE", name: "CATG_NAME" };
 const HOL = { table: "holiday_mst", date: "HOL_DATE", desc: "HOL_DESC" };
+const DEFAULT_SHIFT = "GEN";   // as in timeSheetApi
+const DEFAULT_WEEK_OFF = 0;     // JS getDay(): 0 = Sunday — used when shift_mst gives none
 const RULES = {
-  weeklyOff: [5],        // JS getDay(): 0 = Sun … 5 = Fri
   lateAfter: "08:10",    // 08:00 + 10 min margin
   halfDayBelow: 240,     // normal minutes below this on a working day = half day
 };
@@ -58,6 +64,22 @@ async function headerInfo(db, p) {
   }
   return { company, catgLabel };
 }
+
+/** Weekly off of each shift as JS getDay() (shift_mst.WEEK_OFF_DAY is MySQL DAYOFWEEK, 1 = Sunday). */
+async function fetchWeekOffs(db) {
+  const map = {};
+  try {
+    const [rows] = await db.query("SELECT SHIFT_CODE, WEEK_OFF_DAY FROM shift_mst");
+    rows.forEach((r) => {
+      const dow = Number(r.WEEK_OFF_DAY) || 1; // same default as the time sheet
+      map[r.SHIFT_CODE] = (dow - 1 + 7) % 7;
+    });
+  } catch (e) {
+    console.error("attendance-register shifts:", e.message);
+  }
+  return map;
+}
+const weekOffOf = (map, shift) => map[shift || DEFAULT_SHIFT] ?? map[DEFAULT_SHIFT] ?? DEFAULT_WEEK_OFF;
 
 async function fetchHolidays(db, p) {
   try {
@@ -113,22 +135,26 @@ function addTot(t, s) {
 async function buildReport(db, p) {
   // days of the month
   const hol = await fetchHolidays(db, p);
+  const weekOffs = await fetchWeekOffs(db);
+  const stdOff = weekOffOf(weekOffs, DEFAULT_SHIFT); // day columns shaded by the GEN shift
   const days = [];
   for (let d = 1; d <= p.nDays; d++) {
     const dt = new Date(p.y, p.m - 1, d);
     days.push({
       d, wd: "SMTWTFS"[dt.getDay()],
-      off: RULES.weeklyOff.includes(dt.getDay()),
+      dow: dt.getDay(),
+      off: dt.getDay() === stdOff,
       hol: hol[d] || "",
     });
   }
 
   const [hdrs] = await db.query(
     `SELECT h.TSHT_NO, h.EMP_CODE, e.${EMP.name} AS EMP_NAME, e.${EMP.card} AS CARD_NO,
-            e.${EMP.catg} AS CATG, c.${CATG.name} AS CATG_NAME
+            e.${EMP.catg} AS CATG, c.${CATG.name} AS CATG_NAME, pm.SHIFT_CODE
        FROM time_sheet_hdr h
        JOIN ${EMP.table} e       ON e.${EMP.code} = h.EMP_CODE
        LEFT JOIN ${CATG.table} c ON c.${CATG.code} = e.${EMP.catg}
+       LEFT JOIN payroll_mst pm  ON pm.EMP_CODE = h.EMP_CODE
       WHERE h.TSHT_DATE >= ? AND h.TSHT_DATE <= LAST_DAY(?)
         AND (? = 'ALL' OR e.${EMP.catg} = ?)
         AND (? = 'Y' OR h.STATUS <> 'D')
@@ -161,8 +187,9 @@ async function buildReport(db, p) {
     while (i < hdrs.length && hdrs[i].CATG === catg) {
       const h = hdrs[i];
       const t = emptyTot();
+      const empOff = weekOffOf(weekOffs, h.SHIFT_CODE); // this employee's weekly off (his shift)
       const cells = days.map((day, k) => {
-        const x = classify(byTs[h.TSHT_NO]?.[day.d] || [], day.off, !!day.hol);
+        const x = classify(byTs[h.TSHT_NO]?.[day.d] || [], day.dow === empOff, !!day.hol);
         // day-wise column totals: hours worked and head count present
         const pres = ["P", "L", "M", "WP", "HP"].includes(x.c) ? 1 : x.c === "½" ? 0.5 : 0;
         catDay[k].m += x.m; catDay[k].p += pres;
