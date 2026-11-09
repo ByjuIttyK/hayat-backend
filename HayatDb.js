@@ -5638,7 +5638,7 @@ app.get("/api/fabdohdr/:doNo", function (req, res) {
   connection.query(
     "SELECT a.INV_NO ,a.DO_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS DO_DATE, a.CUST_CODE, " +
     "b.CUST_NAME, a.JOB_NO,  a.DO_APPROVED, a.QUOT_NO, a.LPO_NO,a.CONTACT_PERSON, a.PROJECT_DETAIL," +
-    "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE ,  " +
+    "DATE_FORMAT(a.LPO_DATE,'%d/%m/%Y') AS LPO_DATE  " +
     "FROM fab_do_hdr a " +
     "left outer join cus_mst b on a.cust_code = b.cust_code " +
     "WHERE a.INV_NO = ?",
