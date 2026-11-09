@@ -122,7 +122,10 @@
 //   · Late  — the day's first line (earliest In) only: shift start → In, breaks not counted.
 //   · Short — every line: from its Out to the next line's In when that line starts inside the shift,
 //     else to the shift end; breaks inside the gap not counted. e.g. 07:58–11:40 + 15:41–20:30 →
-//     line 1 Short 11:40→15:41 less lunch; line 2 none. A single line keeps the old rule
+//     A gap that runs across the lunch break is split there: the part before lunch is Short on the
+//     earlier line (left early), the part after lunch is Short on the later line (came back late).
+//     e.g. 07:58–11:40 + 15:41–20:30 → line 1 Short 1:20 (11:40→13:00), line 2 Short 1:41 (14:00→15:41).
+//     A gap that does not cross lunch stays on the earlier line. A single line keeps the old rule
 //     (Short = standard day − Normal − late), so a half day still adds up to 8:00.
 //   · Half day (morning tea not cut) only for a line that leaves before the end of lunch and does not
 //     come back inside the shift — a line followed by another in-shift line has all its breaks cut.
@@ -344,10 +347,14 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride
     const from = sh.lateFromMrg ? sh.sin + sh.inLate : sh.sin;
     res.lateMins = Math.max(0, effIn - from - breakMins(from, effIn, sh));
   }
+  if (judge.gapFrom !== null && judge.gapFrom !== undefined && effIn > judge.gapFrom) {
+    // came back late after lunch: from the end of lunch to this line's In, breaks not counted
+    res.shortMins += Math.max(0, effIn - judge.gapFrom - breakMins(judge.gapFrom, effIn, sh));
+  }
   if (judge.short && judge.shortTo !== null && judge.shortTo !== undefined) {
     // a later line of the day starts inside the shift: short = the gap up to its In, breaks not counted
     const to = Math.min(judge.shortTo, sh.sout);
-    if (effOut < to) res.shortMins = Math.max(0, to - effOut - breakMins(effOut, to, sh));
+    if (effOut < to) res.shortMins += Math.max(0, to - effOut - breakMins(effOut, to, sh));
   } else if (judge.short && effOut < sh.sout) {
     if (judge.late && !judge.multi) {
       // one In / Out pair: short = standard day − normal − late (as worked from the shift start),
@@ -357,7 +364,7 @@ function calcDay(date, timeIn, timeOut, sh, holidays, otEligible, outMinOverride
     } else {
       // last of several pairs: time from Out to shift end, breaks in it not counted
       const to = sh.lateFromMrg ? sh.sout - sh.outEarly : sh.sout;
-      res.shortMins = Math.max(0, to - effOut - breakMins(effOut, to, sh));
+      res.shortMins += Math.max(0, to - effOut - breakMins(effOut, to, sh));
     }
   }
   return res;
@@ -734,11 +741,17 @@ module.exports = function timeSheetApi(connection) {
         // per line: late on the day's first line, short up to the next in-shift line (or the shift end)
         const pos = timed.findIndex((x) => x.idx === idx);
         const next = pos >= 0 ? timed[pos + 1] : undefined;
-        const nextInShift = !!next && next.i < shiftOf(shiftCode).sout;
+        const shN = shiftOf(shiftCode);
+        const nextInShift = !!next && next.i < shN.sout;
+        const prev = pos > 0 ? timed[pos - 1] : undefined;
+        const cur = pos >= 0 ? timed[pos] : undefined;
+        // a gap running across the lunch break is split at it (before → earlier line, after → later line)
+        const crossesLunch = (a, b) => shN.lunchTo !== null && a.o < shN.lunchTo && b.i > shN.lunchTo;
         const calc = calcDay(date, src.timeIn, src.timeOut, shiftOf(shiftCode), holidays, otEligible, outOverride, {
           late: idx === firstIdx,
           short: pos >= 0 || isLastReg,
-          shortTo: nextInShift ? next.i : null,
+          shortTo: nextInShift ? (crossesLunch(cur, next) ? shN.lunchTo : next.i) : null,
+          gapFrom: prev && cur && cur.i < shN.sout && crossesLunch(prev, cur) ? shN.lunchTo : null,
           halfDay: !nextInShift, // morning tea uncut only when he does not come back inside the shift
           multi: timed.length > 1,
         });
