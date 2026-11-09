@@ -19,7 +19,7 @@
 //   POST /tsht/save              D: full save · T: Job No only · A: refused
 //   POST /tsht/time-approve/:no  D -> T  (TIME_APPR_BY / TIME_APPR_DT)
 //   POST /tsht/job-approve/:no   T -> A  (APPROVED_BY / APPROVED_DT)
-//   POST /tsht/revoke/:no        admin only: A -> T, T -> D  (REVOKED_BY / REVOKED_DT)
+//   POST /tsht/revoke/:no        role 'admin' only: A -> T, T -> D  (REVOKED_BY / REVOKED_DT)
 //
 // 26-Oct-2026: shift crossing midnight — time_sheet_dtl key is TSHT_NO + DAY_NO + SEQ_NO
 //   CONT_FLAG 'C' = continuation row (00:00 → out) of the previous day's shift:
@@ -109,6 +109,14 @@
 //       ADD COLUMN RATE_EFF_DATE DATE NULL;
 //     ALTER TABLE tsht_allow ADD COLUMN SRC_FLAG CHAR(1) NOT NULL DEFAULT 'M';
 //     ALTER TABLE tsht_ded   ADD COLUMN SRC_FLAG CHAR(1) NOT NULL DEFAULT 'M';
+// 09-Nov-2026: employee start date in the month — absent / late / short count only from it:
+//   emp_mst.APPT_DT (joining) and hr_mst.LAST_RESUME_DT (back from leave), read by loadEmp.
+//   · date < APPT_DT        → dayType 'J' (before joining): never absent, late or short; not paid
+//                              (PayslipPrint: "Before joining" deduction at the day rate).
+//   · date < LAST_RESUME_DT → a day not already on an approved leave becomes annual leave
+//     (dayType 'L', leavePay 'A' — paid by Leave Salary, taken off the month like any annual leave).
+//   Only days with no punch change type; late / short is cleared on every day before the start date.
+//   Totals / payslips: notJoinedDays. Registers: mark 'NJ'.
 // 08-Nov-2026: payroll month close (payrollPeriod.js) — a month whose payroll is closed refuses Save,
 //   Time approval, revoke to Draft, delete and card images; a month whose job allocation is closed
 //   refuses Job approval, revoke of the Job approval and Job No changes (423).
@@ -206,11 +214,14 @@ const padEmp = (c) => String(c || '').trim().toUpperCase().padStart(4, '0').slic
 const tsNoOf = (tshtDate, empCode) => `${tshtDate.slice(0, 7)}-${padEmp(empCode)}`;
 const userOf = (req) =>
   (req.user && (req.user.USER_NAME || req.user.username || req.user.user_name)) || (req.body && req.body.user) || 'system';
-/** Users allowed to revoke approvals. Taken from the login token only — never from the request body. */
-const REVOKE_USERS = ['admin'];
+/**
+ * Roles allowed to revoke approvals (09-Nov-2026: by ROLE, no longer by the user name 'admin').
+ * Taken from the login token only (req.user.role, signed at login) — never from the request body.
+ */
+const REVOKE_ROLES = ['admin'];
 const canRevokeUser = (req) => {
-  const u = req.user && (req.user.USER_NAME || req.user.username || req.user.user_name);
-  return !!u && REVOKE_USERS.includes(String(u).trim().toLowerCase());
+  const role = req.user && (req.user.role || req.user.ROLE);
+  return !!role && REVOKE_ROLES.includes(String(role).trim().toLowerCase());
 };
 
 function parseMonth(tshtDate) {
@@ -500,7 +511,7 @@ const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function registerOf(rows, month) {
   const sumOf = (list, k) => list.reduce((t, r) => t + (Number(r[k]) || 0), 0);
   const tot = {
-    present: 0, absent: 0, weekOff: 0, holiday: 0, offWorked: 0, leave: 0, unpaidLeave: 0, toCheck: 0,
+    present: 0, absent: 0, weekOff: 0, holiday: 0, offWorked: 0, leave: 0, unpaidLeave: 0, toCheck: 0, notJoined: 0,
     lateDays: 0, shortDays: 0, lateMins: 0, shortMins: 0,
     normalHrs: sumOf(rows, 'normalHrs'), normalOt: sumOf(rows, 'normalOt'), holidayOt: sumOf(rows, 'holidayOt'),
   };
@@ -517,6 +528,7 @@ function registerOf(rows, month) {
     const hot = sumOf(dayRows, 'holidayOt');
     let mark;
     if (err) mark = '?';
+    else if (first.dayType === 'J') mark = 'NJ'; // before joining
     else if (first.dayType === 'L') mark = first.leavePay === 'U' ? 'UL' : 'L';
     else if (first.dayType === 'A') mark = 'A';
     // worked on an off day = a punch on the day itself (a ↪ row from the night before only adds hours)
@@ -530,6 +542,7 @@ function registerOf(rows, month) {
     else if (mark === 'OW') tot.offWorked++;
     else if (mark === 'L') tot.leave++;
     else if (mark === 'UL') tot.unpaidLeave++;
+    else if (mark === 'NJ') tot.notJoined++;
     else tot.toCheck++;
     if (late > 0) tot.lateDays++;
     if (short > 0) tot.shortDays++;
@@ -584,8 +597,12 @@ module.exports = function timeSheetApi(connection) {
   }
   async function loadEmp(empCode, conn = db) {
     const [rows] = await conn.query(
-      `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE
-         FROM emp_mst e LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
+      `SELECT e.EMP_CODE, e.EMP_NAME, e.CARD_NO, p.BASIC_SAL, p.SHIFT_CODE, p.OT_ELIGIBLE,
+              DATE_FORMAT(e.APPT_DT, '%Y-%m-%d') AS APPT_DT,
+              DATE_FORMAT(h.LAST_RESUME_DT, '%Y-%m-%d') AS LAST_RESUME_DT
+         FROM emp_mst e
+         LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
+         LEFT JOIN hr_mst h ON h.EMP_CODE = e.EMP_CODE
         WHERE e.EMP_CODE = ?`,
       [padEmp(empCode)],
     );
@@ -684,6 +701,10 @@ module.exports = function timeSheetApi(connection) {
       // approved leave on this date: no punches → leave day; punches → worked day, to check
       const leave = leaveDays.get(date) || null;
       const punchedOnLeave = !!leave && regs.some((r) => toMin(r.timeIn) !== null || toMin(r.timeOut) !== null);
+      // before the employee's start date in this month: joining (APPT_DT) / back from leave (LAST_RESUME_DT)
+      const punchedDay = regs.some((r) => toMin(r.timeIn) !== null || toMin(r.timeOut) !== null);
+      const beforeJoin = !!emp.APPT_DT && date < emp.APPT_DT;
+      const beforeResume = !beforeJoin && !!emp.LAST_RESUME_DT && date < emp.LAST_RESUME_DT;
       regs.forEach((src, idx) => {
         const shiftCode = src.shiftCode || empShift;
         const isLastReg = idx === regs.length - 1;
@@ -704,6 +725,23 @@ module.exports = function timeSheetApi(connection) {
           leavePay: leave && !punchedOnLeave ? leave.leavePay : null,
           leaveConflict: punchedOnLeave,
         });
+        // no absent / late / short before the start date
+        if (beforeJoin || beforeResume) {
+          calc.lateMins = 0;
+          calc.shortMins = 0;
+        }
+        if (beforeJoin && !punchedDay) {
+          calc.dayType = 'J'; // before joining — not employed yet, not paid
+        } else if (beforeResume && !punchedDay && !leave) {
+          // still on leave until the resume date — counted as annual leave (paid by Leave Salary)
+          Object.assign(calc, {
+            dayType: 'L',
+            leavePay: 'A',
+            leaveName: `Annual leave (resumed ${emp.LAST_RESUME_DT.slice(8, 10)}/${emp.LAST_RESUME_DT.slice(5, 7)})`,
+            leaveType: null,
+            leaveNo: null,
+          });
+        }
         out.push({
           dayNo: d,
           seqNo: ++seq,
@@ -713,7 +751,7 @@ module.exports = function timeSheetApi(connection) {
           timeOut: hhmm(toMin(src.timeOut)),
           shiftCode,
           jobNo: src.jobNo || null,
-          remarks: src.remarks ? String(src.remarks).slice(0, 30) : null,
+          remarks: src.remarks ? String(src.remarks).slice(0, 30) : calc.dayType === 'J' ? 'Before joining' : null,
           needsCheck: !!src.needsCheck || !!calc.error || punchedOnLeave,
           ...calc,
         });
@@ -1116,14 +1154,14 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
-  // ---------- Revoke approval (admin only): A -> T, or T -> D ----------
+  // ---------- Revoke approval (role 'admin' only): A -> T, or T -> D ----------
   // Steps back one approval at a time, so a job-approved sheet needs two revokes to reach Draft.
   // The approver columns of the revoked step are cleared; REVOKED_BY / REVOKED_DT keep who did it.
   router.post('/tsht/revoke/:no', async (req, res) => {
     const no = req.params.no;
     let conn;
     try {
-      if (!canRevokeUser(req)) throw httpErr(403, 'Only admin can revoke approvals');
+      if (!canRevokeUser(req)) throw httpErr(403, 'Only a user with the admin role can revoke approvals');
       const user = String(userOf(req)).slice(0, 20);
       conn = await db.getConnection();
       await conn.beginTransaction();
@@ -1182,6 +1220,7 @@ module.exports = function timeSheetApi(connection) {
       offDays: days((r) => (r.dayType === 'S' || r.dayType === 'H') && !r.holidayOt),
       absentDays: days((r) => r.dayType === 'A'),
       lateDays: days((r) => r.lateMins > 0),
+      notJoinedDays: days((r) => r.dayType === 'J'), // before joining (APPT_DT) — not paid
       // approved leave (same as useTimeSheet totals)
       leaveDays: days((r) => r.dayType === 'L'),
       annualLeaveDays: days((r) => r.dayType === 'L' && r.leavePay === 'A'),

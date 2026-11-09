@@ -131,6 +131,7 @@ app.post("/api/login", (req, res) => {
           user: {
             username: user.username,
             role: user.role,
+            ui_style: user.ui_style === 'STD' ? 'STD' : 'BAS',
           },
         });
 

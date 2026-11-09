@@ -8,6 +8,7 @@
  * POST /api/users              → create new user (bcrypt hash)
  * PUT  /api/users/:id/toggle   → activate / deactivate
  * PUT  /api/users/:id/reset-password → reset password
+ * PUT  /api/users/:id/ui-style → screen style: BAS (Basic) / STD (Standard)
  * DELETE /api/users/:id        → delete (non-self)
  *
  * Registration in HayatDb.js (after JWT middleware is set up):
@@ -40,7 +41,7 @@ module.exports = function (connection) {
   router.get('/users', adminOnly, async (req, res) => {
     try {
       const rows = await q(
-        `SELECT id, username, user_abbr, role, is_active,
+        `SELECT id, username, user_abbr, role, ui_style, is_active,
                 DATE_FORMAT(created_at,'%d/%m/%Y %H:%i') AS created_at
          FROM users ORDER BY username`
       );
@@ -54,6 +55,7 @@ module.exports = function (connection) {
   // ── POST /api/users — create user ────────────────────────────────────────────
   router.post('/users', adminOnly, async (req, res) => {
     const { username, user_abbr, password, role } = req.body;
+    const uiStyle = req.body.ui_style === 'STD' ? 'STD' : 'BAS';   // new users default to Basic
     if (!username || !user_abbr || !password || !role) {
       return res.status(400).json({ message: 'username, user_abbr, password and role are required.' });
     }
@@ -65,8 +67,8 @@ module.exports = function (connection) {
       }
       const hash = await bcrypt.hash(password, SALT_ROUNDS);
       const result = await q(
-        'INSERT INTO users (username, user_abbr, password_hash, role, is_active) VALUES (?,?,?,?,1)',
-        [username.trim(), user_abbr.trim().toUpperCase(), hash, role]
+        'INSERT INTO users (username, user_abbr, password_hash, role, ui_style, is_active) VALUES (?,?,?,?,?,1)',
+        [username.trim(), user_abbr.trim().toUpperCase(), hash, role, uiStyle]
       );
       res.status(201).json({ message: 'User created successfully.', id: result.insertId });
     } catch (err) {
@@ -110,6 +112,23 @@ module.exports = function (connection) {
       res.status(500).json({ message: err.message });
     }
   });
+  // ── PUT /api/users/:id/ui-style — Basic / Standard screens ──────────────────
+  router.put('/users/:id/ui-style', adminOnly, async (req, res) => {
+    const { id } = req.params;
+    const style = String(req.body.ui_style || '').trim().toUpperCase();
+    if (style !== 'BAS' && style !== 'STD') {
+      return res.status(400).json({ message: "Screen style must be 'BAS' (Basic) or 'STD' (Standard)." });
+    }
+    try {
+      const r = await q('UPDATE users SET ui_style = ? WHERE id = ?', [style, id]);
+      if (!r.affectedRows) return res.status(404).json({ message: 'User not found.' });
+      res.json({ message: `Screen style set to ${style === 'STD' ? 'Standard' : 'Basic'}.` });
+    } catch (err) {
+      console.error('[users ui-style]', err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ── PUT /api/users/:id/reset-password ───────────────────────────────────────
   router.put('/users/:id/reset-password', adminOnly, async (req, res) => {
     const { id } = req.params;
