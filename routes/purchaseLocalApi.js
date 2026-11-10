@@ -20,6 +20,11 @@
 //   NARRATION  ← the voucher's own Narration (as keyed on the screen)
 //   NARRATION1 ← supplier invoice reference, e.g. "Inv 45821 dt 12/10/2026"
 //   Both are passed to postToTranAcc as Narration / Narration1.
+//
+// Round Off (10-Nov-2026): netData.RndOff (+ / −) is added on the total after VAT on the screen
+//   (Net = Taxable + VAT + Round Off) and saved to purchase_hdr.RND_OFF. It is passed to the G/L
+//   posting as RndOff — acc_posting_setup needs a ROUND_OFF rule for it (see Step 4), or the
+//   voucher's Dr and Cr differ by the round off.
 
 const express = require("express");
 const { postToTranAcc } = require("../services/glPostingService");
@@ -126,14 +131,17 @@ module.exports = function (connection) {
             }
           }
 
+          // Round Off on the total after VAT (+ / −), 2 decimals
+          const rndOff = Math.round((Number(String(netData.RndOff ?? 0).replace(/,/g, "")) || 0) * 100) / 100;
+
           // ── Step 1: purchase_hdr ──
           // ADD = plain INSERT, so a number clash throws ER_DUP_ENTRY instead of
           // overwriting another user's voucher. EDIT keeps the upsert (row is
           // confirmed to exist and locked above).
           const insertPart = `
             INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE, SRV_NO,NARRATION,
-                                      INV_NO, INV_DATE, PO_NO, INV_AMOUNT, DISCOUNT, VAT_PERC, VAT_AMOUNT)
-            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?)`;
+                                      INV_NO, INV_DATE, PO_NO, INV_AMOUNT, DISCOUNT, VAT_PERC, VAT_AMOUNT, RND_OFF)
+            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?)`;
           const upsertPart = `
             ON DUPLICATE KEY UPDATE
               PJV_DATE   = VALUES(PJV_DATE),
@@ -146,7 +154,8 @@ module.exports = function (connection) {
               INV_AMOUNT = VALUES(INV_AMOUNT),
               DISCOUNT   = VALUES(DISCOUNT),
               VAT_PERC   = VALUES(VAT_PERC),
-              VAT_AMOUNT = VALUES(VAT_AMOUNT)`;
+              VAT_AMOUNT = VALUES(VAT_AMOUNT),
+              RND_OFF    = VALUES(RND_OFF)`;
           const netQuery = mode === "ADD" ? insertPart : insertPart + upsertPart;
 
           const hdrResult = await q(conn, netQuery, [
@@ -154,6 +163,7 @@ module.exports = function (connection) {
             netData.Narration, netData.InvNo, netData.InvDt, netData.LpoNo,
             netData.AMOUNT, netData.discAmt, netData.VatPct,
             netData.VatAmt, // was netData.vatAmt — the screen sends VatAmt, so VAT_AMOUNT was saving NULL
+            rndOff,
           ]);
           console.log(`purchase_hdr ${mode}:`, pjvNo, hdrResult.affectedRows);
 
@@ -202,7 +212,10 @@ module.exports = function (connection) {
             GrossAmt: netData.GrossAmt, // PURCHASE rule
             VatAmt: netData.VatAmt,     // VAT rule
             DiscAmt: netData.discAmt,   // DISCOUNT rule
-            NetAmt: netData.NetAmt,     // NET_PAYABLE rule
+            NetAmt: netData.NetAmt,     // NET_PAYABLE rule — already includes the round off
+            // ROUND_OFF rule (acc_posting_setup FIELD_NAME 'RndOff'): Dr when +, Cr when −,
+            // so Dr (purchase + VAT + round off) = Cr (supplier net + discount).
+            RndOff: rndOff,
             JobNo: netData.JobNo || null,
             PanelNo: netData.PanelNo || null,
           };
