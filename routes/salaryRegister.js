@@ -1,8 +1,8 @@
 // routes/salaryRegister.js
 // Salary Register (Summary / Detailed) from time_sheet_hdr + tsht_allow + tsht_ded + payroll_mst
 //   GET /api/salary-register/categories
-//   GET /api/salary-register?from=YYYY-MM-DD&to=YYYY-MM-DD&catg=ALL|<code>&mode=S|D&draft=Y|N
-//   GET /api/salary-register/breakup?...same params...&type=A|D[&tshtNo=..|&empCode=..|&scatg=..]
+//   GET /api/salary-register?from=YYYY-MM-DD&to=YYYY-MM-DD&catg=ALL|<code>&mode=S|D&draft=Y|N&grp=CATG|DEPT|TRADE|NATION
+//   GET /api/salary-register/breakup?...same params...&type=A|D[&tshtNo=..|&empCode=..|&scatg=..|&grpBy=..&grpVal=..]
 //   GET /api/salary-register/annexure?...same params...
 //   GET /api/salary-register/excel?...same params...[&annex=Y]
 //
@@ -16,6 +16,17 @@ const ExcelJS = require("exceljs");
 // ---- Column names: adjust here only if your masters differ ----
 const EMP = { table: "emp_mst", code: "EMP_CODE", name: "EMP_NAME", catg: "EMP_CATG" };
 const CATG = { table: "emp_catg_mst", code: "CATG_CODE", name: "CATG_NAME" };
+
+// ---- Group By: emp_mst column + master table for the heading name ----
+// Only these keys are accepted, so the column name never comes from the request.
+// >>> Check the DEPT / TRADE / NATION master table and column names <<<
+const GRP = {
+  CATG:   { label: "Category",   col: EMP.catg,     table: CATG.table,   code: CATG.code,     name: CATG.name },
+  DEPT:   { label: "Department", col: "DEPT_CODE",  table: "dept_mst",   code: "DEPT_CODE",   name: "DEPT_NAME" },
+  TRADE:  { label: "Trade",      col: "TRADE_CODE", table: "trade_mst",  code: "TRADE_CODE",  name: "TRADE_NAME" },
+  NATION: { label: "Nation",     col: "NATION_CODE", table: "nation_mst", code: "NATION_CODE", name: "NATION_NAME" },
+};
+
 const BRK = {
   A: { table: "tsht_allow", code: "ALLOW_CODE", mst: "allow_mst", mstCode: "ALLOW_CODE", mstName: "ALLOW_DESC",
        title: "Allowances", letter: "A", regCol: "Add Allow.", regKey: "allow" },
@@ -50,10 +61,17 @@ function getParams(q) {
     mode: q.mode === "D" ? "D" : "S",
     draft: q.draft === "Y" ? "Y" : "N",
     annex: q.annex === "Y" ? "Y" : "N",
+    grp: GRP[q.grp] ? String(q.grp) : "CATG",
   };
 }
 
+// sub-title line shared by all Excel sheets
+const subLine = (p, catgLabel) =>
+  `Period: ${dmy(p.from)} to ${dmy(p.to)}     Category: ${catgLabel}     Grouped by: ${GRP[p.grp].label}` +
+  (p.draft === "Y" ? "     (incl. Draft time sheets)" : "");
+
 async function fetchRows(db, p) {
+  const g = GRP[p.grp];
   // Time sheets are dated the 1st of the month, so the range is widened to whole months.
   const RANGE = `TSHT_DATE >= DATE_FORMAT(?, '%Y-%m-01') AND TSHT_DATE <= LAST_DAY(?)`;
   const sql = `
@@ -63,6 +81,8 @@ async function fetchRows(db, p) {
            e.${EMP.name}                          AS EMP_NAME,
            e.${EMP.catg}                          AS CATG,
            c.${CATG.name}                         AS CATG_NAME,
+           e.${g.col}                             AS GRP_CODE,
+           gm.${g.name}                           AS GRP_NAME,
            h.STATUS,
            IFNULL(pm.BASIC_SAL,0)                 AS BASIC_SAL,
            ${toMin("TOT_NORMAL_HRS")}             AS N_MIN,
@@ -75,6 +95,7 @@ async function fetchRows(db, p) {
       FROM time_sheet_hdr h
       JOIN ${EMP.table} e       ON e.${EMP.code} = h.EMP_CODE
       LEFT JOIN ${CATG.table} c ON c.${CATG.code} = e.${EMP.catg}
+      LEFT JOIN ${g.table} gm   ON gm.${g.code} = e.${g.col}
       LEFT JOIN payroll_mst pm  ON pm.EMP_CODE = h.EMP_CODE
       LEFT JOIN (SELECT TSHT_NO, SUM(AMOUNT) AS AMT FROM tsht_allow
                   WHERE ${RANGE} GROUP BY TSHT_NO) a ON a.TSHT_NO = h.TSHT_NO
@@ -83,7 +104,7 @@ async function fetchRows(db, p) {
      WHERE h.${RANGE}
        AND (? = 'ALL' OR e.${EMP.catg} = ?)
        AND (? = 'Y' OR h.STATUS <> 'D')
-     ORDER BY e.${EMP.catg}, h.EMP_CODE, h.TSHT_DATE`;
+     ORDER BY e.${g.col}, h.EMP_CODE, h.TSHT_DATE`;
   const [rows] = await db.query(sql, [
     p.from, p.to,          // tsht_allow
     p.from, p.to,          // tsht_ded
@@ -136,25 +157,30 @@ const totLine = (rowType, label, t, extra = {}) => ({
   ...extra,
 });
 
-function buildReport(rows, mode) {
+// Rows arrive ordered by the group column, then employee, then month.
+// GROUP / CATTOTAL rows carry grpVal ("" for employees with no code); category grouping also keeps catg.
+function buildReport(rows, mode, grp) {
+  const g = GRP[grp];
   const out = [];
   const grand = emptyTot();
   let i = 0;
   while (i < rows.length) {
-    const catg = rows[i].CATG;
-    const catgTot = emptyTot();
-    out.push({ rowType: "GROUP", catg, label: `${catg || "--"}  ${rows[i].CATG_NAME || ""}`.trim() });
+    const gcode = rows[i].GRP_CODE;
+    const gx = grp === "CATG" ? { catg: gcode, grpVal: gcode ?? "" } : { grpVal: gcode ?? "" };
+    const grpTot = emptyTot();
+    out.push({ rowType: "GROUP", ...gx, label: `${gcode || "--"}  ${rows[i].GRP_NAME || ""}`.trim() });
 
-    while (i < rows.length && rows[i].CATG === catg) {
+    while (i < rows.length && rows[i].GRP_CODE === gcode) {
       const emp = rows[i].EMP_CODE;
       const name = rows[i].EMP_NAME;
+      const catg = rows[i].CATG;
       const basic = r2(rows[i].BASIC_SAL);
       const empTot = emptyTot();
       let lines = 0;
 
-      while (i < rows.length && rows[i].CATG === catg && rows[i].EMP_CODE === emp) {
+      while (i < rows.length && rows[i].GRP_CODE === gcode && rows[i].EMP_CODE === emp) {
         const r = rows[i];
-        add(empTot, r); add(catgTot, r); add(grand, r);
+        add(empTot, r); add(grpTot, r); add(grand, r);
         if (mode === "D") {
           const t = emptyTot(); add(t, r);
           out.push(totLine("DATA", "", t, {
@@ -170,7 +196,7 @@ function buildReport(rows, mode) {
         out.push(totLine("SUBTOTAL", `Total: ${emp}  ${name}`, empTot, { catg, empCode: emp, empName: name }));
       }
     }
-    out.push(totLine("CATTOTAL", "Category Total:", catgTot, { catg }));
+    out.push(totLine("CATTOTAL", `${g.label} Total:`, grpTot, gx));
   }
   if (rows.length) out.push(totLine("GRAND", "Grand Total", grand));
   return out;
@@ -179,6 +205,7 @@ function buildReport(rows, mode) {
 // ---- Allowance / deduction breakup lines ----
 async function fetchBreakup(db, p, type, scope = {}) {
   const b = BRK[type];
+  const g = GRP[p.grp];
   let where = `h.TSHT_DATE >= DATE_FORMAT(?, '%Y-%m-01') AND h.TSHT_DATE <= LAST_DAY(?)
      AND (? = 'ALL' OR e.${EMP.catg} = ?)
      AND (? = 'Y' OR h.STATUS <> 'D')
@@ -187,29 +214,40 @@ async function fetchBreakup(db, p, type, scope = {}) {
   if (scope.tshtNo) { where += " AND h.TSHT_NO = ?"; args.push(scope.tshtNo); }
   if (scope.empCode) { where += " AND h.EMP_CODE = ?"; args.push(scope.empCode); }
   if (scope.catg) { where += ` AND e.${EMP.catg} = ?`; args.push(scope.catg); }
+  if (scope.grpBy && GRP[scope.grpBy]) {
+    const col = GRP[scope.grpBy].col;
+    if (scope.grpVal) { where += ` AND e.${col} = ?`; args.push(scope.grpVal); }
+    else where += ` AND (e.${col} IS NULL OR e.${col} = '')`; // the "--" (no code) group
+  }
 
   const sql = `
     SELECT x.${b.code} AS CODE, m.${b.mstName} AS CNAME,
            h.EMP_CODE, e.${EMP.name} AS EMP_NAME,
            e.${EMP.catg} AS CATG, c.${CATG.name} AS CATG_NAME,
+           e.${g.col} AS GRP_CODE, gm.${g.name} AS GRP_NAME,
            DATE_FORMAT(h.TSHT_DATE,'%m/%Y') AS MON, h.TSHT_NO,
            x.AMOUNT, x.REMARKS
       FROM ${b.table} x
       JOIN time_sheet_hdr h     ON h.TSHT_NO = x.TSHT_NO
       JOIN ${EMP.table} e       ON e.${EMP.code} = h.EMP_CODE
       LEFT JOIN ${CATG.table} c ON c.${CATG.code} = e.${EMP.catg}
+      LEFT JOIN ${g.table} gm   ON gm.${g.code} = e.${g.col}
       LEFT JOIN ${b.mst} m      ON m.${b.mstCode} = x.${b.code}
      WHERE ${where}
-     ORDER BY x.${b.code}, e.${EMP.catg}, h.EMP_CODE, h.TSHT_DATE`;
+     ORDER BY x.${b.code}, e.${g.col}, h.EMP_CODE, h.TSHT_DATE`;
   const [rows] = await db.query(sql, args);
   return rows.map((r) => ({
     code: r.CODE, name: r.CNAME || "", empCode: r.EMP_CODE, empName: r.EMP_NAME,
-    catg: r.CATG, catgName: r.CATG_NAME || "", month: r.MON, tshtNo: r.TSHT_NO,
+    catg: r.CATG, catgName: r.CATG_NAME || "",
+    grp: r.GRP_CODE ?? "", grpName: r.GRP_NAME || "",
+    month: r.MON, tshtNo: r.TSHT_NO,
     amount: r2(r.AMOUNT), remarks: r.REMARKS || "",
   }));
 }
 
-// Annexure: listed by code (narrow), plus code x category summary and a check against the register
+// Annexure: listed by code (narrow), plus code x group summary and a check against the register.
+// The summary keeps the field names cats / byCat / catTotals so the PDF needs no change;
+// they now hold the selected grouping (category, department, trade or nation).
 function buildAnnex(lines, type, registerTotal) {
   const b = BRK[type];
   const rows = [];
@@ -227,8 +265,8 @@ function buildAnnex(lines, type, registerTotal) {
       const l = lines[i];
       rows.push({ rowType: "LINE", ...l });
       ct = r2(ct + l.amount);
-      if (!cats.find((c) => c.code === l.catg)) cats.push({ code: l.catg, name: l.catgName });
-      sm.byCat[l.catg] = r2((sm.byCat[l.catg] || 0) + l.amount);
+      if (!cats.find((c) => c.code === l.grp)) cats.push({ code: l.grp, name: l.grpName });
+      sm.byCat[l.grp] = r2((sm.byCat[l.grp] || 0) + l.amount);
       i++;
     }
     sm.total = ct;
@@ -253,7 +291,7 @@ function buildEmpAnnex(allowLines, dedLines, regAllow, regDed) {
     ...allowLines.map((l) => ({ ...l, t: "A" })),
     ...dedLines.map((l) => ({ ...l, t: "D" })),
   ].sort((a, b) =>
-    String(a.catg || "").localeCompare(String(b.catg || "")) ||
+    String(a.grp || "").localeCompare(String(b.grp || "")) ||   // same order as the register
     String(a.empCode).localeCompare(String(b.empCode)) ||
     String(a.tshtNo).localeCompare(String(b.tshtNo)) ||        // yyyy-mm-... = month order
     a.t.localeCompare(b.t) ||                                  // allowances before deductions
@@ -291,6 +329,7 @@ async function annexData(db, p, report) {
   const grand = report.find((r) => r.rowType === "GRAND") || {};
   const [al, dl] = await Promise.all([fetchBreakup(db, p, "A"), fetchBreakup(db, p, "D")]);
   return {
+    grpLabel: GRP[p.grp].label,
     allow: buildAnnex(al, "A", grand.allow || 0),
     ded: buildAnnex(dl, "D", grand.ded || 0),
     emp: buildEmpAnnex(al, dl, grand.allow || 0, grand.ded || 0),
@@ -377,9 +416,7 @@ function addRegisterSheet(wb, report, p, company, catgLabel) {
   const nCols = cols.length;
   ws.columns = cols.map((c) => ({ width: c.w }));
 
-  titleLines(ws, company, `Salary Register - ${p.mode === "D" ? "Detailed" : "Summary"}`,
-    `Period: ${dmy(p.from)} to ${dmy(p.to)}     Category: ${catgLabel}` +
-      (p.draft === "Y" ? "     (incl. Draft time sheets)" : ""));
+  titleLines(ws, company, `Salary Register - ${p.mode === "D" ? "Detailed" : "Summary"}`, subLine(p, catgLabel));
   headerRow(ws, cols.map((c) => c.h));
   ws.views = [{ state: "frozen", ySplit: 5 }];
 
@@ -417,8 +454,7 @@ function addAnnexSheet(wb, ax, p, company, catgLabel) {
   const nCols = heads.length;
   ws.columns = [{ width: 10 }, { width: 30 }, { width: 9 }, { width: 15 }, { width: 13 }, { width: 30 }];
 
-  titleLines(ws, company, `Annexure ${ax.letter} - ${ax.title}`,
-    `Period: ${dmy(p.from)} to ${dmy(p.to)}     Category: ${catgLabel}`);
+  titleLines(ws, company, `Annexure ${ax.letter} - ${ax.title}`, subLine(p, catgLabel));
   headerRow(ws, heads);
   ws.views = [{ state: "frozen", ySplit: 5 }];
 
@@ -447,13 +483,13 @@ function addAnnexSheet(wb, ax, p, company, catgLabel) {
   ]);
   chk.font = { bold: true, color: { argb: ax.diff === 0 ? "FF1F3C88" : "FFC62828" } };
 
-  // code x category summary
+  // code x group summary
   if (ax.summary.length) {
     ws.addRow([]);
-    ws.addRow([`Code Summary - ${ax.title}`]).font = { bold: true };
+    ws.addRow([`Code Summary - ${ax.title} by ${GRP[p.grp].label}`]).font = { bold: true };
     const sHeads = ["Code", "Description", ...ax.cats.map((c) => `${c.code || "--"} ${c.name || ""}`.trim()), "Total"];
     const sN = sHeads.length;
-    // widen extra columns if categories exceed the detail layout
+    // widen extra columns if groups exceed the detail layout
     for (let ci = 7; ci <= sN; ci++) ws.getColumn(ci).width = 13;
     headerRow(ws, sHeads);
     for (const s of ax.summary) {
@@ -477,8 +513,7 @@ function addEmpAnnexSheet(wb, ax, p, company, catgLabel) {
   const nCols = heads.length;
   ws.columns = [{ width: 9 }, { width: 15 }, { width: 7 }, { width: 28 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 26 }];
 
-  titleLines(ws, company, `Annexure ${ax.letter} - ${ax.title}`,
-    `Period: ${dmy(p.from)} to ${dmy(p.to)}     Category: ${catgLabel}`);
+  titleLines(ws, company, `Annexure ${ax.letter} - ${ax.title}`, subLine(p, catgLabel));
   headerRow(ws, heads);
   ws.views = [{ state: "frozen", ySplit: 5 }];
 
@@ -530,13 +565,13 @@ module.exports = function (connection) {
     try {
       const rows = await fetchRows(db, p);
       const { company, catgLabel } = await headerInfo(db, p);
-      res.json({ rows: buildReport(rows, p.mode), company, catgLabel, params: p });
+      res.json({ rows: buildReport(rows, p.mode, p.grp), company, catgLabel, params: p });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });
 
-  // drill-down popup: one time sheet / one employee / one category / all
+  // drill-down popup: one time sheet / one employee / one group / all
   router.get("/salary-register/breakup", async (req, res) => {
     let p;
     try { p = getParams(req.query); } catch (e) { return res.status(400).json({ error: e.message }); }
@@ -545,6 +580,8 @@ module.exports = function (connection) {
       tshtNo: req.query.tshtNo ? String(req.query.tshtNo) : undefined,
       empCode: req.query.empCode ? String(req.query.empCode) : undefined,
       catg: req.query.scatg ? String(req.query.scatg) : undefined,
+      grpBy: req.query.grpBy && GRP[req.query.grpBy] ? String(req.query.grpBy) : undefined,
+      grpVal: req.query.grpVal !== undefined ? String(req.query.grpVal) : undefined,
     };
     try {
       res.json({ type, title: BRK[type].title, lines: await fetchBreakup(db, p, type, scope) });
@@ -558,7 +595,7 @@ module.exports = function (connection) {
     let p;
     try { p = getParams(req.query); } catch (e) { return res.status(400).json({ error: e.message }); }
     try {
-      const report = buildReport(await fetchRows(db, p), p.mode);
+      const report = buildReport(await fetchRows(db, p), p.mode, p.grp);
       res.json(await annexData(db, p, report));
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -569,7 +606,7 @@ module.exports = function (connection) {
     let p;
     try { p = getParams(req.query); } catch (e) { return res.status(400).json({ error: e.message }); }
     try {
-      const report = buildReport(await fetchRows(db, p), p.mode);
+      const report = buildReport(await fetchRows(db, p), p.mode, p.grp);
       const { company, catgLabel } = await headerInfo(db, p);
 
       const wb = new ExcelJS.Workbook();
@@ -581,7 +618,7 @@ module.exports = function (connection) {
         addEmpAnnexSheet(wb, ax.emp, p, company, catgLabel);
       }
 
-      const fname = `SalaryRegister_${p.mode === "D" ? "Detailed" : "Summary"}_${p.from}_${p.to}.xlsx`;
+      const fname = `SalaryRegister_${p.mode === "D" ? "Detailed" : "Summary"}_by${GRP[p.grp].label}_${p.from}_${p.to}.xlsx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
       await wb.xlsx.write(res);
