@@ -7995,3 +7995,5 @@ app.use('/api', leaveTypeApi(connection));
 app.use('/api', authMiddleware, require('./routes/fabDoQuotItems')(connection));
 //
 app.use('/api', require('./routes/payslipLabelApi')(connection));
+//
+  app.use("/api", authMiddleware, require("./routes/ledgerSettle")(connection));
