@@ -199,8 +199,10 @@ const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SE
 const HRS_COLS = ['TOT_NORMAL_HRS', 'TOT_NOT_HRS', 'TOT_HOT_HRS'];
 const WAGE_COLS = ['NORMAL_WAGES', 'NOT_WAGES', 'HOT_WAGES', 'TOTAL_SALARY'];
 const TOT_COLS = [...HRS_COLS, ...WAGE_COLS];
+
 // salary snapshot — the pay the month was calculated with (SAL_SCHEME is stored separately)
-const SNAP_COLS = ['BASIC_SAL', 'HOURLY_RATE', 'DAYS_IN_MONTH', 'DAY_RATE', 'RATE_EFF_DATE'];
+// 11-Nov-2026: EARNED_BASIC / ROUND_OFF — Normal wages = Earned basic + Round-off (Salary Register)
+const SNAP_COLS = ['BASIC_SAL', 'HOURLY_RATE', 'DAYS_IN_MONTH', 'DAY_RATE', 'RATE_EFF_DATE', 'EARNED_BASIC', 'ROUND_OFF'];
 /** Salary JV posted for this sheet? (tran_acc tran type 15, Narration 2 = TSHT_NO). Adjust to your schema. */
 const JV_POSTED_SQL = 'SELECT 1 FROM tran_acc WHERE TRAN_TYPE = 15 AND NARRATION2 = ? LIMIT 1';
 const srcFlag = (v) => (v === 'U' ? 'U' : 'M');
@@ -897,7 +899,7 @@ module.exports = function timeSheetApi(connection) {
                   ELSE h.STATUS
                 END AS STATUS,
                 h.STATUS AS STATUS_CODE,
-                ${TOT_COLS.map((c) => `h.${c}`).join(', ')}
+                ${TOT_COLS.map((c) => `h.${c}`).join(', '),h.EARNED_BASIC, h.ROUND_OFF}
            FROM time_sheet_hdr h
            JOIN emp_mst e ON e.EMP_CODE = h.EMP_CODE
           ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -1077,6 +1079,8 @@ module.exports = function timeSheetApi(connection) {
         month.days,
         num(wages.DAY_RATE, 2),
         wages.RATE_EFF_DATE || pay.effDate || null,
+        num(wages.EARNED_BASIC, 2), // null if the screen did not send it (old build)
+        num(wages.ROUND_OFF, 2),
       ];
 
       if (mode === 'ADD') {

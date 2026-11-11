@@ -21,17 +21,21 @@ const CATG = { table: "emp_catg_mst", code: "CATG_CODE", name: "CATG_NAME" };
 // Only these keys are accepted, so the column name never comes from the request.
 // >>> Check the DEPT / TRADE / NATION master table and column names <<<
 const GRP = {
-  CATG:   { label: "Category",   col: EMP.catg,     table: CATG.table,   code: CATG.code,     name: CATG.name },
-  DEPT:   { label: "Department", col: "DEPT_CODE",  table: "dept_mst",   code: "DEPT_CODE",   name: "DEPT_NAME" },
-  TRADE:  { label: "Trade",      col: "TRADE_CODE", table: "trade_mst",  code: "TRADE_CODE",  name: "TRADE_NAME" },
-  NATION: { label: "Nation",     col: "NATION_CODE", table: "nation_mst", code: "NATION_CODE", name: "NATION_NAME" },
+  CATG: { label: "Category", col: EMP.catg, table: CATG.table, code: CATG.code, name: CATG.name },
+  DEPT: { label: "Department", col: "DEPT_CODE", table: "dept_mst", code: "DEPT_CODE", name: "DEPT_NAME" },
+  TRADE: { label: "Trade", col: "TRADE_CODE", table: "trade_mst", code: "TRADE_CODE", name: "TRADE_NAME" },
+  NATION: { label: "Nation", col: "NATION_CODE", table: "nation_mst", code: "NATION_CODE", name: "NATION_NAME" },
 };
 
 const BRK = {
-  A: { table: "tsht_allow", code: "ALLOW_CODE", mst: "allow_mst", mstCode: "ALLOW_CODE", mstName: "ALLOW_DESC",
-       title: "Allowances", letter: "A", regCol: "Add Allow.", regKey: "allow" },
-  D: { table: "tsht_ded", code: "DED_CODE", mst: "ded_mst", mstCode: "DED_CODE", mstName: "DED_DESC",
-       title: "Deductions", letter: "B", regCol: "Less Deduct.", regKey: "ded" },
+  A: {
+    table: "tsht_allow", code: "ALLOW_CODE", mst: "allow_mst", mstCode: "ALLOW_CODE", mstName: "ALLOW_DESC",
+    title: "Allowances", letter: "A", regCol: "Add Allow.", regKey: "allow"
+  },
+  D: {
+    table: "tsht_ded", code: "DED_CODE", mst: "ded_mst", mstCode: "DED_CODE", mstName: "DED_DESC",
+    title: "Deductions", letter: "B", regCol: "Less Deduct.", regKey: "ded"
+  },
 };
 
 // time_sheet_hdr.STATUS decode (D = Draft is the table default)
@@ -85,6 +89,7 @@ async function fetchRows(db, p) {
            gm.${g.name}                           AS GRP_NAME,
            h.STATUS,
            IFNULL(pm.BASIC_SAL,0)                 AS BASIC_SAL,
+           COALESCE(h.EARNED_BASIC, h.NORMAL_WAGES - IFNULL(h.ROUND_OFF,0)) AS EARNED,
            ${toMin("TOT_NORMAL_HRS")}             AS N_MIN,
            ${toMin("TOT_NOT_HRS")}                AS O_MIN,
            ${toMin("TOT_HOT_HRS")}                AS H_MIN,
@@ -130,15 +135,16 @@ async function headerInfo(db, p) {
 }
 
 // ---- Build flat report rows (shared by screen, PDF and Excel) ----
-const emptyTot = () => ({
-  cnt: 0, nMin: 0, oMin: 0, hMin: 0, nW: 0, oW: 0, hW: 0, gross: 0, allow: 0, ded: 0, tot: 0,
-});
 
+const emptyTot = () => ({
+  cnt: 0, nMin: 0, oMin: 0, hMin: 0, eB: 0, nW: 0, oW: 0, hW: 0, gross: 0, allow: 0, ded: 0, tot: 0,
+});
 function add(t, r) {
   t.cnt += 1;
   t.nMin += Number(r.N_MIN) || 0;
   t.oMin += Number(r.O_MIN) || 0;
   t.hMin += Number(r.H_MIN) || 0;
+  t.eB = r2(t.eB + Number(r.EARNED));
   t.nW = r2(t.nW + Number(r.NORMAL_WAGES));
   t.oW = r2(t.oW + Number(r.NOT_WAGES));
   t.hW = r2(t.hW + Number(r.HOT_WAGES));
@@ -149,7 +155,7 @@ function add(t, r) {
 }
 
 const totLine = (rowType, label, t, extra = {}) => ({
-  rowType, label, sheets: t.cnt, basic: null,
+  rowType, label, sheets: t.cnt, basic: null,earned: t.eB,
   nHrs: fmtHm(t.nMin), nWages: t.nW,
   oHrs: fmtHm(t.oMin), oWages: t.oW,
   hHrs: fmtHm(t.hMin), hWages: t.hW,
@@ -340,19 +346,20 @@ async function annexData(db, p, report) {
 function columnsFor(mode) {
   const left = mode === "D"
     ? [
-        { h: "Emp Code", k: "empCode", w: 10 },
-        { h: "Employee Name", k: "empName", w: 26 },
-        { h: "Month", k: "month", w: 9 },
-        { h: "T/S No", k: "tshtNo", w: 15 },
-        { h: "Status", k: "status", w: 14 },
-      ]
+      { h: "Emp Code", k: "empCode", w: 10 },
+      { h: "Employee Name", k: "empName", w: 26 },
+      { h: "Month", k: "month", w: 9 },
+      { h: "T/S No", k: "tshtNo", w: 15 },
+      { h: "Status", k: "status", w: 14 },
+    ]
     : [
-        { h: "Emp Code", k: "empCode", w: 10 },
-        { h: "Employee Name", k: "empName", w: 28 },
-        { h: "Sheets", k: "sheets", w: 7, num: "0" },
-      ];
+      { h: "Emp Code", k: "empCode", w: 10 },
+      { h: "Employee Name", k: "empName", w: 28 },
+      { h: "Sheets", k: "sheets", w: 7, num: "0" },
+    ];
   const right = [
     { h: "Basic Salary", k: "basic", w: 11, num: "#,##0.00" },
+    { h: "Earned Basic", k: "earned", w: 12, num: "#,##0.00" },
     { h: "Normal Hrs", k: "nHrs", w: 9, hrs: true },
     { h: "Normal Wages", k: "nWages", w: 12, num: "#,##0.00" },
     { h: "N.OT Hrs", k: "oHrs", w: 8, hrs: true },
@@ -479,7 +486,7 @@ function addAnnexSheet(wb, ax, p, company, catgLabel) {
   ws.addRow([]);
   const chk = ws.addRow([
     `Register ${ax.regCol} total: ${fmtAmt(ax.registerTotal)}     ` +
-      (ax.diff === 0 ? "Tallied" : `Difference: ${fmtAmt(ax.diff)}`),
+    (ax.diff === 0 ? "Tallied" : `Difference: ${fmtAmt(ax.diff)}`),
   ]);
   chk.font = { bold: true, color: { argb: ax.diff === 0 ? "FF1F3C88" : "FFC62828" } };
 
@@ -538,7 +545,7 @@ function addEmpAnnexSheet(wb, ax, p, company, catgLabel) {
   const ok = ax.diffAllow === 0 && ax.diffDed === 0;
   const chk = ws.addRow([
     `Register Add Allow. ${fmtAmt(ax.regAllow)}  /  Less Deduct. ${fmtAmt(ax.regDed)}     ` +
-      (ok ? "Tallied" : `Difference: Allow ${fmtAmt(ax.diffAllow)}  Ded ${fmtAmt(ax.diffDed)}`),
+    (ok ? "Tallied" : `Difference: Allow ${fmtAmt(ax.diffAllow)}  Ded ${fmtAmt(ax.diffDed)}`),
   ]);
   chk.font = { bold: true, color: { argb: ok ? "FF1F3C88" : "FFC62828" } };
 }
