@@ -899,7 +899,7 @@ module.exports = function timeSheetApi(connection) {
                   ELSE h.STATUS
                 END AS STATUS,
                 h.STATUS AS STATUS_CODE,
-                ${TOT_COLS.map((c) => `h.${c}`).join(', '),h.EARNED_BASIC, h.ROUND_OFF}
+                ${TOT_COLS.map((c) => `h.${c}`).join(', ')},h.EARNED_BASIC, h.ROUND_OFF
            FROM time_sheet_hdr h
            JOIN emp_mst e ON e.EMP_CODE = h.EMP_CODE
           ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
