@@ -131,6 +131,11 @@
 //     come back inside the shift — a line followed by another in-shift line has all its breaks cut.
 //   · A later line starting at / after the shift end (e.g. back at 23:45) is flagged afterShift —
 //     the screen labels it "Overtime after regular shift"; the line before it is short to the shift end.
+// 11-Nov-2026: earned format — /tsht/save stores EARNED_BASIC, EARNED_ALLOW, ATT_DED, ROUND_OFF (SNAP_COLS),
+//   /tsht/list returns them, /tsht/payslips sends each allowance line's type (fixed lines are prorated).
+//   DB: ALTER TABLE time_sheet_hdr ADD COLUMN EARNED_BASIC DECIMAL(12,2) NULL AFTER BASIC_SAL,
+//         ADD COLUMN EARNED_ALLOW DECIMAL(12,2) NULL AFTER EARNED_BASIC, ADD COLUMN ATT_DED DECIMAL(12,2) NULL AFTER EARNED_ALLOW,
+//         ADD COLUMN ROUND_OFF DECIMAL(6,2) NULL AFTER ATT_DED;   (EARNED_BASIC / ROUND_OFF already added)
 // 08-Nov-2026: payroll month close (payrollPeriod.js) — a month whose payroll is closed refuses Save,
 //   Time approval, revoke to Draft, delete and card images; a month whose job allocation is closed
 //   refuses Job approval, revoke of the Job approval and Job No changes (423).
@@ -199,10 +204,10 @@ const MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SE
 const HRS_COLS = ['TOT_NORMAL_HRS', 'TOT_NOT_HRS', 'TOT_HOT_HRS'];
 const WAGE_COLS = ['NORMAL_WAGES', 'NOT_WAGES', 'HOT_WAGES', 'TOTAL_SALARY'];
 const TOT_COLS = [...HRS_COLS, ...WAGE_COLS];
-
 // salary snapshot — the pay the month was calculated with (SAL_SCHEME is stored separately)
-// 11-Nov-2026: EARNED_BASIC / ROUND_OFF — Normal wages = Earned basic + Round-off (Salary Register)
-const SNAP_COLS = ['BASIC_SAL', 'HOURLY_RATE', 'DAYS_IN_MONTH', 'DAY_RATE', 'RATE_EFF_DATE', 'EARNED_BASIC', 'ROUND_OFF'];
+// 11-Nov-2026: earned figures for the Salary Register — Earned basic + Earned allow + N.OT + H.OT
+//   − ATT_DED (late / short + absent) − the sheet's deductions + ROUND_OFF = TOTAL_SALARY
+const SNAP_COLS = ['BASIC_SAL', 'HOURLY_RATE', 'DAYS_IN_MONTH', 'DAY_RATE', 'RATE_EFF_DATE', 'EARNED_BASIC', 'EARNED_ALLOW', 'ATT_DED', 'ROUND_OFF'];
 /** Salary JV posted for this sheet? (tran_acc tran type 15, Narration 2 = TSHT_NO). Adjust to your schema. */
 const JV_POSTED_SQL = 'SELECT 1 FROM tran_acc WHERE TRAN_TYPE = 15 AND NARRATION2 = ? LIMIT 1';
 const srcFlag = (v) => (v === 'U' ? 'U' : 'M');
@@ -899,7 +904,7 @@ module.exports = function timeSheetApi(connection) {
                   ELSE h.STATUS
                 END AS STATUS,
                 h.STATUS AS STATUS_CODE,
-                ${TOT_COLS.map((c) => `h.${c}`).join(', ')},h.EARNED_BASIC, h.ROUND_OFF
+                ${TOT_COLS.map((c) => `h.${c}`).join(', ')}, h.EARNED_BASIC, h.EARNED_ALLOW, h.ATT_DED, h.ROUND_OFF
            FROM time_sheet_hdr h
            JOIN emp_mst e ON e.EMP_CODE = h.EMP_CODE
           ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
@@ -1080,6 +1085,8 @@ module.exports = function timeSheetApi(connection) {
         num(wages.DAY_RATE, 2),
         wages.RATE_EFF_DATE || pay.effDate || null,
         num(wages.EARNED_BASIC, 2), // null if the screen did not send it (old build)
+        num(wages.EARNED_ALLOW, 2),
+        num(wages.ATT_DED, 2),
         num(wages.ROUND_OFF, 2),
       ];
 
@@ -1375,7 +1382,8 @@ module.exports = function timeSheetApi(connection) {
         const emp = calc.emp;
         // the basic stored with the sheet; sheets saved before the snapshot: the basic in force for the month
         const basic = hdr.BASIC_SAL !== null ? Number(hdr.BASIC_SAL) : (await monthPay(emp, hdr.TSHT_DATE)).basic;
-        const line = (a) => ({ code: a.CODE, descr: a.DESCR || '', amount: Number(a.AMOUNT) || 0, remarks: a.REMARKS || '' });
+        // type (F / V): fixed allowance lines are earned for the paid days only (11-Nov-2026)
+        const line = (a) => ({ code: a.CODE, descr: a.DESCR || '', amount: Number(a.AMOUNT) || 0, remarks: a.REMARKS || '', type: a.TYPE || '' });
         slips.push({
           tshtNo: hdr.TSHT_NO,
           tshtDate: hdr.TSHT_DATE,

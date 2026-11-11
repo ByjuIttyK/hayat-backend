@@ -4,6 +4,8 @@
 // Endpoint: GET /api/pvlist/:tranId[?fromDate=yyyy-MM-dd&toDate=yyyy-MM-dd]
 // Period: InfoGrid's period chip sends fromDate/toDate; without them the
 // current ac_period is used (utils/periodFilter.js).
+// 11-Nov-2026: TRAN_TYPE 04 rows carry ALL_CHQ_NOS (every cheque no. of the voucher, space separated)
+//   so InfoGrid's Cheque No filter finds a voucher by its 2nd / 3rd … cheque (InfoGridChequeSearch.ts).
 
 const express = require("express");
 const periodFilter = require("../utils/periodFilter");
@@ -74,7 +76,7 @@ module.exports = function (connection) {
       const sql =
         "SELECT v.TRAN_TYPE, v.VCHR_NO, DATE_FORMAT(v.DATTE,'%d/%m/%Y') AS DATTE, " +
         "v.ACC_CODE, v.CUST_CODE, " +
-        "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT, chq.CHQ_COUNT, " +
+        "chq.CHEQUE_NO, DATE_FORMAT(chq.CHEQUE_DT,'%d/%m/%y') AS CHEQUE_DT, chq.CHQ_COUNT, chq.ALL_CHQ_NOS, " +
         amountCol + "v.AMOUNT AS VCHR_AMOUNT, " +
         "v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
         "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, v.CONTRA_FLG, " +
@@ -90,7 +92,9 @@ module.exports = function (connection) {
         "LEFT OUTER JOIN ac_list ON ac_list.AC_CODE = v.CUST_CODE " +
         "LEFT OUTER JOIN (" +
         "  SELECT TRAN_TYPE, VCHR_NO, MIN(CHQ) AS CHEQUE_NO, MIN(CHQ_DATE) AS CHEQUE_DT, " +
-        "         COUNT(DISTINCT CHQ) AS CHQ_COUNT FROM (" +
+        "         COUNT(DISTINCT CHQ) AS CHQ_COUNT, " +
+        // every cheque no. of the voucher — the list's Cheque No filter finds a voucher by any of them
+        "         GROUP_CONCAT(DISTINCT CHQ ORDER BY CHQ SEPARATOR ' ') AS ALL_CHQ_NOS FROM (" +
         "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ, CHQ_DATE FROM pdc_isu WHERE TRAN_TYPE = ? " +
         "    UNION ALL " +
         "    SELECT TRAN_TYPE, VCHR_NO, CHQ_NO AS CHQ, CHQ_DATE FROM current_chq WHERE TRAN_TYPE = ? " +
