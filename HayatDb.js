@@ -7498,7 +7498,7 @@ const glSuggestApi = require('./gl_suggest_api')(connection);
 app.use('/api/gl-suggest', authMiddleware, glSuggestApi);
 //
 const rcpChqApi = require("./rcp_chq_batch_api");
-app.use("/rcp_batch", rcpChqApi);
+app.use("/api/rcp_batch", rcpChqApi);
 
 //app.use('/api', require('./boqTemplateRoute'));
 // HayatDb.js — one line to add:

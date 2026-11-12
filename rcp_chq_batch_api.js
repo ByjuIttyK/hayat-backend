@@ -50,7 +50,9 @@ router.get("/next_no", async (req, res) => {
       const m = rows[0].BATCH_NO.match(/-(\d+)$/);
       if (m) next = parseInt(m[1], 10) + 1;
     }
-    res.json({ batchNo: `R${yr}-${String(next).padStart(3, "0")}` });
+    const no = `R${yr}-${String(next).padStart(3, "0")}`;
+    // BATCH_NO is the key the screen reads; batchNo kept for any older caller
+    res.json({ BATCH_NO: no, batchNo: no });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
