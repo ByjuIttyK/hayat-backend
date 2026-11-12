@@ -7,7 +7,7 @@
 //
 // Feeds the Job No / Panel No dropdowns in the PinvNonStock items grid.
 //
-//   GET /api/joblov/jobs           → [{ code, label, extra }]
+//   GET /api/joblov/jobs           → [{ code, label, extra, custCode, quotRef, contractAmt }]
 //   GET /api/joblov/panels/:jobNo  → [{ code, label }]
 //
 // Paths sit under /joblov, NOT /lov — lovRoutes.js already owns /lov/:lovHdr
@@ -30,7 +30,11 @@ module.exports = function (connection) {
       const [rows] = await db.query(`
         SELECT TRIM(j.JOB_NO)                   AS code,
                TRIM(COALESCE(j.PROJ_NAME, ''))  AS label,
-               TRIM(COALESCE(c.CUST_NAME, ''))  AS extra
+               TRIM(COALESCE(c.CUST_NAME, ''))  AS extra,
+               -- extra columns for the JV Job No dropdown (PinvNonStock ignores them)
+               TRIM(COALESCE(j.CUST_CODE, ''))  AS custCode,
+               TRIM(COALESCE(j.QUOT_REF, ''))   AS quotRef,
+               COALESCE(j.CONTRACT_AMT, 0)      AS contractAmt
         FROM   job_card j
         LEFT   JOIN cus_mst c ON TRIM(c.CUST_CODE) = TRIM(j.CUST_CODE)
         ORDER  BY j.JOB_NO DESC

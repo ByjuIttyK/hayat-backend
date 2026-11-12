@@ -1539,7 +1539,8 @@ app.get("/api/custst/:p_cus/:as_on_date", function (req, res) {
   console.log("CustSt ==>", { as_on_date, p_cus });
 
   let sql = "SELECT a.CUST_CODE, t.TYPE_ABBR as TRAN_TYPE, a.VCHR_NO, DATE_FORMAT(a.DATTE,'%d/%m/%y') AS DATTE," +
-    " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE," +
+    " a.NAR, a.DR_AMT, a.CR_AMT,a.DR_AMT - a.CR_AMT AS INV_BAL, a.BALANCE, a.JOB_NO," +
+
     // Due date is not stored. Where the invoice carries credit terms it is
     // INV_DATE + CR_DAYS; DO_DATE remains the fallback for invoices with none.
     " CASE WHEN COALESCE(b.CR_DAYS,0) >= 0" +
@@ -7996,4 +7997,6 @@ app.use('/api', authMiddleware, require('./routes/fabDoQuotItems')(connection));
 //
 app.use('/api', require('./routes/payslipLabelApi')(connection));
 //
-  app.use("/api", authMiddleware, require("./routes/ledgerSettle")(connection));
+app.use("/api", authMiddleware, require("./routes/ledgerSettle")(connection));
+//
+app.use("/api", authMiddleware, require("./routes/sivJobPanels")(connection));
