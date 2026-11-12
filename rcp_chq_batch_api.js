@@ -4,7 +4,7 @@
 //
 //  Mount in HayatDb.js:
 //    const rcpChqApi = require("./routes/rcp_chq_batch_api");
-//    app.use("/rcp_batch", rcpChqApi);
+//    app.use("/api/rcp_batch", rcpChqApi);
 //
 //  Customer-side mirror of pay_chq_batch_api.js:
 //    received cheque  →  Dr Bank (current) / PDC Receivable (post-dated),
@@ -29,9 +29,31 @@ function pdcAc(chqDt, batchDt, bankAc) {
   return pdcType(chqDt, batchDt) === "PDC" ? PDC_RECEIVABLE_AC : (bankAc || "");
 }
 
+// "Stld : 3405,3412,3385" — settled invoice nos for TRAN_ACC.NARRATION1.
+// Leading zeros dropped so more numbers fit; cut at the last whole number ≤ 80 chars.
+function stldNarration(settlement, max = 80) {
+  const nos = settlement
+    .filter(s => Number(s.RV_AMT) > 0 && String(s.DOC_NO || "").trim())
+    .map(s => String(s.DOC_NO).trim().replace(/^0+(?=\d)/, ""));
+  if (!nos.length) return "";
+  let out = "Stld : ";
+  for (let i = 0; i < nos.length; i++) {
+    const next = out + (i ? "," : "") + nos[i];
+    if (next.length > max) break;
+    out = next;
+  }
+  return out;
+}
+
 function toSqlDate(v) {
   if (!v) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  // Local date parts, not toISOString(): on an IST server a DATE column comes back
+  // as local midnight, and toISOString() would shift it to the previous day.
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return null;
+    const p2 = n => String(n).padStart(2, "0");
+    return `${v.getFullYear()}-${p2(v.getMonth() + 1)}-${p2(v.getDate())}`;
+  }
   const s = String(v).trim();
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d, m, y] = s.split("/"); return `${y}-${m}-${d}`; }
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
@@ -270,6 +292,8 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
     const rvNo = String(mx.NEXT_NO).padStart(10, "0");
 
     const rvDate = hdr.BATCH_DT;
+    // Customer credit lines carry the settled invoices; header narration if none settled
+    const custNar = (stldNarration(settlement) || hdr.NARRATION || "").slice(0, 80);
     const total  = cheques.reduce((t, c) => t + (Number(c.AMOUNT) || 0), 0);
     const now    = new Date();
     const trDate = now.toISOString().slice(0, 10);
@@ -299,8 +323,8 @@ router.post("/:batchNo/generate_rv", async (req, res) => {
            (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
             NARRATION1, NARRATION2, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
          VALUES ('03',?,?,?,?,'C',?,?,?,?,?,?,?)`,
-        [rvNo, rvDate, hdr.CUST_CODE, Number(c.AMOUNT) || 0, hdr.NARRATION || "",
-         `Chq: ${c.CHQ_NO} Dt: ${c.CHQ_DT}`,
+        [rvNo, rvDate, hdr.CUST_CODE, Number(c.AMOUNT) || 0, custNar,
+         `Chq: ${c.CHQ_NO} Dt: ${toSqlDate(c.CHQ_DT) || ""}`,
          username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
     }
 

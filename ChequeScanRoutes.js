@@ -3,8 +3,10 @@
 //  Mount in HayatDb.js:  app.use("/ai", authMiddleware, require("./ChequeScanRoutes"));
 //  Requires in .env:     GEMINI_API_KEY=...   (free key from aistudio.google.com)
 //  Frontend contract unchanged: POST /ai/cheque_scan { b64, mime, fields }
-//  → JSON { chqNo, bankName, branchName, accountNo, payeeName, amount,
-//           currency, chequeDate, confidence, notes }
+//  → JSON { chqNo, bankName, branchName, accountNo, payeeName, drawerName,
+//           amount, currency, chequeDate, confidence, notes }
+//  drawerName = account holder printed on the cheque (on a received cheque,
+//  that is the customer; payeeName is us). Used to match CUS_MST.
 // ─────────────────────────────────────────────────────────────────────────────
 const express = require("express");
 const router = express.Router();
@@ -16,9 +18,11 @@ const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
 const PROMPT_FULL = `You are a UAE cheque OCR system. Read the attached cheque and return ONLY a JSON object with these keys:
-chqNo, bankName, branchName, accountNo, payeeName, amount (number), currency, chequeDate (YYYY-MM-DD), confidence ("high"|"medium"|"low"), notes.
+chqNo, bankName, branchName, accountNo, payeeName, drawerName, amount (number), currency, chequeDate (YYYY-MM-DD), confidence ("high"|"medium"|"low"), notes.
 Rules:
 - chqNo is the printed serial number (top "NO." field or the FIRST group of the MICR line at the bottom). It is NEVER the account number.
+- payeeName is the name after "Pay" / "Pay against this cheque to" / "or the bearer" — who the cheque is paid TO.
+- drawerName is the account holder: the person or company name PRINTED on the cheque, usually just above or beside the "Account no" / IBAN line near the signature. It is NEVER the payee and NEVER the bank name. Copy it exactly as printed (keep abbreviations such as "SERVC", "INTL", "FZE", "LLC").
 - Use null for any field not present on the cheque (blank/unissued cheques have no payee, date, or amount).
 - No markdown, no explanations — JSON only.`;
 
