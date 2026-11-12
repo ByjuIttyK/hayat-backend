@@ -128,18 +128,22 @@ module.exports = function (connection) {
  router.get("/sales-inquiry", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT s.INQ_NO,
-              DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
-              s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
-              s.SUBJECT, s.SINQ_STAT, s.REGRET,
-              (SELECT MAX(q.QUOT_NO) 
-                 FROM quot_hdr q
-                WHERE q.INQ_NO = s.INQ_NO) AS QUOTE_NO,
-              s.QUOTE_DATE,
-              s.CUST_CONTACT_PER
-         FROM sales_inquiry s
-         LEFT JOIN cus_mst c ON c.CUST_CODE = s.CUST_CODE
-        ORDER BY s.INQ_NO DESC`
+     `SELECT s.INQ_NO,
+        DATE_FORMAT(s.INQ_DATE,'%d/%m/%Y') AS INQ_DATE,
+        s.INQ_TYPE, s.CUST_CODE, c.CUST_NAME,
+        s.SUBJECT, s.SINQ_STAT, s.REGRET,
+        q.QUOT_NO AS QUOTE_NO,
+        s.QUOTE_DATE,
+        (SELECT MAX(j.JOB_NO)
+           FROM job_card j
+          WHERE j.QUOT_REF = q.QUOT_NO) AS JOB_NO,
+        s.CUST_CONTACT_PER
+   FROM sales_inquiry s
+   LEFT OUTER JOIN cus_mst c ON c.CUST_CODE = s.CUST_CODE
+   LEFT outer JOIN (SELECT INQ_NO, MAX(QUOT_NO) AS QUOT_NO
+                FROM quot_hdr
+               GROUP BY INQ_NO) q ON q.INQ_NO = s.INQ_NO
+  ORDER BY s.INQ_NO DESC`
     );
     res.json(rows);
   } catch (err) {
