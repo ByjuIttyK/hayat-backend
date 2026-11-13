@@ -14,6 +14,12 @@
 //   so their rows still add up; re-save (or revoke and re-approve) them for the exact split.
 //   The annexure check compares the allowance lines with the standing allowances (allowStd).
 //
+// 13-Nov-2026 layout (SalaryRegister1.xlsx): heading bands on row 4 over the column headings —
+//   Salary Details (Basic Salary, Allowances) | Earned Salary (Normal Hrs, Earned Basic, Earned Allow.) |
+//   Over-time (N.OT Hrs, N.OT Wages, H.OT Hrs, H.OT Wages) | Gross Salary | Deductions/ Adjustments
+//   (Att. Deduct., Other Deduct., Round Off) | Total Salary. Gross and Total span rows 4–5.
+//   Allowances = the standing allowances (allowStd). Screen and PDF use the same order.
+//
 // Register in HayatDb.js:
 //   const salaryRegister = require("./routes/salaryRegister");
 //   app.use("/api", salaryRegister(connection));
@@ -368,23 +374,36 @@ function columnsFor(mode) {
         { h: "Employee Name", k: "empName", w: 28 },
         { h: "Sheets", k: "sheets", w: 7, num: "0" },
       ];
+  // band: heading on row 4 (BANDS below)
   const right = [
-    { h: "Basic Salary", k: "basic", w: 11, num: "#,##0.00" },
-    { h: "Earned Basic", k: "earned", w: 12, num: "#,##0.00" },
-    { h: "Normal Hrs", k: "nHrs", w: 9, hrs: true },
-    { h: "N.OT Hrs", k: "oHrs", w: 8, hrs: true },
-    { h: "N.OT Wages", k: "oWages", w: 11, num: "#,##0.00" },
-    { h: "H.OT Hrs", k: "hHrs", w: 8, hrs: true },
-    { h: "H.OT Wages", k: "hWages", w: 11, num: "#,##0.00" },
-    { h: "Earned Allow.", k: "allow", w: 12, num: "#,##0.00" },
-    { h: "Gross Salary", k: "gross", w: 12, num: "#,##0.00" },
-    { h: "Att. Deduct.", k: "att", w: 11, num: "#,##0.00" },
-    { h: "Other Deduct.", k: "ded", w: 11, num: "#,##0.00" },
-    { h: "Round Off", k: "ro", w: 9, num: "#,##0.00" },
-    { h: "Total Salary", k: "total", w: 13, num: "#,##0.00" },
+    { h: "Basic Salary", k: "basic", w: 11, num: "#,##0.00", band: "SAL" },
+    { h: "Allowances", k: "allowStd", w: 11, num: "#,##0.00", band: "SAL" },
+    { h: "Normal Hrs", k: "nHrs", w: 9, hrs: true, band: "EARN" },
+    { h: "Earned Basic", k: "earned", w: 12, num: "#,##0.00", band: "EARN" },
+    { h: "Earned Allow.", k: "allow", w: 12, num: "#,##0.00", band: "EARN" },
+    { h: "N.OT Hrs", k: "oHrs", w: 8, hrs: true, band: "OT" },
+    { h: "N.OT Wages", k: "oWages", w: 11, num: "#,##0.00", band: "OT" },
+    { h: "H.OT Hrs", k: "hHrs", w: 8, hrs: true, band: "OT" },
+    { h: "H.OT Wages", k: "hWages", w: 11, num: "#,##0.00", band: "OT" },
+    { h: "Gross Salary", k: "gross", w: 12, num: "#,##0.00", band: "GROSS" },
+    { h: "Att. Deduct.", k: "att", w: 11, num: "#,##0.00", band: "DED" },
+    { h: "Other Deduct.", k: "ded", w: 11, num: "#,##0.00", band: "DED" },
+    { h: "Round Off", k: "ro", w: 9, num: "#,##0.00", band: "DED" },
+    { h: "Total Salary", k: "total", w: 13, num: "#,##0.00", band: "TOT" },
   ];
   return { left, cols: [...left, ...right] };
 }
+
+// Heading bands of the register sheet (colours as in SalaryRegister1.xlsx).
+// single: a one-column band whose heading spans rows 4–5 (Gross / Total Salary).
+const BANDS = {
+  SAL:   { head: "Salary Details",          fill: "FF4472C4", font: "FFFFFFFF", bold: true },  // blue, white text
+  EARN:  { head: "Earned Salary",           fill: "FFFFC000", font: "FF000000" },
+  OT:    { head: "Over-time",               fill: "FF70AD47", font: "FFFFFFFF", bold: true },  // green, white text
+  GROSS: { head: "Gross Salary",            fill: "FFD9E1F2", font: "FF000000", bold: true, single: true },
+  DED:   { head: "Deductions/ Adjustments", fill: "FFFF0000", font: "FFFFFFFF" },
+  TOT:   { head: "Total Salary",            fill: "FFE8ECF2", font: "FF000000", bold: true, single: true },
+};
 
 // ---- Excel helpers ----
 const THIN = { style: "thin", color: { argb: "FF7F8896" } };
@@ -400,7 +419,8 @@ function titleLines(ws, company, title, sub) {
 function headerRow(ws, heads) {
   const hdr = ws.addRow(heads);
   hdr.height = 32;
-  hdr.eachCell((c) => {
+  // includeEmpty: blank heading cells (under a merged band) get the border / fill too
+  hdr.eachCell({ includeEmpty: true }, (c) => {
     c.font = { bold: true };
     c.fill = HDR_FILL;
     c.border = { top: THIN, bottom: THIN, left: THIN, right: THIN };
@@ -428,15 +448,47 @@ function addRegisterSheet(wb, report, p, company, catgLabel) {
   const ws = wb.addWorksheet("Salary Register", {
     pageSetup: {
       orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0,
-      printTitlesRow: "5:5",
+      printTitlesRow: "4:5",          // band row + column headings on every page
     },
   });
   const { left, cols } = columnsFor(p.mode);
   const nCols = cols.length;
   ws.columns = cols.map((c) => ({ width: c.w }));
 
-  titleLines(ws, company, `Salary Register - ${p.mode === "D" ? "Detailed" : "Summary"}`, subLine(p, catgLabel));
-  headerRow(ws, cols.map((c) => c.h));
+  // rows 1–3: company, title, period line (no blank row 4 — the bands go there)
+  ws.addRow([company]).font = { bold: true, size: 14 };
+  ws.addRow([`Salary Register - ${p.mode === "D" ? "Detailed" : "Summary"}`]).font = { bold: true, size: 12 };
+  ws.addRow([subLine(p, catgLabel)]);
+
+  // row 4: heading bands over their columns (the left columns have none)
+  const band = ws.addRow(new Array(nCols).fill(null));
+  band.height = 18;
+  const bandBorder = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  const merges = [];
+  let ci = 1;
+  while (ci <= nCols) {
+    const key = cols[ci - 1].band;
+    let n = 1;
+    while (key && ci - 1 + n < nCols && cols[ci - 1 + n].band === key) n++;
+    if (key) {
+      const B = BANDS[key];
+      for (let k = ci; k < ci + n; k++) {
+        const cell = band.getCell(k);
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: B.fill } };
+        cell.font = { bold: !!B.bold, color: { argb: B.font } };
+        cell.border = bandBorder;
+        cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      }
+      band.getCell(ci).value = B.head;
+      if (B.single) merges.push([band.number, ci, band.number + 1, ci]);   // spans rows 4–5
+      else if (n > 1) merges.push([band.number, ci, band.number, ci + n - 1]);
+    }
+    ci += n;
+  }
+
+  // row 5: column headings (blank under Gross / Total — their band heading covers both rows)
+  headerRow(ws, cols.map((c) => (c.band && BANDS[c.band].single ? null : c.h)));
+  merges.forEach((m) => ws.mergeCells(...m));
   ws.views = [{ state: "frozen", ySplit: 5 }];
 
   for (const r of report) {
