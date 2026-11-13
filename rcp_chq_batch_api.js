@@ -13,6 +13,13 @@
 //  RV_DATE (Nov 2026): the Receipt Voucher's posting date, kept apart from the
 //  batch date. Needs:  ALTER TABLE rcp_chq_batch ADD COLUMN RV_DATE DATE NULL AFTER RV_NO;
 //  Older batches with no RV_DATE post on BATCH_DT, as before.
+//
+//  DR_ACC_CODE / DR_ACC_HEAD (Nov 2026): Debit A/c chosen on the screen
+//  (Cheque Receipt — Single). The RV debit line posts to it; batches that
+//  don't send it post to BANK_CODE, as before. Needs:
+//    ALTER TABLE rcp_chq_batch
+//      ADD COLUMN DR_ACC_CODE VARCHAR(20)  NULL AFTER BANK_NAME,
+//      ADD COLUMN DR_ACC_HEAD VARCHAR(100) NULL AFTER DR_ACC_CODE;
 "use strict";
 const express = require("express");
 const router  = express.Router();
@@ -62,6 +69,30 @@ function toSqlDate(v) {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   return null;
 }
+
+// ─── Debit A/c list + lookup (Cheque Receipt — Single) ───────────────────────
+//  Declared before GET /:batchNo so "bank-dr-lov" is not taken as a batch no.
+//  GET /rcp_batch/bank-dr-lov         → bank_mst rows with CASH='B' AND PDC_IND='N'
+//  GET /rcp_batch/bank-dr-acc/:code   → one bank_mst row (no filter, so the
+//                                       PDC Receivable a/c 116-024-0-001 resolves too)
+router.get("/bank-dr-lov", async (req, res) => {
+  try {
+    const rows = await q(
+      `SELECT BANK_CODE, BANK_NAME FROM bank_mst
+        WHERE CASH = 'B' AND PDC_IND = 'N'
+        ORDER BY BANK_CODE`);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/bank-dr-acc/:code", async (req, res) => {
+  try {
+    const [row] = await q(
+      `SELECT BANK_CODE, BANK_NAME FROM bank_mst WHERE BANK_CODE = ?`,
+      [String(req.params.code || "").trim()]);
+    res.json(row || null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // ─── GET /rcp_batch/next_no ───────────────────────────────────────────────────
 //  ?prefix=S → single-cheque series (S2026-001); default R → batch series.
@@ -155,10 +186,13 @@ router.post("/", async (req, res) => {
     await conn.query(
       `INSERT INTO rcp_chq_batch
          (BATCH_NO, BATCH_DT, CUST_CODE, CUST_NAME, BANK_CODE, BANK_NAME,
+          DR_ACC_CODE, DR_ACC_HEAD,
           CURRENCY, NARRATION, STATUS, RV_NO, RV_DATE, CREATED_BY)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [header.BATCH_NO, batchDt, header.CUST_CODE, header.CUST_NAME || "",
-       header.BANK_CODE, header.BANK_NAME || "", header.CURRENCY || "AED",
+       header.BANK_CODE, header.BANK_NAME || "",
+       header.DR_ACC_CODE || null, header.DR_ACC_HEAD || null,
+       header.CURRENCY || "AED",
        header.NARRATION || "", header.STATUS || "Draft", header.RV_NO || "", rvDt,
        req.user?.username || "system"]);
 
@@ -167,7 +201,7 @@ router.post("/", async (req, res) => {
       const c = validCheques[i];
       const cDt = toSqlDate(c.CHQ_DT);
       const type = pdcType(cDt, batchDt);
-      const debitAc = pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
+      const debitAc = header.DR_ACC_CODE || pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
       await conn.query(
         `INSERT INTO rcp_chq_batch_det
            (BATCH_NO, SEQ, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH, DEBIT_AC,
@@ -216,11 +250,15 @@ async function updateBatch(conn, batchNo, header, cheques = [], settlement = [],
        BATCH_DT=?,
        RV_DATE = CASE WHEN ? = 1 OR COALESCE(RV_NO, '') = '' THEN ? ELSE RV_DATE END,
        CUST_CODE=?, CUST_NAME=?, BANK_CODE=?, BANK_NAME=?,
+       DR_ACC_CODE = COALESCE(?, DR_ACC_CODE), DR_ACC_HEAD = COALESCE(?, DR_ACC_HEAD),
        CURRENCY=?, NARRATION=?,
        STATUS = COALESCE(?, STATUS), RV_NO = COALESCE(?, RV_NO)
      WHERE BATCH_NO=?`,
     [batchDt, rePost ? 1 : 0, rvDt, header.CUST_CODE, header.CUST_NAME || "", header.BANK_CODE,
-     header.BANK_NAME || "", header.CURRENCY || "AED", header.NARRATION || "",
+     header.BANK_NAME || "",
+     // not sent (batch screen) → keep what is stored
+     header.DR_ACC_CODE || null, header.DR_ACC_HEAD || null,
+     header.CURRENCY || "AED", header.NARRATION || "",
      header.STATUS || null, header.RV_NO === undefined ? null : header.RV_NO, batchNo]);
 
   await conn.query(`DELETE FROM rcp_chq_batch_det WHERE BATCH_NO = ?`, [batchNo]);
@@ -231,7 +269,7 @@ async function updateBatch(conn, batchNo, header, cheques = [], settlement = [],
     const c = validCheques[i];
     const cDt = toSqlDate(c.CHQ_DT);
     const type = pdcType(cDt, batchDt);
-    const debitAc = pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
+    const debitAc = header.DR_ACC_CODE || pdcAc(cDt, batchDt, c.BANK_AC || header.BANK_AC || "");
     await conn.query(
       `INSERT INTO rcp_chq_batch_det
          (BATCH_NO, SEQ, CHQ_NO, CHQ_DT, BANK_NAME, BRANCH, DEBIT_AC,
@@ -297,6 +335,8 @@ router.delete("/:batchNo", async (req, res) => {
 //  Shared by generate_rv (new RV No) and repost_rv (same RV No after edit).
 async function postRv(conn, hdr, cheques, settlement, rvNo, username) {
   const rvDate = hdr.RV_DATE || hdr.BATCH_DT;   // RV posting date; older batches: batch date
+  // Debit a/c: the one chosen on the screen; batches without it → the bank, as before
+  const drAc = String(hdr.DR_ACC_CODE || "").trim() || hdr.BANK_CODE;
   // Customer credit lines carry the settled invoices; header narration if none settled
   const custNar = (stldNarration(settlement) || hdr.NARRATION || "").slice(0, 80);
   const total  = cheques.reduce((t, c) => t + (Number(c.AMOUNT) || 0), 0);
@@ -304,23 +344,23 @@ async function postRv(conn, hdr, cheques, settlement, rvNo, username) {
   const trDate = toSqlDate(now);
   const trTime = now.toTimeString().slice(0, 8);
 
-  // a) VOUCHERS — RV header. ACC_CODE = bank (the receiving account).
+  // a) VOUCHERS — RV header. ACC_CODE = the debit (receiving) account.
   await conn.query(
     `INSERT INTO vouchers
        (TRAN_TYPE, VCHR_NO, DATTE, CUST_CODE, ACC_CODE, AMOUNT,
         NARRATION1, PAID_TO, CUR_CODE, REF_NO)
      VALUES ('03',?,?,?,?,?,?,?,'AED',?)`,
-    [rvNo, rvDate, hdr.CUST_CODE, hdr.BANK_CODE, total,
+    [rvNo, rvDate, hdr.CUST_CODE, drAc, total,
      hdr.NARRATION || "", hdr.CUST_NAME || "", hdr.BATCH_NO]);
 
-  // b) TRAN_ACC — Debit bank (total) + Credit customer per cheque
+  // b) TRAN_ACC — Debit the debit a/c (total) + Credit customer per cheque
   let sr = 1;
   await conn.query(
     `INSERT INTO tran_acc
        (TRAN_TYPE, vchr_no, DATTE, ACC_CODE, AMOUNT, DB_CR,
         NARRATION1, USERNAME, SR_NO, TRANS_DATE, TRANS_TIME, REF_NO)
      VALUES ('03',?,?,?,?,'D',?,?,?,?,?,?)`,
-    [rvNo, rvDate, hdr.BANK_CODE, total, hdr.NARRATION || "",
+    [rvNo, rvDate, drAc, total, hdr.NARRATION || "",
      username, String(sr++), trDate, trTime, hdr.BATCH_NO]);
   for (const c of cheques) {
     await conn.query(
@@ -341,8 +381,9 @@ async function postRv(conn, hdr, cheques, settlement, rvNo, username) {
          (TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE, CHQ_BANK,
           PDC_CODE, CUST_CODE, AMOUNT, NARRATION, REALISED, MAIN_SR_NO, REF_NO)
        VALUES ('03',?,?,?,?,?,?,?,?,?,'N',?,?)`,
+      // CHQ_BANK = deposit bank; PDC_CODE = the a/c the cheque was debited to
       [rvNo, rvDate, c.CHQ_NO, c.CHQ_DT, hdr.BANK_CODE,
-       hdr.BANK_CODE, hdr.CUST_CODE, Number(c.AMOUNT) || 0,
+       drAc, hdr.CUST_CODE, Number(c.AMOUNT) || 0,
        (c.NARRATION || "").slice(0, 80), psr++, hdr.BATCH_NO]);
   }
 

@@ -7460,6 +7460,31 @@ app.get("/api/fabdo-prjrefs/:custCode", (req, res) => {
   });
 });
 
+    app.get('/api/quot-lov', (req, res) => {
+        const q = String(req.query.q || '').trim();
+        const like = `%${q}%`;
+
+        const sql = `
+            SELECT h.QUOT_NO,
+                   DATE_FORMAT(h.QUOT_DATE, '%d/%m/%Y') AS QUOT_DATE,
+                   h.CUST_CODE,
+                   c.CUST_NAME,
+                   h.AMOUNT
+              FROM quot_hdr h
+              LEFT JOIN cus_mst c ON c.CUST_CODE = h.CUST_CODE
+             WHERE (? = '' OR h.QUOT_NO LIKE ? OR c.CUST_NAME LIKE ?)
+             ORDER BY h.QUOT_DATE DESC, h.QUOT_NO DESC
+             LIMIT 500`;
+
+        connection.query(sql, [q, like, like], (err, rows) => {
+            if (err) {
+                console.error('quot-lov error:', err);
+                return res.status(500).json({ message: 'Query error' });
+            }
+            res.json(rows);
+        });
+    });
+
 //Jv Routes
 const jvRoutes = require('./JvExcelEntryRoutes');
 app.use('/api/jv', jvRoutes);
