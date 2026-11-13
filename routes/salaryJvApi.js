@@ -21,6 +21,9 @@
 //
 // 08-Nov-2026: payroll month close (payrollPeriod.js) — the Salary JV of a month whose payroll is closed
 //   cannot be added, changed or deleted.
+// 13-Nov-2026: Vchr Date is chosen on the screen in ADD and EDIT. The voucher is posted on it —
+//   salary_jv_hdr.VCHR_DATE and every tran_acc.DATTE line. It must fall inside ac_period
+//   (START_DATE … END_DATE). EDIT without a date (older screen) keeps the saved date.
 //
 // Register in HayatDb.js:
 //   const salaryJvApi = require('./routes/salaryJvApi');
@@ -240,6 +243,7 @@ module.exports = function (connection) {
     if (!month) throw fail(400, 'Select the month');
     if (mode === 'EDIT' && !b.vchrNo) throw fail(400, 'Voucher number missing');
     if (mode === 'ADD' && !isIso(b.vchrDate)) throw fail(400, 'Voucher date missing');
+    if (b.vchrDate && !isIso(b.vchrDate)) throw fail(400, 'Voucher date is not valid');
 
     for (let attempt = 0; ; attempt += 1) {
       try {
@@ -253,7 +257,18 @@ module.exports = function (connection) {
           const [h] = await q(conn, `SELECT DATE_FORMAT(VCHR_DATE, '%Y-%m-%d') AS VCHR_DATE FROM salary_jv_hdr WHERE TRAN_TYPE = ? AND VCHR_NO = ? FOR UPDATE`, [SALARY_JV_TYPE, vchrNo]);
           const [t] = await q(conn, `SELECT DATE_FORMAT(MIN(DATTE), '%Y-%m-%d') AS VCHR_DATE, COUNT(*) AS N FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ? FOR UPDATE`, [SALARY_JV_TYPE, vchrNo]);
           if (!h && !Number(t.N)) throw fail(404, `Salary JV ${vchrNo} no longer exists`);
-          vchrDate = (h && h.VCHR_DATE) || t.VCHR_DATE; // the voucher keeps its date
+          // the date chosen on the screen; without one the voucher keeps its saved date
+          vchrDate = isIso(b.vchrDate) ? b.vchrDate : (h && h.VCHR_DATE) || t.VCHR_DATE;
+        }
+
+        // the posting date must be inside the current accounting period (ac_period: one row)
+        const [per] = await q(
+          conn,
+          `SELECT DATE_FORMAT(START_DATE, '%Y-%m-%d') AS F, DATE_FORMAT(END_DATE, '%Y-%m-%d') AS T FROM ac_period LIMIT 1`,
+        );
+        if (per && per.F && per.T && (vchrDate < per.F || vchrDate > per.T)) {
+          const d = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+          throw fail(400, `Vchr. Date ${d(vchrDate)} is outside the accounting period ${d(per.F)} – ${d(per.T)}`);
         }
 
         const s = await sheetsFor(conn, catg, month, mode === 'EDIT' ? vchrNo : '');
@@ -294,7 +309,8 @@ module.exports = function (connection) {
             conn,
             `INSERT INTO salary_jv_hdr (TRAN_TYPE, VCHR_NO, VCHR_DATE, CATG_CODE, SAL_MONTH, PARTICULARS, DEBIT_AC, EMP_COUNT, TOTAL_AMT, CREATED_BY, CREATED_DT)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE PARTICULARS = VALUES(PARTICULARS), DEBIT_AC = VALUES(DEBIT_AC), EMP_COUNT = VALUES(EMP_COUNT),
+             ON DUPLICATE KEY UPDATE VCHR_DATE = VALUES(VCHR_DATE),
+                                     PARTICULARS = VALUES(PARTICULARS), DEBIT_AC = VALUES(DEBIT_AC), EMP_COUNT = VALUES(EMP_COUNT),
                                      TOTAL_AMT = VALUES(TOTAL_AMT), UPDATED_BY = ?, UPDATED_DT = NOW()`,
             [SALARY_JV_TYPE, vchrNo, vchrDate, catg, month, particulars, debitAc, s.sheets.length, total, who, who],
           );
