@@ -3,8 +3,9 @@
 //
 //   Header : salary_jv_hdr (TRAN_TYPE, VCHR_NO) — category, salary month, particulars, totals
 //   Lines  : tran_acc  TRAN_TYPE = '15' AND VCHR_NO = salary_jv_hdr.VCHR_NO
-//            per time sheet one Dr (emp_catg_mst.Salary_debit_ac) + one Cr (payroll_mst.ACCRUED_SAL_AC),
-//            NARRATION1 = "EMP NAME - MM/YYYY", NARRATION2 = TSHT_NO, AMOUNT = TOTAL_SALARY
+//            per time sheet one Dr (emp_catg_mst.Salary_debit_ac, gross), one Cr per tsht_ded line
+//            (tsht_ded.ACC_CODE) and one Cr (payroll_mst.ACCRUED_SAL_AC, TOTAL_SALARY) — see 14-Nov-2026
+//            NARRATION1 = "EMP NAME - MM/YYYY" (deduction: "DED_DESC - EMP NAME - MM/YYYY"), NARRATION2 = TSHT_NO
 //
 //   GET  /api/salary-jv-list                    every tran type 15 voucher (header from salary_jv_hdr,
 //                                               or derived from its first time sheet when the header is missing)
@@ -24,6 +25,16 @@
 // 13-Nov-2026: Vchr Date is chosen on the screen in ADD and EDIT. The voucher is posted on it —
 //   salary_jv_hdr.VCHR_DATE and every tran_acc.DATTE line. It must fall inside ac_period
 //   (START_DATE … END_DATE). EDIT without a date (older screen) keeps the saved date.
+// 14-Nov-2026: time-sheet deductions credited to their own account.
+//   Per time sheet:  Dr Salary Debit A/c          = TOTAL_SALARY + deductions (gross)
+//                    Cr tsht_ded.ACC_CODE          = each deduction line (AMOUNT > 0), in DED_CODE order
+//                       NARRATION1 "DED_DESC - EMP NAME - MM/YYYY", NARRATION2 TSHT_NO
+//                    Cr payroll_mst.ACCRUED_SAL_AC = TOTAL_SALARY (net)
+//   sheetsFor returns per sheet DEDS [{DED_CODE, DED_DESC, AMOUNT, ACC_CODE, ACC_HEAD}], DED_TOTAL, GROSS,
+//   DED_SIG (deductions per account, "acc:amt,…") and, for the voucher being edited, SAVED_DED_SIG
+//   (the same, from its saved Cr lines other than the accrual) so a changed deduction shows as amended.
+//   Save: expect carries {TSHT_NO, AMOUNT = GROSS, DED_SIG}; a deduction without ACC_CODE, or with an
+//   ACC_CODE not in acc_mst, refuses the save. salary_jv_hdr.TOTAL_AMT = the Dr total (gross).
 //
 // Register in HayatDb.js:
 //   const salaryJvApi = require('./routes/salaryJvApi');
@@ -50,6 +61,16 @@ module.exports = function (connection) {
     return m ? `${m[1]}-${m[2]}-01` : null;
   };
   const mmyyyy = (iso) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  /** Deductions summed per account, sorted — "12-1208-0-016:500.00,…" ('' when none). Same rule on both sides of a compare. */
+  const dedSig = (list) => {
+    const byAcc = new Map();
+    for (const d of list) byAcc.set(String(d.ACC_CODE || ''), r2((byAcc.get(String(d.ACC_CODE || '')) || 0) + r2(d.AMOUNT)));
+    return Array.from(byAcc.entries())
+      .filter(([, amt]) => amt)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([acc, amt]) => `${acc}:${amt.toFixed(2)}`)
+      .join(',');
+  };
 
   const withConn = (fn) => async (req, res) => {
     let conn;
@@ -95,6 +116,45 @@ module.exports = function (connection) {
         ORDER BY h.EMP_CODE`,
       [SALARY_JV_TYPE, own, SALARY_JV_TYPE, own, catg, month],
     );
+
+    // deduction lines of these time sheets (tsht_ded) — each is credited to its AcCode (Cr)
+    const tshtNos = all.map((r) => r.TSHT_NO);
+    const dedRows = tshtNos.length
+      ? await q(
+          conn,
+          `SELECT d.TSHT_NO, d.DED_CODE, m.DED_DESC, d.AMOUNT, d.ACC_CODE, a.ACC_HEAD
+             FROM tsht_ded d
+             LEFT JOIN ded_mst m ON m.DED_CODE = d.DED_CODE
+             LEFT JOIN acc_mst a ON a.ACC_CODE = d.ACC_CODE
+            WHERE d.TSHT_NO IN (?) AND d.AMOUNT > 0
+            ORDER BY d.TSHT_NO, d.DED_CODE`,
+          [tshtNos],
+        )
+      : [];
+    // EDIT: the voucher's saved Cr lines, to tell a changed deduction (amount or account)
+    const savedCr = own
+      ? await q(conn, `SELECT NARRATION2 AS TSHT_NO, ACC_CODE, AMOUNT FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ? AND DB_CR = 'C'`, [SALARY_JV_TYPE, own])
+      : [];
+    const dedBySheet = new Map();
+    for (const d of dedRows) {
+      if (!dedBySheet.has(d.TSHT_NO)) dedBySheet.set(d.TSHT_NO, []);
+      dedBySheet.get(d.TSHT_NO).push({
+        DED_CODE: d.DED_CODE, DED_DESC: d.DED_DESC || '', AMOUNT: r2(d.AMOUNT),
+        ACC_CODE: d.ACC_CODE ? String(d.ACC_CODE).trim() : '', ACC_HEAD: d.ACC_HEAD || '',
+      });
+    }
+    for (const r of all) {
+      const deds = dedBySheet.get(r.TSHT_NO) || [];
+      r.DEDS = deds;
+      r.DED_TOTAL = r2(deds.reduce((t, d) => t + d.AMOUNT, 0));
+      r.GROSS = r2(r2(r.TOTAL_SALARY) + r.DED_TOTAL);
+      r.DED_SIG = dedSig(deds);
+      r.SAVED_DED_SIG =
+        r.SAVED_AMT === null || r.SAVED_AMT === undefined
+          ? null
+          : dedSig(savedCr.filter((t) => t.TSHT_NO === r.TSHT_NO && t.ACC_CODE !== r.ACCRUED_SAL_AC));
+    }
+
     const posted = all.filter((r) => r.POSTED_VCHR);
     const drafts = all.filter((r) => !r.POSTED_VCHR && r.STATUS === 'D');
     const zero = all.filter((r) => !r.POSTED_VCHR && r.STATUS !== 'D' && !(Number(r.TOTAL_SALARY) > 0));
@@ -278,16 +338,33 @@ module.exports = function (connection) {
             : 'There are no processed time sheets to post');
         }
         // the lines the user saw must still be the lines we are about to write
-        const expect = new Map((Array.isArray(b.expect) ? b.expect : []).map((x) => [String(x.TSHT_NO), r2(x.AMOUNT)]));
-        const changed = s.sheets.length !== expect.size || s.sheets.some((x) => expect.get(x.TSHT_NO) !== r2(x.TOTAL_SALARY));
+        //   (gross amount + the deductions per account, so a changed deduction or AcCode (Cr) is caught too)
+        const expect = new Map(
+          (Array.isArray(b.expect) ? b.expect : []).map((x) => [String(x.TSHT_NO), { amt: r2(x.AMOUNT), sig: String(x.DED_SIG ?? '') }]),
+        );
+        const changed =
+          s.sheets.length !== expect.size ||
+          s.sheets.some((x) => {
+            const e = expect.get(x.TSHT_NO);
+            return !e || e.amt !== x.GROSS || e.sig !== x.DED_SIG;
+          });
         if (changed) throw fail(409, 'The time sheets changed while you were on this screen (posted by another user, re-processed or amended). The lines have been refreshed — check and save again.');
 
         const debitAc = s.catgRow.DEBIT_AC;
         if (!debitAc) throw fail(400, `No Salary Debit A/c for category ${catg} (emp_catg_mst)`);
         const noAccrual = s.sheets.filter((x) => !x.ACCRUED_SAL_AC);
         if (noAccrual.length) throw fail(400, `No Accrued Sal A/c (Employee Master → Payroll) for ${noAccrual.map((x) => x.EMP_CODE).join(', ')}`);
+        // every deduction must name a valid account to credit (Time Sheet → Deductions → AcCode (Cr))
+        const badDed = [];
+        for (const x of s.sheets) {
+          for (const d of x.DEDS) {
+            if (!d.ACC_CODE) badDed.push(`${x.TSHT_NO} ded ${d.DED_CODE}: AcCode (Cr) not set`);
+            else if (!d.ACC_HEAD) badDed.push(`${x.TSHT_NO} ded ${d.DED_CODE}: ${d.ACC_CODE} not in acc_mst`);
+          }
+        }
+        if (badDed.length) throw fail(400, `Correct the deductions on the Time Sheet first — ${badDed.join('; ')}`);
 
-        const total = r2(s.sheets.reduce((t, x) => t + r2(x.TOTAL_SALARY), 0));
+        const total = r2(s.sheets.reduce((t, x) => t + x.GROSS, 0)); // Dr total = Cr total
 
         if (mode === 'ADD') {
           const [m] = await q(
@@ -317,14 +394,19 @@ module.exports = function (connection) {
           await q(conn, 'DELETE FROM tran_acc WHERE TRAN_TYPE = ? AND VCHR_NO = ?', [SALARY_JV_TYPE, vchrNo]);
         }
 
-        // tran_acc lines — Dr then Cr per time sheet, Emp Code order
+        // tran_acc lines per time sheet, Emp Code order:
+        //   Dr Salary (gross) · Cr each deduction to its AcCode (Cr) · Cr Accrued Salary (net)
         const values = [];
         let sr = 0;
         for (const x of s.sheets) {
-          const amt = r2(x.TOTAL_SALARY);
+          const net = r2(x.TOTAL_SALARY);
           const n1 = `${x.EMP_NAME} - ${mmyyyy(month)}`.slice(0, 200);
-          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, debitAc, null, n1, x.TSHT_NO, amt, 'D']);
-          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, x.ACCRUED_SAL_AC, null, n1, x.TSHT_NO, amt, 'C']);
+          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, debitAc, null, n1, x.TSHT_NO, x.GROSS, 'D']);
+          for (const d of x.DEDS) {
+            const n1d = `${d.DED_DESC || `Deduction ${d.DED_CODE}`} - ${x.EMP_NAME} - ${mmyyyy(month)}`.slice(0, 200);
+            values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, d.ACC_CODE, null, n1d, x.TSHT_NO, d.AMOUNT, 'C']);
+          }
+          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, x.ACCRUED_SAL_AC, null, n1, x.TSHT_NO, net, 'C']);
         }
         await q(
           conn,

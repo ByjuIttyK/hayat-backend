@@ -26,7 +26,7 @@ module.exports = function (connection) {
   const CREDIT_NOTE = "10";
 
   const SQL_INV = `
-    SELECT h.INV_NO, h.INV_DATE, h.CUST_CODE, c.CUST_NAME,
+    SELECT h.INV_NO, h.INV_DATE, h.CUST_CODE, c.CUST_NAME, h.JOB_NO,
            ${INV_AMT}      AS INV_AMT,
            IFNULL(s.AMT,0) AS STLD_AMT
       FROM fab_inv_hdr h
@@ -198,7 +198,8 @@ module.exports = function (connection) {
       });
       maturity.forEach((m) => (m.AMOUNT = r2(m.AMOUNT)));
 
-      const overdueChq = chq.filter((c) => c.STATUS === "OVERDUE")
+      // PDCs only — current cheques are not followed up here
+      const overdueChq = chq.filter((c) => c.PDCTYPE === "PDCRCD" && c.STATUS === "OVERDUE")
         .sort((a, b) => (a.CD || 0) - (b.CD || 0))
         .map((c) => ({
           TYPE: c.PDCTYPE === "PDCRCD" ? "PDC" : "Current",
@@ -221,7 +222,7 @@ module.exports = function (connection) {
         activity,
         mix: Object.entries(mix).map(([LABEL, AMOUNT]) => ({ LABEL, AMOUNT: r2(AMOUNT) })).sort((a, b) => b.AMOUNT - a.AMOUNT),
         ageing,
-        customers: custAll.slice(0, 20),
+        customers: custAll,   // all — the screen shows the top 20, Print / Excel take all
         customersTotal: {
           COUNT: custAll.length,
           OS_AMT: r2(receivable),
@@ -231,6 +232,19 @@ module.exports = function (connection) {
         cheques: { PDC: chqStatus("PDCRCD"), CURRENT: chqStatus("CURRCD") },
         maturity,
         overdueChq,
+        // for the customer drill-down popup
+        openInvoices: open
+          .sort((a, b) => (a.D || 0) - (b.D || 0))
+          .map((i) => ({
+            INV_NO: i.INV_NO, INV_DATE: dmy(i.D), JOB_NO: i.JOB_NO || "", CUST_CODE: i.CUST_CODE,
+            INV_AMT: r2(i.AMT), STLD_AMT: r2(i.ST), BAL: i.BAL, DAYS: i.D ? days(today, i.D) : null,
+          })),
+        pdcInHand: pdcInHand
+          .sort((a, b) => (a.CD || 0) - (b.CD || 0))
+          .map((p) => ({
+            PARTY_CODE: p.PARTY_CODE, VCHR_NO: p.VCHR_NO, CHQ_NO: p.CHQ_NO, CHQ_DATE: dmy(p.CD),
+            CHQ_BANK: p.CHQ_BANK || "", AMOUNT: r2(p.AMT), DUE: p.STATUS === "OVERDUE",
+          })),
       });
     } catch (err) {
       console.error("sales-collection:", err);
