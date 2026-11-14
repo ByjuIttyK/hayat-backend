@@ -8029,3 +8029,5 @@ app.use("/api", authMiddleware, require("./routes/sivJobPanels")(connection));
 app.use("/api", require("./routes/inqConversionApi")(connection))
 //
 app.use("/api", require("./routes/quotConversionApi")(connection));
+//
+app.use("/api", require("./routes/salesCollectionApi")(connection));
