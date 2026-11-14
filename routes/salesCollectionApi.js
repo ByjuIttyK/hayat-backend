@@ -11,6 +11,8 @@
 //   Cheques rcvd : v_all_cheques TRAN_TYPE = '03', PDCTYPE PDCRCD (PDC) / CURRCD (current)
 //                  realised when REALISED = 'Y'
 // Receivable figures (ageing, top customers, PDCs in hand) are "as on today", over ALL open invoices.
+// 14-Nov-2026: cheques with a 0 amount are left out everywhere (cancelled / blank entries) — they no
+//   longer show in "PDCs due but not realised", the cheque counts, PDCs in hand or the maturity chart.
 
 const express = require("express");
 
@@ -51,7 +53,8 @@ module.exports = function (connection) {
       FROM v_all_cheques v
       LEFT JOIN cus_mst c ON c.CUST_CODE = v.PARTY_CODE
      WHERE v.TRAN_TYPE = '03'
-       AND v.PDCTYPE IN ('PDCRCD','CURRCD')`;
+       AND v.PDCTYPE IN ('PDCRCD','CURRCD')
+       AND IFNULL(v.AMOUNT,0) <> 0`;
 
   // ---------- helpers ----------
   const num = (v) => Number(v || 0);
