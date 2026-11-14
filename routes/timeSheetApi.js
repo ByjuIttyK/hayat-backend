@@ -136,6 +136,10 @@
 //   DB: ALTER TABLE time_sheet_hdr ADD COLUMN EARNED_BASIC DECIMAL(12,2) NULL AFTER BASIC_SAL,
 //         ADD COLUMN EARNED_ALLOW DECIMAL(12,2) NULL AFTER EARNED_BASIC, ADD COLUMN ATT_DED DECIMAL(12,2) NULL AFTER EARNED_ALLOW,
 //         ADD COLUMN ROUND_OFF DECIMAL(6,2) NULL AFTER ATT_DED;   (EARNED_BASIC / ROUND_OFF already added)
+// 14-Nov-2026: deduction lines carry the account credited — tsht_ded.ACC_CODE (ded[].accCode from the screen).
+//   /tsht/save stores it (checked against acc_mst); /tsht/sheet returns it; the Salary JV credits it.
+//   GET /ts-ded-acc lists the accounts offered (acc_mst REPORT_LN 12 / GL_CODE 1208).
+//   DB: ALTER TABLE tsht_ded ADD COLUMN ACC_CODE VARCHAR(20) NULL;
 // 08-Nov-2026: payroll month close (payrollPeriod.js) — a month whose payroll is closed refuses Save,
 //   Time approval, revoke to Draft, delete and card images; a month whose job allocation is closed
 //   refuses Job approval, revoke of the Job approval and Job No changes (423).
@@ -886,13 +890,19 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
+  // AcCode (Cr) dropdown of deduction lines: salary advance accounts
   router.get('/ts-ded-acc', async (req, res) => {
-  const [rows] = await db.query(
-    `SELECT acc_code AS ACC_CODE, acc_head AS ACC_HEAD
-       FROM acc_mst WHERE report_ln = '12' AND gl_code = '1208'
-      ORDER BY acc_code`);
-  res.json(rows);
-});
+    try {
+      const [rows] = await db.query(
+        `SELECT acc_code AS ACC_CODE, acc_head AS ACC_HEAD
+           FROM acc_mst WHERE report_ln = '12' AND gl_code = '1208'
+          ORDER BY acc_code`,
+      );
+      res.json(rows);
+    } catch (e) {
+      send(res, e);
+    }
+  });
   // ---------- list (for InfoGrid / month review) ----------
   router.get('/tsht/list', async (req, res) => {
     try {
@@ -953,7 +963,7 @@ module.exports = function timeSheetApi(connection) {
         [no],
       );
       const [ded] = await db.query(
-        `SELECT a.DED_CODE AS CODE, m.DED_DESC AS DESCR, m.DED_TYPE AS TYPE, a.AMOUNT, a.REMARKS, a.SRC_FLAG
+        `SELECT a.DED_CODE AS CODE, m.DED_DESC AS DESCR, m.DED_TYPE AS TYPE, a.AMOUNT, a.REMARKS, a.SRC_FLAG, a.ACC_CODE
            FROM tsht_ded a LEFT JOIN ded_mst m ON m.DED_CODE = a.DED_CODE
           WHERE a.TSHT_NO = ? ORDER BY a.srno_row_id`,
         [no],
@@ -1065,6 +1075,15 @@ module.exports = function timeSheetApi(connection) {
       };
       codesOk(allow, 'Allowances');
       codesOk(ded, 'Deductions');
+      // AcCode (Cr) of each deduction: must be an account in acc_mst (the Salary JV credits it)
+      const dedAcc = (a) => (a.accCode ? String(a.accCode).trim().slice(0, 20) : null);
+      const accCodes = Array.from(new Set(ded.map(dedAcc).filter(Boolean)));
+      if (accCodes.length) {
+        const [found] = await conn.query('SELECT ACC_CODE FROM acc_mst WHERE ACC_CODE IN (?)', [accCodes]);
+        const known = new Set(found.map((r) => String(r.ACC_CODE).trim()));
+        const unknown = accCodes.filter((c) => !known.has(c));
+        if (unknown.length) throw httpErr(400, `Deductions: AcCode (Cr) ${unknown.join(', ')} not found in acc_mst`);
+      }
       const calc = await computeSheet({ tshtDate: month.first, empCode, rows: req.body.rows }, conn);
       const bad = calc.rows.find((r) => r.error);
       if (bad) throw httpErr(400, `${dayLabel(bad)}: ${bad.error}`);
@@ -1136,8 +1155,8 @@ module.exports = function timeSheetApi(connection) {
       await conn.execute('DELETE FROM tsht_ded WHERE TSHT_NO = ?', [no]);
       for (const a of ded) {
         await conn.execute(
-          'INSERT INTO tsht_ded (TSHT_NO, TSHT_DATE, EMP_CODE, DED_CODE, AMOUNT, REMARKS, SRC_FLAG, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, srcFlag(a.src), user],
+          'INSERT INTO tsht_ded (TSHT_NO, TSHT_DATE, EMP_CODE, DED_CODE, AMOUNT, REMARKS, SRC_FLAG, ACC_CODE, CREATED_BY) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [no, month.first, calc.emp.EMP_CODE, Number(a.code), Number(a.amount) || 0, a.remarks ? String(a.remarks).slice(0, 100) : null, srcFlag(a.src), dedAcc(a), user],
         );
       }
 

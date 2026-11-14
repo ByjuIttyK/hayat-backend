@@ -8031,3 +8031,7 @@ app.use("/api", require("./routes/inqConversionApi")(connection))
 app.use("/api", require("./routes/quotConversionApi")(connection));
 //
 app.use("/api", require("./routes/salesCollectionApi")(connection));
+//
+const mgmtSalaryApi = require('./routes/mgmtSalaryApi');
+app.use('/api', mgmtSalaryApi(connection));
+//
