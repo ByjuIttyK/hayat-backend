@@ -406,15 +406,19 @@ module.exports = function (connection) {
                 (SELECT SUM(x.AMOUNT) FROM tran_acc x
                   WHERE x.TRAN_TYPE = a.STLD_TYPE AND x.vchr_no = a.STLD_DOC
                     AND x.ACC_CODE = a.ACC_CODE AND x.DB_CR = a.STLD_DBCR) AS invAmount,
-                (SELECT MAX(x.JOB_NO) FROM tran_acc x
-                  WHERE x.TRAN_TYPE = a.STLD_TYPE AND x.vchr_no = a.STLD_DOC
-                    AND x.ACC_CODE = a.ACC_CODE)                           AS jobNo,
+                -- 14-Nov-2026: job of the sales invoice from fab_inv_hdr (STLD_TYPE 06);
+                -- other documents keep the job from their tran_acc line
+                COALESCE(NULLIF(fi.JOB_NO, ''),
+                  (SELECT MAX(x.JOB_NO) FROM tran_acc x
+                    WHERE x.TRAN_TYPE = a.STLD_TYPE AND x.vchr_no = a.STLD_DOC
+                      AND x.ACC_CODE = a.ACC_CODE))                        AS jobNo,
                 (SELECT SUM(z.STLD_AMT) FROM adj_dtl z
                   WHERE z.STLD_TYPE = a.STLD_TYPE AND z.STLD_DOC = a.STLD_DOC
                     AND z.ACC_CODE = a.ACC_CODE)                           AS invSettled,${supInvCols}
            FROM adj_dtl a
       LEFT JOIN cus_mst c ON c.CUST_CODE = a.ACC_CODE
-      LEFT JOIN sup_mst s ON s.SUP_CODE  = a.ACC_CODE${supInvJoin("a.STLD_TYPE", "a.STLD_DOC")}
+      LEFT JOIN sup_mst s ON s.SUP_CODE  = a.ACC_CODE
+      LEFT JOIN fab_inv_hdr fi ON a.STLD_TYPE = '06' AND fi.INV_NO = a.STLD_DOC${supInvJoin("a.STLD_TYPE", "a.STLD_DOC")}
           WHERE a.SOURCE_TYPE = ? AND a.SOURCE_DOC = ?
        ORDER BY a.MAIN_SR_NO, a.STLD_DOC`,
         [tranType, vchrNo]
