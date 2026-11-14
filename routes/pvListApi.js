@@ -80,7 +80,8 @@ module.exports = function (connection) {
         amountCol + "v.AMOUNT AS VCHR_AMOUNT, " +
         "v.NARRATION1, v.NARRATION2, ac_list.AC_HEAD AS ACC_HEAD, " +
         "v.BANK_NAME, v.PAID_TO, v.CAN_CEL, v.CONTRA_FLG, " +
-        "v.ACC_CODE2, v.AMOUNT2, v.JOB_NO, v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN, " +
+        "COALESCE(NULLIF(v.JOB_NO,''), tj.JOB_NOS) AS JOB_NO, " +
+        "v.ACC_CODE2, v.AMOUNT2,  v.CUR_CODE, v.CONV_RATE, v.AMOUNT_FRGN, " +
         " v.CREATED_BY," +
         " DATE_FORMAT(v.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
         " v.LAST_EDITED_BY," +
@@ -108,13 +109,20 @@ module.exports = function (connection) {
         "    FROM tran_acc WHERE TRAN_TYPE = ? AND DB_CR = 'D' " +
         "   GROUP BY TRAN_TYPE, VCHR_NO) drc " +
         "  ON drc.TRAN_TYPE = v.TRAN_TYPE AND drc.VCHR_NO = v.VCHR_NO " +
+        "LEFT OUTER JOIN (" +
+        "   SELECT TRAN_TYPE, VCHR_NO, " +
+        "          GROUP_CONCAT(DISTINCT JOB_NO ORDER BY JOB_NO SEPARATOR ', ') AS JOB_NOS " +
+        "   FROM tran_acc " +
+        "   WHERE TRAN_TYPE = ? AND JOB_NO IS NOT NULL AND JOB_NO <> '' " +
+        "   GROUP BY TRAN_TYPE, VCHR_NO) tj " +
+        "  ON tj.TRAN_TYPE = v.TRAN_TYPE AND tj.VCHR_NO = v.VCHR_NO " +
         "WHERE v.TRAN_TYPE = ? " + pf.sql +
         "ORDER BY v.VCHR_NO DESC, CAST(dr.SR_NO AS UNSIGNED)";
 
       // Placeholders in SQL order: chq(2), [single-mode drJoin(2)], drc(1), where(1), period(2)
       const params = drMode === "all"
-        ? [tranId, tranId, tranId, tranId, ...pf.params]
-        : [tranId, tranId, tranId, tranId, tranId, tranId, ...pf.params];
+        ? [tranId, tranId, tranId, tranId,tranId ,...pf.params]
+        : [tranId, tranId, tranId, tranId, tranId, tranId,tranId, ...pf.params];
 
       connection.query(sql, params, function (error, result) {
         if (error) {
