@@ -886,7 +886,7 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
-  router.get('/api/ts-ded-acc', async (req, res) => {
+  router.get('/ts-ded-acc', async (req, res) => {
   const [rows] = await pool.query(
     `SELECT acc_code AS ACC_CODE, acc_head AS ACC_HEAD
        FROM acc_mst WHERE report_ln = '12' AND gl_code = '1208'
