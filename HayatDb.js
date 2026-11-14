@@ -8027,3 +8027,5 @@ app.use("/api", authMiddleware, require("./routes/ledgerSettle")(connection));
 app.use("/api", authMiddleware, require("./routes/sivJobPanels")(connection));
 //
 app.use("/api", require("./routes/inqConversionApi")(connection))
+//
+app.use("/api", require("./routes/quotConversionApi")(connection));
