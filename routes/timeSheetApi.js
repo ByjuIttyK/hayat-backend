@@ -28,6 +28,9 @@
 //                                      week off / holiday → H.OT; never late / short / absent
 //     day 15 seq 2  08:00 → 17:30      regular duty, judged as usual
 //   A shift on the last day continues on day "last + 1" (1st of next month), kept on this sheet.
+// 14-Nov-2026: the payslip builder is router.payslipsFor(nos) → { slips, skipped } — also used by the
+//   Ledger of Accounts payslip (routes/payslipGate.js). Register in HayatDb.js as:
+//     const tsRouter = timeSheetApi(connection); app.use('/api', tsRouter);
 // 30-Oct-2026: POST /tsht/payslips { nos: [...] } — payslip figures of processed sheets (Payslip Print list):
 //   stored days recalculated (as when the sheet is opened), the same month totals as the screen
 //   (useTimeSheet totals), the sheet's own allowance / deduction lines, and the basic in force for
@@ -1372,10 +1375,11 @@ module.exports = function timeSheetApi(connection) {
     }
   });
 
-  router.post('/tsht/payslips', async (req, res) => {
-    try {
-      const nos = Array.isArray(req.body && req.body.nos) ? req.body.nos.map(String).slice(0, 500) : [];
-      if (!nos.length) throw httpErr(400, 'No time sheets selected');
+  /**
+   * Payslip figures of processed sheets (PayslipPrint.PayslipData) — used by /tsht/payslips (Payslip Print
+   * list) and, through router.payslipsFor, by the Ledger of Accounts payslip (payslipGate.js, 14-Nov-2026).
+   */
+  async function buildSlips(nos) {
       const slips = [];
       const skipped = [];
       for (const no of nos) {
@@ -1420,6 +1424,15 @@ module.exports = function timeSheetApi(connection) {
           deductions: ded.map(line),
         });
       }
+      return { slips, skipped };
+  }
+  router.payslipsFor = buildSlips;
+
+  router.post('/tsht/payslips', async (req, res) => {
+    try {
+      const nos = Array.isArray(req.body && req.body.nos) ? req.body.nos.map(String).slice(0, 500) : [];
+      if (!nos.length) throw httpErr(400, 'No time sheets selected');
+      const { slips, skipped } = await buildSlips(nos);
       res.json({ ok: true, slips, skipped });
     } catch (e) {
       send(res, e);

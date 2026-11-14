@@ -6964,7 +6964,7 @@ app.get('/api/Leddsp/:acode/:stdt/:enddt', function (req, res) {
   connection.query(
     "SELECT a.SR_NO, a.TRAN_TYPE, t.TYPE_ABBR, a.VCHR_NO, " +
     " DATE_FORMAT(a.DATTE,'%d/%m/%Y') DATTE, a.JOB_NO, jc.PROJ_NAME, " +
-    " a.NARRATION1, a.NARRATION2, " +
+    " a.NARRATION1, a.NARRATION2, a.REF_NO," +
     " CASE WHEN a.db_cr='D' THEN a.AMOUNT ELSE 0 END AS AMOUNT_DR, " +
     " CASE WHEN a.db_cr='C' THEN a.AMOUNT ELSE 0 END AS AMOUNT_CR " +
     " FROM tran_acc a " +
@@ -7924,9 +7924,7 @@ app.use("/api", require("./routes/payStatus")(connection));
 //
 app.use("/api", require("./routes/stockRecalApi")(connection));
 //
-const timeSheetApi = require('./routes/timeSheetApi');
-app.use('/api', timeSheetApi(connection));
-//
+
 app.use("/api", require("./routes/empMstApi")(connection));
 //
 app.use("/api", require("./routes/holidayMstApi")(connection));
@@ -8035,3 +8033,12 @@ app.use("/api", require("./routes/salesCollectionApi")(connection));
 const mgmtSalaryApi = require('./routes/mgmtSalaryApi');
 app.use('/api', mgmtSalaryApi(connection));
 //
+//const payslipGate = require('./routes/payslipGate');
+//app.use('/api', authMiddleware, payslipGate(connection, { JWT_SECRET }));
+const timeSheetApi = require('./routes/timeSheetApi');
+//app.use('/api', timeSheetApi(connection));
+//
+const tsRouter = timeSheetApi(connection);
+app.use('/api', tsRouter);
+const payslipGate = require('./routes/payslipGate');
+app.use('/api', authMiddleware, payslipGate(connection, { JWT_SECRET, payslipsFor: tsRouter.payslipsFor }));

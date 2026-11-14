@@ -41,6 +41,9 @@
 //     Dr Salary Debit A/c / Cr Accrued Sal A/c, no deduction lines (SALARY is already net).
 //   Rows carry SRC 'TS' (time sheet) or 'MS' (management salary). Posted / saved amounts / removed
 //   work as for time sheets (by NARRATION2). mgmtSalaryApi refuses to change or delete a posted voucher.
+// 14-Nov-2026: tran_acc.REF_NO = TSHT_NO (or 'MS' + mgmt_salary VCHR_NO) on every line of the employee —
+//   the key the Ledger of Accounts uses to open the employee's payslip (LedgerPayslip.tsx, payslipGate.js).
+//   Older JVs: UPDATE tran_acc SET REF_NO = NARRATION2 WHERE TRAN_TYPE = '15' AND (REF_NO IS NULL OR REF_NO = '');
 //
 // Register in HayatDb.js:
 //   const salaryJvApi = require('./routes/salaryJvApi');
@@ -431,12 +434,12 @@ module.exports = function (connection) {
         for (const x of s.sheets) {
           const net = r2(x.TOTAL_SALARY);
           const n1 = `${x.EMP_NAME} - ${mmyyyy(month)}`.slice(0, 200);
-          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, debitAc, null, n1, x.TSHT_NO, x.GROSS, 'D']);
+          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, debitAc, x.TSHT_NO, n1, x.TSHT_NO, x.GROSS, 'D']);
           for (const d of x.DEDS) {
             const n1d = `${d.DED_DESC || `Deduction ${d.DED_CODE}`} - ${x.EMP_NAME} - ${mmyyyy(month)}`.slice(0, 200);
-            values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, d.ACC_CODE, null, n1d, x.TSHT_NO, d.AMOUNT, 'C']);
+            values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, d.ACC_CODE, x.TSHT_NO, n1d, x.TSHT_NO, d.AMOUNT, 'C']);
           }
-          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, x.ACCRUED_SAL_AC, null, n1, x.TSHT_NO, net, 'C']);
+          values.push([SALARY_JV_TYPE, vchrNo, vchrDate, ++sr, x.ACCRUED_SAL_AC, x.TSHT_NO, n1, x.TSHT_NO, net, 'C']);
         }
         await q(
           conn,
