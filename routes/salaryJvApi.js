@@ -35,6 +35,12 @@
 //   (the same, from its saved Cr lines other than the accrual) so a changed deduction shows as amended.
 //   Save: expect carries {TSHT_NO, AMOUNT = GROSS, DED_SIG}; a deduction without ACC_CODE, or with an
 //   ACC_CODE not in acc_mst, refuses the save. salary_jv_hdr.TOTAL_AMT = the Dr total (gross).
+// 14-Nov-2026: management staff salary (mgmt_salary, MgmtSalary.tsx) posted with the time sheets.
+//   Each mgmt_salary voucher of the category's employees for the month is one more "sheet":
+//     key (NARRATION2) = 'MS' + VCHR_NO, e.g. MS0000000001 · TOTAL_SALARY = mgmt_salary.SALARY
+//     Dr Salary Debit A/c / Cr Accrued Sal A/c, no deduction lines (SALARY is already net).
+//   Rows carry SRC 'TS' (time sheet) or 'MS' (management salary). Posted / saved amounts / removed
+//   work as for time sheets (by NARRATION2). mgmtSalaryApi refuses to change or delete a posted voucher.
 //
 // Register in HayatDb.js:
 //   const salaryJvApi = require('./routes/salaryJvApi');
@@ -100,9 +106,9 @@ module.exports = function (connection) {
     );
     if (!c) throw fail(404, `Category ${catg} not found`);
 
-    const all = await q(
+    const tsRows = await q(
       conn,
-      `SELECT h.TSHT_NO, h.EMP_CODE, e.EMP_NAME, h.STATUS, IFNULL(h.TOTAL_SALARY, 0) AS TOTAL_SALARY,
+      `SELECT 'TS' AS SRC, h.TSHT_NO, h.EMP_CODE, e.EMP_NAME, h.STATUS, IFNULL(h.TOTAL_SALARY, 0) AS TOTAL_SALARY,
               p.ACCRUED_SAL_AC, a.ACC_HEAD AS ACCRUED_HEAD,
               (SELECT MIN(t.VCHR_NO) FROM tran_acc t
                 WHERE t.TRAN_TYPE = ? AND t.NARRATION2 = h.TSHT_NO AND t.VCHR_NO <> ?) AS POSTED_VCHR,
@@ -117,8 +123,32 @@ module.exports = function (connection) {
       [SALARY_JV_TYPE, own, SALARY_JV_TYPE, own, catg, month],
     );
 
+    // management staff salary vouchers (mgmt_salary) of the category's employees for the month —
+    // always "processed" (STATUS 'A'); key 'MS' + VCHR_NO in NARRATION2
+    let msRows = [];
+    try {
+      msRows = await q(
+        conn,
+        `SELECT 'MS' AS SRC, CONCAT('MS', s.VCHR_NO) AS TSHT_NO, s.EMP_CODE, e.EMP_NAME, 'A' AS STATUS,
+                IFNULL(s.SALARY, 0) AS TOTAL_SALARY, p.ACCRUED_SAL_AC, a.ACC_HEAD AS ACCRUED_HEAD,
+                (SELECT MIN(t.VCHR_NO) FROM tran_acc t
+                  WHERE t.TRAN_TYPE = ? AND t.NARRATION2 = CONCAT('MS', s.VCHR_NO) AND t.VCHR_NO <> ?) AS POSTED_VCHR,
+                (SELECT SUM(t.AMOUNT) FROM tran_acc t
+                  WHERE t.TRAN_TYPE = ? AND t.VCHR_NO = ? AND t.NARRATION2 = CONCAT('MS', s.VCHR_NO) AND t.DB_CR = 'D') AS SAVED_AMT
+           FROM mgmt_salary s
+           JOIN emp_mst e ON e.EMP_CODE = s.EMP_CODE
+           LEFT JOIN payroll_mst p ON p.EMP_CODE = s.EMP_CODE
+           LEFT JOIN acc_mst a ON a.ACC_CODE = p.ACCRUED_SAL_AC
+          WHERE e.EMP_CATG = ? AND s.SAL_MONTH = ?`,
+        [SALARY_JV_TYPE, own, SALARY_JV_TYPE, own, catg, month],
+      );
+    } catch (e) {
+      if (e.code !== 'ER_NO_SUCH_TABLE') throw e; // mgmt_salary not created yet
+    }
+    const all = [...tsRows, ...msRows].sort((x, y) => String(x.EMP_CODE).localeCompare(String(y.EMP_CODE)) || String(x.TSHT_NO).localeCompare(String(y.TSHT_NO)));
+
     // deduction lines of these time sheets (tsht_ded) — each is credited to its AcCode (Cr)
-    const tshtNos = all.map((r) => r.TSHT_NO);
+    const tshtNos = tsRows.map((r) => r.TSHT_NO);
     const dedRows = tshtNos.length
       ? await q(
           conn,
@@ -334,8 +364,8 @@ module.exports = function (connection) {
         const s = await sheetsFor(conn, catg, month, mode === 'EDIT' ? vchrNo : '');
         if (!s.sheets.length) {
           throw fail(400, mode === 'EDIT'
-            ? 'No processed time sheets are left for this JV — delete the voucher from the list instead'
-            : 'There are no processed time sheets to post');
+            ? 'No processed time sheets or management salaries are left for this JV — delete the voucher from the list instead'
+            : 'There are no processed time sheets or management salaries to post');
         }
         // the lines the user saw must still be the lines we are about to write
         //   (gross amount + the deductions per account, so a changed deduction or AcCode (Cr) is caught too)

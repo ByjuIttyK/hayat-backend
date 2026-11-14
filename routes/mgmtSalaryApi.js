@@ -12,6 +12,8 @@
 //   POST /api/mgmt-salary/delete  { vchrNo }
 //
 //   Payroll month close (payrollPeriod.js): a closed month cannot be added, changed or deleted.
+//   Salary JV (tran type 15) posts each voucher with NARRATION2 = 'MS' + VCHR_NO; a posted voucher
+//   cannot be changed or deleted — delete it from the Salary JV (or update the JV) first. (14-Nov-2026)
 //
 // Register in HayatDb.js:
 //   const mgmtSalaryApi = require('./routes/mgmtSalaryApi');
@@ -22,6 +24,7 @@ const express = require('express');
 const { assertPayrollOpen } = require('./payrollPeriod');
 
 const MGMT_CATG = 'M';
+const SALARY_JV_TYPE = '15';
 
 module.exports = function (connection) {
   const router = express.Router();
@@ -38,6 +41,11 @@ module.exports = function (connection) {
     return m && +m[2] >= 1 && +m[2] <= 12 ? `${m[1]}-${m[2]}-01` : null;
   };
   const mmyyyy = (iso) => `${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+  /** Salary JV that posted this voucher (tran_acc NARRATION2 = 'MS' + VCHR_NO), or null. */
+  const postedJv = async (conn, vchrNo) => {
+    const [r] = await q(conn, `SELECT MIN(VCHR_NO) AS JV FROM tran_acc WHERE TRAN_TYPE = ? AND NARRATION2 = ?`, [SALARY_JV_TYPE, `MS${vchrNo}`]);
+    return r && r.JV ? r.JV : null;
+  };
 
   const withConn = (fn) => async (req, res) => {
     let conn;
@@ -114,6 +122,8 @@ module.exports = function (connection) {
         if (mode === 'EDIT') {
           const [old] = await q(conn, `SELECT DATE_FORMAT(SAL_MONTH, '%Y-%m-%d') AS SAL_MONTH FROM mgmt_salary WHERE VCHR_NO = ? FOR UPDATE`, [vchrNo]);
           if (!old) throw fail(404, `Salary voucher ${vchrNo} no longer exists`);
+          const jv = await postedJv(conn, vchrNo);
+          if (jv) throw fail(423, `Salary voucher ${vchrNo} is posted in Salary JV ${jv} — delete it from that JV first, then change it`);
           // moving the voucher out of a closed month is a change to that month too
           if (old.SAL_MONTH !== month) await assertPayrollOpen((sql, p) => q(conn, sql, p), old.SAL_MONTH, 'Changing this management salary');
         }
@@ -162,6 +172,8 @@ module.exports = function (connection) {
     await q(conn, 'START TRANSACTION');
     const [r] = await q(conn, `SELECT DATE_FORMAT(SAL_MONTH, '%Y-%m-%d') AS SAL_MONTH FROM mgmt_salary WHERE VCHR_NO = ? FOR UPDATE`, [vchrNo]);
     if (!r) throw fail(404, `Salary voucher ${vchrNo} not found`);
+    const jv = await postedJv(conn, vchrNo);
+    if (jv) throw fail(423, `Salary voucher ${vchrNo} is posted in Salary JV ${jv} — delete it from that JV first`);
     await assertPayrollOpen((sql, p) => q(conn, sql, p), r.SAL_MONTH, `Deleting salary voucher ${vchrNo}`);
     await q(conn, 'DELETE FROM mgmt_salary WHERE VCHR_NO = ?', [vchrNo]);
     await q(conn, 'COMMIT');
