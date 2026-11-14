@@ -203,7 +203,7 @@ module.exports = function (connection) {
         },
         monthly,
         customers,
-        outstanding: outstanding.slice(0, 100),
+        outstanding,   // all of them — the screen shows a Total row
       });
     } catch (err) {
       console.error("quot-conversion:", err);
