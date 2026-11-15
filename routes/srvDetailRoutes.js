@@ -97,6 +97,93 @@ async function chequesOf(db, vchrNo) {
   return out;
 }
 
+// ── LPO status ────────────────────────────────────────────────────────────
+// Effective LPO of an SRV line = srv_items.LPO_NO, else the SRV header's LPO no.
+// The header column is found by name (LPO_NO / PO_NO) so a naming difference
+// does not break the panel.
+const SAFE_COL = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const t = (v) => String(v ?? '').trim();
+const srNum = (v) => { const n = parseInt(t(v), 10); return isNaN(n) ? t(v) : n; };
+
+async function lpoStatus(db, srvNo, items) {
+  let hdrLpo = '';
+  let lpoCol = null;
+  try {
+    const [[hdr]] = await db.query('SELECT * FROM srv_hdr WHERE SRV_NO = ? LIMIT 1', [srvNo]);
+    if (hdr) {
+      lpoCol = Object.keys(hdr).find((k) => /^lpo_?no$/i.test(k)) || Object.keys(hdr).find((k) => /^po_?no$/i.test(k)) || null;
+      if (lpoCol && !SAFE_COL.test(lpoCol)) lpoCol = null;
+      hdrLpo = lpoCol ? t(hdr[lpoCol]) : '';
+    }
+  } catch (e) { /* no header table — line LPO_NO only */ }
+
+  const lines = items.map((r) => ({ ...r, ELPO: t(r.LPO_NO) || hdrLpo }));
+  const lpos = [...new Set(lines.map((l) => l.ELPO).filter(Boolean))];
+
+  let lpoLines = [];
+  let others = [];
+  if (lpos.length) {
+    const [ll] = await db.query(
+      `SELECT LPO_NO, SR_NO, ITEM_CODE, ITEM_NAME, UNIT, JOB_NO, LPO_DATE,
+              IFNULL(QTY, 0) AS QTY, IFNULL(RATE, 0) AS RATE, IFNULL(DISC_PERCENT, 0) AS DISC_PERCENT
+         FROM lpo_items WHERE LPO_NO IN (?)`, [lpos]);
+    lpoLines = ll;
+    // every SRV line received against these LPOs (line LPO_NO or header LPO no.)
+    const [oo] = lpoCol
+      ? await db.query(
+        `SELECT s.SRV_NO, s.SRV_DATE, s.SR_NO, s.ITEM_CODE, IFNULL(s.QTY, 0) AS QTY,
+                COALESCE(NULLIF(TRIM(s.LPO_NO), ''), TRIM(h.${lpoCol})) AS ELPO
+           FROM srv_items s LEFT JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
+          WHERE s.LPO_NO IN (?) OR h.${lpoCol} IN (?)`, [lpos, lpos])
+      : await db.query(
+        `SELECT SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, IFNULL(QTY, 0) AS QTY, TRIM(LPO_NO) AS ELPO
+           FROM srv_items WHERE LPO_NO IN (?)`, [lpos]);
+    others = oo.filter((o) => lpos.includes(t(o.ELPO)));
+  }
+
+  const sameLine = (lpoNo, lpoLine, srv) =>
+    t(srv.ELPO) === lpoNo && srNum(srv.SR_NO) === srNum(lpoLine.SR_NO)
+    && (!t(lpoLine.ITEM_CODE) || t(srv.ITEM_CODE) === t(lpoLine.ITEM_CODE));
+  const ts = (v) => { const d = toDate(v); return d ? d.getTime() : 0; };
+
+  return lines.map((r) => {
+    const qty = Number(r.QTY) || 0;
+    const srvRate = qty ? (qty * Number(r.COST) - Number(r.DISCOUNT)) / qty : Number(r.COST);
+    const l = r.ELPO
+      ? lpoLines.find((x) => t(x.LPO_NO) === r.ELPO && srNum(x.SR_NO) === srNum(r.SR_NO)
+        && (!t(x.ITEM_CODE) || t(x.ITEM_CODE) === t(r.ITEM_CODE)))
+      : null;
+    if (!l) {
+      return {
+        srNo: r.SR_NO, itemCode: r.ITEM_CODE, lpoNo: r.ELPO, matched: false, lpoSr: '', lpoDate: '',
+        lpoItemName: '', lpoUnit: '', lpoJobNo: '', lpoQty: 0, recdBefore: 0, thisQty: qty,
+        balAfterThis: 0, balNow: 0, lpoRate: 0, srvRate: Math.round(srvRate * 1000) / 1000, varPct: 0,
+      };
+    }
+    const myT = ts(r.SRV_DATE);
+    const onLine = others.filter((o) => sameLine(r.ELPO, l, o));
+    const before = onLine
+      .filter((o) => t(o.SRV_NO) !== srvNo && (ts(o.SRV_DATE) < myT || (ts(o.SRV_DATE) === myT && t(o.SRV_NO) < srvNo)))
+      .reduce((s, o) => s + Number(o.QTY), 0);
+    // all receipts on the line; this SRV's own line is counted once even if the query missed it
+    const others2 = onLine.filter((o) => t(o.SRV_NO) !== srvNo).reduce((s, o) => s + Number(o.QTY), 0);
+    const all = others2 + qty;
+    const lpoQty = Number(l.QTY) || 0;
+    const lpoRate = Number(l.RATE) * (1 - Number(l.DISC_PERCENT) / 100);
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    return {
+      srNo: r.SR_NO, itemCode: r.ITEM_CODE, lpoNo: r.ELPO, matched: true,
+      lpoSr: String(l.SR_NO), lpoDate: dmy(l.LPO_DATE),
+      lpoItemName: l.ITEM_NAME || '', lpoUnit: l.UNIT || '', lpoJobNo: l.JOB_NO || '',
+      lpoQty, recdBefore: r3(before), thisQty: qty,
+      balAfterThis: r3(lpoQty - before - qty),
+      balNow: r3(lpoQty - all),
+      lpoRate: r3(lpoRate), srvRate: r3(srvRate),
+      varPct: lpoRate ? Math.round(((srvRate - lpoRate) / lpoRate) * 1000) / 10 : 0,
+    };
+  });
+}
+
 module.exports = function (connection) {
   const router = express.Router();
 
@@ -111,7 +198,7 @@ module.exports = function (connection) {
                 COALESCE(NULLIF(s.SRV_UNIT, ''), s.ITEM_UNIT) AS UNIT,
                 IFNULL(s.QTY, 0) AS QTY, IFNULL(s.COST, 0) AS COST, IFNULL(s.DISCOUNT, 0) AS DISCOUNT,
                 ROUND(IFNULL(s.QTY, 0) * IFNULL(s.COST, 0) - IFNULL(s.DISCOUNT, 0), 2) AS AMOUNT,
-                s.LPO_NO, s.JOB_NO, s.SUP_ITEM_CODE
+                s.LPO_NO, s.JOB_NO, s.SUP_ITEM_CODE, s.SRV_DATE
            FROM srv_items s
            LEFT JOIN item_mst i ON i.ITEM_CODE = s.ITEM_CODE
           WHERE s.SRV_NO = ?
@@ -121,46 +208,8 @@ module.exports = function (connection) {
 
       // LPO status per SRV line. Matching as on the LPO list (Rcvd / Pending Qty):
       // LPO No + Sr No, plus Item Code when the LPO line's item code is not blank.
-      const LPO_MATCH = (s) => `${s}.LPO_NO = l.LPO_NO AND ${s}.SR_NO = l.SR_NO
-              AND (TRIM(IFNULL(l.ITEM_CODE, '')) = '' OR ${s}.ITEM_CODE = l.ITEM_CODE)`;
-      const [lpoRows] = await db.query(
-        `SELECT s.SR_NO, s.ITEM_CODE, IFNULL(s.QTY, 0) AS QTY, IFNULL(s.COST, 0) AS COST,
-                IFNULL(s.DISCOUNT, 0) AS DISCOUNT, s.LPO_NO,
-                l.SR_NO AS LPO_SR, DATE_FORMAT(l.LPO_DATE, '%d/%m/%Y') AS LPO_DATE,
-                l.ITEM_NAME AS LPO_ITEM_NAME, l.UNIT AS LPO_UNIT,
-                IFNULL(l.QTY, 0) AS LPO_QTY, IFNULL(l.RATE, 0) AS LPO_RATE,
-                IFNULL(l.DISC_PERCENT, 0) AS DISC_PERCENT, l.JOB_NO AS LPO_JOB_NO,
-                (SELECT IFNULL(SUM(s2.QTY), 0) FROM srv_items s2
-                  WHERE ${LPO_MATCH('s2')} AND s2.SRV_NO <> s.SRV_NO
-                    AND (s2.SRV_DATE < s.SRV_DATE OR (s2.SRV_DATE = s.SRV_DATE AND s2.SRV_NO < s.SRV_NO))) AS RECD_BEFORE,
-                (SELECT IFNULL(SUM(s3.QTY), 0) FROM srv_items s3
-                  WHERE ${LPO_MATCH('s3')}) AS RECD_ALL
-           FROM srv_items s
-           LEFT JOIN lpo_items l ON ${LPO_MATCH('s')}
-          WHERE s.SRV_NO = ?
-          ORDER BY CAST(s.SR_NO AS UNSIGNED), s.SR_NO`,
-        [srvNo]
-      );
-      const lpo = lpoRows.map((r) => {
-        const matched = r.LPO_SR != null;
-        const qty = Number(r.QTY) || 0;
-        const srvRate = qty ? (qty * Number(r.COST) - Number(r.DISCOUNT)) / qty : Number(r.COST);
-        const lpoRate = Number(r.LPO_RATE) * (1 - Number(r.DISC_PERCENT) / 100);   // net of LPO disc %
-        const lpoQty = Number(r.LPO_QTY) || 0;
-        const before = Number(r.RECD_BEFORE) || 0;
-        return {
-          srNo: r.SR_NO, itemCode: r.ITEM_CODE, lpoNo: r.LPO_NO || '', matched,
-          lpoSr: matched ? String(r.LPO_SR) : '', lpoDate: r.LPO_DATE || '',
-          lpoItemName: r.LPO_ITEM_NAME || '', lpoUnit: r.LPO_UNIT || '', lpoJobNo: r.LPO_JOB_NO || '',
-          lpoQty, recdBefore: before, thisQty: qty,
-          balAfterThis: Math.round((lpoQty - before - qty) * 1000) / 1000,
-          balNow: Math.round((lpoQty - (Number(r.RECD_ALL) || 0)) * 1000) / 1000,
-          lpoRate: Math.round(lpoRate * 1000) / 1000,
-          srvRate: Math.round(srvRate * 1000) / 1000,
-          varPct: matched && lpoRate ? Math.round(((srvRate - lpoRate) / lpoRate) * 1000) / 10 : 0,
-        };
-      });
-
+      // The line's LPO_NO is often blank — the LPO no. is then taken from srv_hdr.
+      const lpo = await lpoStatus(db, srvNo, items);
       // Purchase Local booked against this SRV (PinvLocal), cancelled ones left out
       const [pjvRows] = await db.query(
         `SELECT PJV_NO, PJV_DATE, INV_NO, INV_DATE, SUP_CODE,
