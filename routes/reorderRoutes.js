@@ -54,7 +54,7 @@ module.exports = function (connection) {
       const useFrom = ymd(monthsBack(months));
       const lpoFrom = ymd(monthsBack(lpoMonths));
 
-      // stock now (stock_trans, loc 01)
+      // stock now = item_mst.OP_STOCK + movements in stock_trans (loc 01)
       const [st] = await db.query(
         `SELECT Item_code AS C, SUM(Qty) AS Q FROM stock_trans WHERE Loc_code = ? GROUP BY Item_code`,
         [STOCK_LOC]
@@ -62,6 +62,14 @@ module.exports = function (connection) {
       const map = {};
       const get = (c) => (map[c] = map[c] || { itemCode: c, stock: 0, used: 0, onOrder: 0 });
       st.forEach((r) => { get(t(r.C)).stock = n3(r.Q); });
+
+      // + opening stock from item_mst.OP_STOCK (not in stock_trans)
+      if (await hasCol(db, 'item_mst', 'OP_STOCK')) {
+        const [op] = await db.query(
+          `SELECT ITEM_CODE AS C, IFNULL(OP_STOCK, 0) AS Q FROM item_mst WHERE IFNULL(OP_STOCK, 0) <> 0`
+        );
+        op.forEach((r) => { const c = t(r.C); if (c) { const it = get(c); it.stock = n3(it.stock + Number(r.Q)); } });
+      }
 
       // usage = qty issued on SIVs in the period (store issues only — no D/O, returns or adjustments)
       const [use] = await db.query(
