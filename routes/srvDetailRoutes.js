@@ -106,38 +106,48 @@ const t = (v) => String(v ?? '').trim();
 const srNum = (v) => { const n = parseInt(t(v), 10); return isNaN(n) ? t(v) : n; };
 
 async function lpoStatus(db, srvNo, items) {
+  // srv_hdr.PO_NO holds the LPO no. (srv_hdr.LPO_NO, srv_items.LPO_NO / PO_NO are usually blank).
+  // All four are tried, header PO_NO first, so whichever is filled is used.
   let hdrLpo = '';
-  let lpoCol = null;
+  let hdrCols = [];
   try {
     const [[hdr]] = await db.query('SELECT * FROM srv_hdr WHERE SRV_NO = ? LIMIT 1', [srvNo]);
     if (hdr) {
-      lpoCol = Object.keys(hdr).find((k) => /^lpo_?no$/i.test(k)) || Object.keys(hdr).find((k) => /^po_?no$/i.test(k)) || null;
-      if (lpoCol && !SAFE_COL.test(lpoCol)) lpoCol = null;
-      hdrLpo = lpoCol ? t(hdr[lpoCol]) : '';
+      const keys = Object.keys(hdr);
+      hdrCols = [/^po_?no$/i, /^lpo_?no$/i]
+        .map((re) => keys.find((k) => re.test(k)))
+        .filter((k) => k && SAFE_COL.test(k));
+      hdrLpo = hdrCols.map((k) => t(hdr[k])).find(Boolean) || '';
     }
-  } catch (e) { /* no header table — line LPO_NO only */ }
+  } catch (e) { /* no header table — line values only */ }
 
-  const lines = items.map((r) => ({ ...r, ELPO: t(r.LPO_NO) || hdrLpo }));
+  const lines = items.map((r) => ({ ...r, ELPO: t(r.LPO_NO) || t(r.PO_NO) || hdrLpo }));
   const lpos = [...new Set(lines.map((l) => l.ELPO).filter(Boolean))];
 
   let lpoLines = [];
   let others = [];
+  const lpoDate = {};
   if (lpos.length) {
     const [ll] = await db.query(
       `SELECT LPO_NO, SR_NO, ITEM_CODE, ITEM_NAME, UNIT, JOB_NO, LPO_DATE,
               IFNULL(QTY, 0) AS QTY, IFNULL(RATE, 0) AS RATE, IFNULL(DISC_PERCENT, 0) AS DISC_PERCENT
-         FROM lpo_items WHERE LPO_NO IN (?)`, [lpos]);
+         FROM lpo_items WHERE TRIM(LPO_NO) IN (?)`, [lpos]);
     lpoLines = ll;
-    // every SRV line received against these LPOs (line LPO_NO or header LPO no.)
-    const [oo] = lpoCol
-      ? await db.query(
-        `SELECT s.SRV_NO, s.SRV_DATE, s.SR_NO, s.ITEM_CODE, IFNULL(s.QTY, 0) AS QTY,
-                COALESCE(NULLIF(TRIM(s.LPO_NO), ''), TRIM(h.${lpoCol})) AS ELPO
-           FROM srv_items s LEFT JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO
-          WHERE s.LPO_NO IN (?) OR h.${lpoCol} IN (?)`, [lpos, lpos])
-      : await db.query(
-        `SELECT SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, IFNULL(QTY, 0) AS QTY, TRIM(LPO_NO) AS ELPO
-           FROM srv_items WHERE LPO_NO IN (?)`, [lpos]);
+    // LPO date from the LPO header (lpo_net); date column found by name
+    try {
+      const [hn] = await db.query('SELECT * FROM lpo_net WHERE TRIM(LPO_NO) IN (?)', [lpos]);
+      hn.forEach((h) => { lpoDate[t(h.LPO_NO)] = dmy(pick(h, /^(lpo_?)?date$|^datte$/i)); });
+    } catch (e) { /* optional */ }
+
+    // every SRV line received against these LPOs (line LPO_NO / PO_NO, else header PO_NO / LPO_NO)
+    const hdrExpr = hdrCols.map((k) => `NULLIF(TRIM(h.${k}), '')`).join(', ');
+    const effExpr = `COALESCE(NULLIF(TRIM(s.LPO_NO), ''), NULLIF(TRIM(s.PO_NO), '')${hdrExpr ? ', ' + hdrExpr : ''})`;
+    const hdrWhere = hdrCols.map((k) => ` OR TRIM(h.${k}) IN (?)`).join('');
+    const [oo] = await db.query(
+      `SELECT s.SRV_NO, s.SRV_DATE, s.SR_NO, s.ITEM_CODE, IFNULL(s.QTY, 0) AS QTY, ${effExpr} AS ELPO
+         FROM srv_items s ${hdrCols.length ? 'LEFT JOIN srv_hdr h ON h.SRV_NO = s.SRV_NO' : ''}
+        WHERE TRIM(s.LPO_NO) IN (?) OR TRIM(s.PO_NO) IN (?)${hdrWhere}`,
+      [lpos, lpos, ...hdrCols.map(() => lpos)]);
     others = oo.filter((o) => lpos.includes(t(o.ELPO)));
   }
 
@@ -173,7 +183,7 @@ async function lpoStatus(db, srvNo, items) {
     const r3 = (v) => Math.round(v * 1000) / 1000;
     return {
       srNo: r.SR_NO, itemCode: r.ITEM_CODE, lpoNo: r.ELPO, matched: true,
-      lpoSr: String(l.SR_NO), lpoDate: dmy(l.LPO_DATE),
+      lpoSr: String(l.SR_NO), lpoDate: dmy(l.LPO_DATE) || lpoDate[r.ELPO] || '',
       lpoItemName: l.ITEM_NAME || '', lpoUnit: l.UNIT || '', lpoJobNo: l.JOB_NO || '',
       lpoQty, recdBefore: r3(before), thisQty: qty,
       balAfterThis: r3(lpoQty - before - qty),
@@ -198,7 +208,7 @@ module.exports = function (connection) {
                 COALESCE(NULLIF(s.SRV_UNIT, ''), s.ITEM_UNIT) AS UNIT,
                 IFNULL(s.QTY, 0) AS QTY, IFNULL(s.COST, 0) AS COST, IFNULL(s.DISCOUNT, 0) AS DISCOUNT,
                 ROUND(IFNULL(s.QTY, 0) * IFNULL(s.COST, 0) - IFNULL(s.DISCOUNT, 0), 2) AS AMOUNT,
-                s.LPO_NO, s.JOB_NO, s.SUP_ITEM_CODE, s.SRV_DATE
+                s.LPO_NO, s.PO_NO, s.JOB_NO, s.SUP_ITEM_CODE, s.SRV_DATE
            FROM srv_items s
            LEFT JOIN item_mst i ON i.ITEM_CODE = s.ITEM_CODE
           WHERE s.SRV_NO = ?
