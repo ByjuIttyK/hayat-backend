@@ -8054,3 +8054,6 @@ const stockAgeingRoutes = require('./routes/stockAgeingRoutes');
 app.use('/api', exceptionCenterRoutes(connection));
 app.use('/api', stockAgeingRoutes(connection));
 //
+const reorderRoutes = require('./routes/reorderRoutes');
+app.use('/api', reorderRoutes(connection));
+//
