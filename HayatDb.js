@@ -8042,3 +8042,9 @@ const tsRouter = timeSheetApi(connection);
 app.use('/api', tsRouter);
 const payslipGate = require('./routes/payslipGate');
 app.use('/api', authMiddleware, payslipGate(connection, { JWT_SECRET, payslipsFor: tsRouter.payslipsFor }));
+//
+const srvDetailRoutes = require('./routes/srvDetailRoutes');
+app.use('/api', srvDetailRoutes(connection));
+//
+const sivDetailRoutes = require('./routes/sivDetailRoutes');
+app.use('/api', sivDetailRoutes(connection));
