@@ -19,6 +19,9 @@ const express = require('express');
 
 const STOCK_LOC = '01';
 const DEFAULT_LEAD = 14;
+// Item code prefixes left out of reordering: CON = consumables, booked lump-sum (collective items)
+const EXCLUDE_PREFIXES = ['CON'];
+const excluded = (code) => EXCLUDE_PREFIXES.some((p) => String(code || '').toUpperCase().startsWith(p));
 
 const n3 = (v) => Math.round((Number(v) || 0) * 1000) / 1000;
 const t = (v) => String(v ?? '').trim();
@@ -106,7 +109,7 @@ module.exports = function (connection) {
       } catch (e) { console.error('reorder on-order:', e.message); }
 
       // keep items that matter: stock, usage, on order, or levels set
-      const items = Object.values(map).filter((it) => it.stock !== 0 || it.used > 0 || it.onOrder > 0 || it.min || it.max);
+      const items = Object.values(map).filter((it) => it.itemCode && !excluded(it.itemCode) && (it.stock !== 0 || it.used > 0 || it.onOrder > 0 || it.min || it.max));
       const codes = items.map((it) => it.itemCode);
 
       // names / part no

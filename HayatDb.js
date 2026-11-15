@@ -8057,3 +8057,6 @@ app.use('/api', stockAgeingRoutes(connection));
 const reorderRoutes = require('./routes/reorderRoutes');
 app.use('/api', reorderRoutes(connection));
 //
+const docFlowRoutes = require('./routes/docFlowRoutes');
+app.use('/api', docFlowRoutes(connection));
+//
