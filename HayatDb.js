@@ -8048,3 +8048,9 @@ app.use('/api', srvDetailRoutes(connection));
 //
 const sivDetailRoutes = require('./routes/sivDetailRoutes');
 app.use('/api', sivDetailRoutes(connection));
+//
+const exceptionCenterRoutes = require('./routes/exceptionCenterRoutes');
+const stockAgeingRoutes = require('./routes/stockAgeingRoutes');
+app.use('/api', exceptionCenterRoutes(connection));
+app.use('/api', stockAgeingRoutes(connection));
+//
