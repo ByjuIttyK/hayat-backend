@@ -27,8 +27,9 @@ const ST = {
   sort: 'sORT_ORD',
 };
 // Stock_tran_type codes. Anything not listed here shows as "Ret / Adj".
-const SIV_TYPES = ['SIV'];          // Store Issue Vouchers
-const DO_TYPES = ['DO', 'TDO'];     // Trading D/O
+const SIV_TYPES = ['S.I.V'];        // Store Issue Vouchers
+const DO_TYPES = ['S.INV'];         // Sales (trading) invoices
+// Others seen: S.RET, RM.RET, P.RET, S.ADJ, TRF.Out / TRF.In -> "Ret / Adj"
 const STOCK_LOC = '01';             // stock is kept in location 01 only
 
 const PAY_TYPE_LABEL = { '02': 'Cash Payment', '04': 'Cheque Payment' };

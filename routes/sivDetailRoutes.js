@@ -149,9 +149,10 @@ module.exports = function (connection) {
         const item = String(ln.ITEM_CODE || '').trim();
         const qty = Number(ln.QTY) || 0;
         const [outs] = await db.query(
-          `SELECT Doc_no, -Qty AS Q FROM stock_trans
+          `SELECT Doc_no, Stock_tran_type AS T, -Qty AS Q FROM stock_trans
             WHERE Item_code = ? AND Loc_code = ? AND Qty < 0 ORDER BY ${ORDER}`, [item, STOCK_LOC]);
-        const idx = outs.findIndex((o) => String(o.Doc_no || '').trim() === sivNo);
+        const idx = outs.findIndex((o) => String(o.Doc_no || '').trim() === sivNo
+          && String(o.T || '').trim().toUpperCase() === 'S.I.V');
         if (idx < 0) {
           result.push({ itemCode: item, itemName: ln.ITEM_NAME || '', qty, stdCost: Number(ln.STD_COST), sources: [], short: 0, note: 'Not found in stock_trans' });
           continue;
