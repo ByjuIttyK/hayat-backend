@@ -36,7 +36,7 @@ module.exports = function (connection) {
                TRIM(COALESCE(j.QUOT_REF, ''))   AS quotRef,
                COALESCE(j.CONTRACT_AMT, 0)      AS contractAmt
         FROM   job_card j
-        LEFT   JOIN cus_mst c ON TRIM(c.CUST_CODE) = TRIM(j.CUST_CODE)
+        LEFT outer  JOIN cus_mst c ON TRIM(c.CUST_CODE) = TRIM(j.CUST_CODE)
         ORDER  BY j.JOB_NO DESC
       `);
       res.json(rows);

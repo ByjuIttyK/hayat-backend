@@ -98,8 +98,8 @@ module.exports = function (connection) {
         conn,
         `INSERT INTO tran_acc (
            TRAN_TYPE, VCHR_NO, DATTE, SR_NO, ACC_CODE,
-           AMOUNT, DB_CR, NARRATION1, NARRATION2, REF_NO
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           AMOUNT, DB_CR, NARRATION1, NARRATION2, REF_NO,JOB_NO
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?)`,
         [
           TRAN_TYPE, VCHR_NO, vchrData.VchrDate,
           sr,                              // 1..n, no gaps
@@ -109,6 +109,7 @@ module.exports = function (connection) {
           trn.Narration1 || null,
           trn.Narration2 || null,
           trn.RefNo || null,
+          trn.JobNo || null,
         ]
       );
     }
