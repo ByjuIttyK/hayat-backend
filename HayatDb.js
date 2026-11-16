@@ -4180,7 +4180,7 @@ app.get("/api/sivitemsjob/:job", function (req, res) {
 
   connection.execute(
     "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y') AS SIV_DATE, a.LOC_CODE,a.SR_NO," +
-    " a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST, a.JOB_NO " +
+    " a.ITEM_CODE, b.ITEM_NAME1, a.QTY, a.SR_NO, a.STD_COST, a.JOB_NO ,a.panel_no " +
     " from siv_items a left outer join  item_mst b on  a.ITEM_CODE = b.ITEM_CODE where " +
     " a.JOB_NO = ? ORDER by a.SIV_NO,a.SR_NO",
     [req.params.job],
