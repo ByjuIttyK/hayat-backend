@@ -73,7 +73,7 @@ const ACC_DELETE = 'DELETE FROM tran_acc WHERE VCHR_NO = ? AND TRAN_TYPE = ?';
 
 const ACC_INSERT = `
   INSERT INTO tran_acc
-    (VCHR_NO, DATTE, TRAN_TYPE, ACC_CODE, DB_CR, AMOUNT, NARRATION1, NARRATION2, JOB_NO, PANEL_NO)
+    (VCHR_NO, SR_NO, DATTE, TRAN_TYPE, ACC_CODE, DB_CR, AMOUNT, NARRATION1, NARRATION2, JOB_NO, PANEL_NO)
   VALUES ?`;
 
 // Panel description when the screen doesn't send it. Adjust the column name if
@@ -99,13 +99,17 @@ async function postSivAccounts(conn, { sivNo, sivDate, jobNo, panelNo, panelDesc
   const narr1 = desc.slice(0, 80) || null;
   const narr2 = narration ? String(narration).trim() || null : null;
 
-  const row = (acc, dbCr) =>
-    [sivNo, sivDate, SIV_TRAN_TYPE, acc, dbCr, amt, narr1, narr2, jobNo, panelNo];
+  // SR_NO is varchar(4): '001', '002', ...
+  const lines = [
+    [wipAc(jobNo), 'D'],
+    [INVENTORY_AC, 'C'],
+  ];
+  const rows = lines.map(([acc, dbCr], i) => [
+    sivNo, String(i + 1).padStart(3, '0'), sivDate, SIV_TRAN_TYPE,
+    acc, dbCr, amt, narr1, narr2, jobNo, panelNo,
+  ]);
 
-  await q(conn, ACC_INSERT, [[
-    row(wipAc(jobNo), 'D'),
-    row(INVENTORY_AC, 'C'),
-  ]]);
+  await q(conn, ACC_INSERT, [rows]);
 }
 
 /** Next SIV No after the highest one on file, same zero-padded width. */
