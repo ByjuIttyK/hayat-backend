@@ -79,7 +79,7 @@ const ACC_INSERT = `
 // Panel description when the screen doesn't send it. Adjust the column name if
 // job_panels keeps the description under a different column.
 const PANEL_DESC_SQL =
-  'SELECT PANEL_DESC FROM job_panels WHERE JOB_NO = ? AND PANEL_REF = ? LIMIT 1';
+  'SELECT PANEL_REF AS PANEL_DESC FROM job_panels WHERE JOB_NO = ? AND SR_NO = ? LIMIT 1';
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
