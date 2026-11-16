@@ -9,6 +9,10 @@
 // backwards; each slice is aged from its receipt date and valued at the
 // receipt's Std_cost.
 //
+// Opening stock (item_mst.OP_STOCK) is not in stock_trans: it is added to the
+// balance and treated as the OLDEST layer (before every receipt), so it is
+// used up first and whatever is left of it falls in the last bucket.
+//
 // Register in HayatDb.js:
 //   const stockAgeingRoutes = require('./routes/stockAgeingRoutes');
 //   app.use('/api', stockAgeingRoutes(connection));
@@ -45,6 +49,17 @@ function bucketLabels(b) {
   return out;
 }
 
+const colCache = new Map();
+async function columnsOf(db, table) {
+  if (!colCache.has(table)) {
+    try {
+      const [rows] = await db.query(`SHOW COLUMNS FROM ${table}`);
+      colCache.set(table, new Set(rows.map((r) => String(r.Field).toUpperCase())));
+    } catch (e) { colCache.set(table, new Set()); }
+  }
+  return colCache.get(table);
+}
+
 module.exports = function (connection) {
   const router = express.Router();
 
@@ -68,11 +83,32 @@ module.exports = function (connection) {
           GROUP BY Item_code`,
         [STOCK_LOC, asOnEnd]
       );
-      const items = {};
+      const all = {};
       bal.forEach((r) => {
-        const q = Number(r.Q) || 0;
-        if (q > 0.0005) items[String(r.C).trim()] = { qty: q, lastIn: r.LI, lastOut: r.LO };
+        const c = String(r.C || '').trim();
+        if (c) all[c] = { qty: Number(r.Q) || 0, op: 0, opCost: 0, lastIn: r.LI, lastOut: r.LO };
       });
+
+      // + opening stock from item_mst.OP_STOCK
+      const imCols = await columnsOf(db, 'item_mst');
+      if (imCols.has('OP_STOCK')) {
+        const costCol = ['OP_RATE', 'OP_COST', 'STD_COST', 'AVG_COST'].find((k) => imCols.has(k));
+        const [op] = await db.query(
+          `SELECT ITEM_CODE AS C, IFNULL(OP_STOCK, 0) AS Q${costCol ? `, IFNULL(${costCol}, 0) AS COST` : ''}
+             FROM item_mst WHERE IFNULL(OP_STOCK, 0) <> 0`
+        );
+        op.forEach((r) => {
+          const c = String(r.C || '').trim();
+          if (!c) return;
+          const it = all[c] || (all[c] = { qty: 0, op: 0, opCost: 0, lastIn: null, lastOut: null });
+          it.op = Number(r.Q) || 0;
+          it.opCost = Number(r.COST) || 0;
+          it.qty += it.op;
+        });
+      }
+
+      const items = {};
+      Object.entries(all).forEach(([c, it]) => { if (it.qty > 0.0005) items[c] = it; });
       const codes = Object.keys(items);
       if (!codes.length) {
         return res.json({ asOn: dmy(asOn), buckets: bucketLabels(buckets), totals: { qty: 0, value: 0, bv: Array(nb).fill(0) }, items: [] });
@@ -99,23 +135,26 @@ module.exports = function (connection) {
         nm.forEach((r) => { names[String(r.ITEM_CODE).trim()] = { name: r.ITEM_NAME1 || '', part: r.ARTICLE_CODE || '' }; });
       } catch (e) { /* optional */ }
 
-      const totals = { qty: 0, value: 0, bv: Array(nb).fill(0), bq: Array(nb).fill(0), noReceiptQty: 0 };
+      const totals = { qty: 0, value: 0, bv: Array(nb).fill(0), bq: Array(nb).fill(0), noReceiptQty: 0, opQty: 0 };
       const out = codes.map((c) => {
         const it = items[c];
-        const ls = layers[c] || [];
+        const ls = [...(layers[c] || [])];
+        // opening stock = oldest layer, after all receipts (list is newest first)
+        if (it.op > 0) ls.push({ OPENING: true, Q: it.op, COST: it.opCost, D: null });
         const lastCost = (ls.find((l) => Number(l.COST) > 0) || {}).COST || 0;
         const bq = Array(nb).fill(0), bv = Array(nb).fill(0);
-        let rem = it.qty, value = 0, oldest = null;
+        let rem = it.qty, value = 0, oldest = null, opUsed = 0;
         for (const l of ls) {
           if (rem <= 0.0005) break;
           const take = Math.min(rem, Number(l.Q) || 0);
           if (take <= 0) continue;
-          const d = toDate(l.D);
-          const age = d ? Math.max(0, Math.round((asOn - dayOf(d)) / 86400000)) : 99999;
+          const d = l.OPENING ? null : toDate(l.D);
+          const age = d ? Math.max(0, Math.round((asOn - dayOf(d)) / 86400000)) : 99999;   // opening → last bucket
+          if (l.OPENING) opUsed = take;
           const b = bucketOf(age);
           const cost = Number(l.COST) > 0 ? Number(l.COST) : Number(lastCost);
           bq[b] += take; bv[b] += take * cost; value += take * cost;
-          oldest = d || oldest;
+          oldest = l.OPENING ? 'OPENING' : (d || oldest);
           rem -= take;
         }
         const noReceipt = rem > 0.0005 ? rem : 0;   // balance with no receipt to explain it
@@ -125,16 +164,17 @@ module.exports = function (connection) {
         const lastOut = toDate(it.lastOut);
         const idleDays = lastOut ? Math.max(0, Math.round((asOn - dayOf(lastOut)) / 86400000)) : null;
 
-        totals.qty += it.qty; totals.value += value; totals.noReceiptQty += noReceipt;
+        totals.qty += it.qty; totals.value += value; totals.noReceiptQty += noReceipt; totals.opQty += opUsed;
         bq.forEach((q, i) => { totals.bq[i] += q; totals.bv[i] += bv[i]; });
 
         return {
           itemCode: c, itemName: (names[c] || {}).name || '', partNo: (names[c] || {}).part || '',
           qty: n3(it.qty), value: n2(value), avgCost: it.qty ? n3(value / it.qty) : 0,
           bq: bq.map(n3), bv: bv.map(n2),
-          oldest: dmy(oldest), lastIn: dmy(it.lastIn), lastOut: dmy(it.lastOut), lastMove: dmy(lastMove),
+          oldest: oldest === 'OPENING' ? 'Opening' : dmy(oldest), lastIn: dmy(it.lastIn), lastOut: dmy(it.lastOut), lastMove: dmy(lastMove),
           idleDays,                       // days since last issue (null = never issued)
           noReceipt: n3(noReceipt),
+          opQty: n3(opUsed),              // part of the balance that is opening stock
         };
       }).sort((a, b) => b.value - a.value);
 
@@ -144,7 +184,7 @@ module.exports = function (connection) {
         buckets: bucketLabels(buckets),
         totals: {
           qty: n3(totals.qty), value: n2(totals.value),
-          bq: totals.bq.map(n3), bv: totals.bv.map(n2), noReceiptQty: n3(totals.noReceiptQty),
+          bq: totals.bq.map(n3), bv: totals.bv.map(n2), noReceiptQty: n3(totals.noReceiptQty), opQty: n3(totals.opQty),
           items: out.length,
         },
         items: out,

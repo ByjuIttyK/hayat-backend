@@ -16,6 +16,13 @@
  *
  * netData.Mode: 'ADD' for a new SIV, 'EDIT' for an existing one.
  * Without Mode, an existing SIV is updated and a missing one is inserted.
+ *
+ * G/L posting (tran_acc, TRAN_TYPE 21) — inside the same transaction:
+ *   Dr 126-001-<JOB_NO>-1   W.I.P Material Cost A/c
+ *   Cr 121-101-0-002        Inventory A/c
+ *   VCHR_NO = SIV_NO, DATTE = SIV_DATE, NARRATION1 = panel description (80),
+ *   NARRATION2 = narration, JOB_NO, PANEL_NO, AMOUNT = net amount.
+ *   On every save the old type-21 rows for the SIV are deleted and re-posted.
  */
 
 const express = require('express');
@@ -56,6 +63,50 @@ const ITEMS_UPSERT = `
     ITEM_CODE = VALUES(ITEM_CODE),
     QTY       = VALUES(QTY),
     STD_COST  = VALUES(STD_COST)`;
+
+// ---- G/L posting ----------------------------------------------------------
+const SIV_TRAN_TYPE = '21';
+const INVENTORY_AC  = '121-101-0-002';
+const wipAc = (jobNo) => `126-001-${jobNo}-1`;
+
+const ACC_DELETE = 'DELETE FROM tran_acc WHERE VCHR_NO = ? AND TRAN_TYPE = ?';
+
+const ACC_INSERT = `
+  INSERT INTO tran_acc
+    (VCHR_NO, DATTE, TRAN_TYPE, ACC_CODE, DB_CR, AMOUNT, NARRATION1, NARRATION2, JOB_NO, PANEL_NO)
+  VALUES ?`;
+
+// Panel description when the screen doesn't send it. Adjust the column name if
+// job_panels keeps the description under a different column.
+const PANEL_DESC_SQL =
+  'SELECT PANEL_DESC FROM job_panels WHERE JOB_NO = ? AND PANEL_REF = ? LIMIT 1';
+
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+/** Re-posts the SIV's Dr WIP / Cr Inventory pair. Call inside the transaction. */
+async function postSivAccounts(conn, { sivNo, sivDate, jobNo, panelNo, panelDesc, narration, amount }) {
+  await q(conn, ACC_DELETE, [sivNo, SIV_TRAN_TYPE]);
+
+  const amt = round2(amount);
+  if (amt === 0) return;                       // nothing to post
+  if (!jobNo) throw new ConflictError('Job No is required to post the SIV to W.I.P');
+
+  let desc = String(panelDesc ?? '').trim();
+  if (!desc && panelNo) {
+    const r = await q(conn, PANEL_DESC_SQL, [jobNo, panelNo]);
+    desc = r.length ? String(r[0].PANEL_DESC ?? '').trim() : '';
+  }
+  const narr1 = desc.slice(0, 80) || null;
+  const narr2 = narration ? String(narration).trim() || null : null;
+
+  const row = (acc, dbCr) =>
+    [sivNo, sivDate, SIV_TRAN_TYPE, acc, dbCr, amt, narr1, narr2, jobNo, panelNo];
+
+  await q(conn, ACC_INSERT, [[
+    row(wipAc(jobNo), 'D'),
+    row(INVENTORY_AC, 'C'),
+  ]]);
+}
 
 /** Next SIV No after the highest one on file, same zero-padded width. */
 async function nextSivNo(conn, width) {
@@ -138,6 +189,21 @@ module.exports = function (connection) {
         sivNo, netData.SivDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.STD_COST,
       ]);
       await q(conn, ITEMS_UPSERT, [values]);
+
+      // Net amount: header total, else the sum of the lines.
+      const netAmt = netData.Amount != null && netData.Amount !== ''
+        ? netData.Amount
+        : itemsData.reduce((s, r) => s + (Number(r.QTY) || 0) * (Number(r.STD_COST) || 0), 0);
+
+      await postSivAccounts(conn, {
+        sivNo,
+        sivDate:   netData.SivDt,
+        jobNo:     netData.JobNo ? String(netData.JobNo).trim() : null,
+        panelNo,
+        panelDesc: netData.PanelDesc,
+        narration: netData.Narration,
+        amount:    netAmt,
+      });
 
       await commit(conn);
       return sivNo;
