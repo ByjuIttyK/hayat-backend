@@ -8059,4 +8059,6 @@ app.use('/api', reorderRoutes(connection));
 //
 const docFlowRoutes = require('./routes/docFlowRoutes');
 app.use('/api', docFlowRoutes(connection));
+
 //
+app.use("/api", authMiddleware, require("./routes/jobSalesIncenAcRoutes")(connection));
