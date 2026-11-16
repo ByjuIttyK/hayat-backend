@@ -56,10 +56,12 @@ const HDR_UPDATE = `
    WHERE SIV_NO=?`;
 
 const ITEMS_UPSERT = `
-  INSERT INTO siv_items (SIV_NO, SIV_DATE, SR_NO, ITEM_CODE, QTY, STD_COST)
+  INSERT INTO siv_items (SIV_NO, SIV_DATE, JOB_NO, PANEL_NO, SR_NO, ITEM_CODE, QTY, STD_COST)
   VALUES ?
   ON DUPLICATE KEY UPDATE
     SIV_DATE  = VALUES(SIV_DATE),
+    JOB_NO    = VALUES(JOB_NO),
+    PANEL_NO  = VALUES(PANEL_NO),
     ITEM_CODE = VALUES(ITEM_CODE),
     QTY       = VALUES(QTY),
     STD_COST  = VALUES(STD_COST)`;
@@ -144,8 +146,10 @@ module.exports = function (connection) {
     // siv_hdr.SIV_TYPE is varchar(1): 'M' materials, 'C' consumables (no panel).
     const sivType = String(netData.SivType || 'M').toUpperCase().charAt(0);
     const panelNo = sivType === 'C' ? null : (String(netData.PanelNo ?? '').trim() || null);
+    // Job No and Panel No are kept on siv_items too — the Job Card's Store Issues tab reads them there.
+    const jobNo = String(netData.JobNo ?? '').trim() || null;
     const hdrFields = [
-      netData.SivDt, netData.JobNo ?? null, panelNo, netData.CustCd ?? null,
+      netData.SivDt, jobNo, panelNo, netData.CustCd ?? null,
       netData.Narration ?? null, sivType, netData.Amount ?? null,
     ];
 
@@ -190,7 +194,7 @@ module.exports = function (connection) {
       }
 
       const values = itemsData.map((row) => [
-        sivNo, netData.SivDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.STD_COST,
+        sivNo, netData.SivDt, jobNo, panelNo, row.SR_NO, row.ITEM_CODE, row.QTY, row.STD_COST,
       ]);
       await q(conn, ITEMS_UPSERT, [values]);
 
@@ -202,7 +206,7 @@ module.exports = function (connection) {
       await postSivAccounts(conn, {
         sivNo,
         sivDate:   netData.SivDt,
-        jobNo:     netData.JobNo ? String(netData.JobNo).trim() : null,
+        jobNo,
         panelNo,
         panelDesc: netData.PanelDesc,
         narration: netData.Narration,
