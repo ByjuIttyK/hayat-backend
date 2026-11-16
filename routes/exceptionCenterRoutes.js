@@ -235,22 +235,38 @@ const CHECKS = [
   {
     key: 'negative_stock', severity: 'high', area: 'Stores',
     title: 'Items with negative stock (today)',
-    description: 'Stock balance below zero in location 01 — usually an issue entered before its SRV, or a missing receipt. Not limited by period.',
+    description: 'Closing stock (item_mst.OP_STOCK + all stock_trans movements in location 01) below zero — usually an issue entered before its SRV, or a missing receipt. Not limited by period.',
     columns: [
       { field: 'itemCode', header: 'Item Code' }, { field: 'itemName', header: 'Description' },
-      { field: 'qty', header: 'Stock', type: 'qty' }, { field: 'date', header: 'Last Movement' },
+      { field: 'opening', header: 'Op. Stock', type: 'qty' }, { field: 'moved', header: 'Movements', type: 'qty' },
+      { field: 'qty', header: 'Closing Stock', type: 'qty' }, { field: 'date', header: 'Last Movement' },
     ],
     async run(db) {
+      // Closing = OP_STOCK + SUM(stock_trans.Qty). Stock is kept in location 01 only,
+      // so OP_STOCK is taken as location 01's opening. The second part keeps items
+      // that move in stock_trans but are missing from item_mst (opening 0).
       const [rows] = await db.query(
-        `SELECT Item_code AS C, SUM(Qty) AS Q, MAX(Doc_date) AS D
-           FROM stock_trans WHERE Loc_code = ?
-          GROUP BY Item_code HAVING SUM(Qty) < -0.0005
-          ORDER BY SUM(Qty)`,
-        [STOCK_LOC]
+        `SELECT C, NAME, OP, MV, OP + MV AS Q, D FROM (
+           SELECT m.ITEM_CODE AS C, m.ITEM_NAME1 AS NAME,
+                  IFNULL(m.OP_STOCK, 0) AS OP, IFNULL(t.Q, 0) AS MV, t.D
+             FROM item_mst m
+             LEFT JOIN (SELECT Item_code, SUM(Qty) AS Q, MAX(Doc_date) AS D
+                          FROM stock_trans WHERE Loc_code = ? GROUP BY Item_code) t
+               ON t.Item_code = m.ITEM_CODE
+           UNION ALL
+           SELECT t.Item_code, '' , 0, SUM(t.Qty), MAX(t.Doc_date)
+             FROM stock_trans t
+            WHERE t.Loc_code = ?
+              AND NOT EXISTS (SELECT 1 FROM item_mst m WHERE m.ITEM_CODE = t.Item_code)
+            GROUP BY t.Item_code
+         ) x
+         WHERE OP + MV < -0.0005
+         ORDER BY Q`,
+        [STOCK_LOC, STOCK_LOC]
       );
-      const names = await itemNames(db, rows.map((r) => String(r.C).trim()));
       return rows.map((r) => ({
-        itemCode: String(r.C).trim(), itemName: names[String(r.C).trim()] || '', qty: n3(r.Q), date: dmy(r.D),
+        itemCode: String(r.C).trim(), itemName: r.NAME || '',
+        opening: n3(r.OP), moved: n3(r.MV), qty: n3(r.Q), date: dmy(r.D),
       }));
     },
   },
