@@ -3913,7 +3913,7 @@ app.get("/api/fpolst/:dys", function (req, res) {
     " a.LAST_EDITED_BY," +
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from fpo_net a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
-    "  WHERE  a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
+    "  WHERE  a.PUR_TYPE ='O' and a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
 
     [req.params.dys],
 
