@@ -189,7 +189,7 @@ const CHECKS = [
     async run(db, from, to) {
       const [rows] = await db.query(
         `SELECT h.SIV_NO, h.SIV_DATE, h.JOB_NO, i.ITEM_CODE,
-                COALESCE(NULLIF(i.XL_ITEM_DESC, ''), m.ITEM_NAME1) AS NAME, IFNULL(i.QTY, 0) AS QTY
+                COALESCE(NULLIF(i.BOQ_ITEM_DESC, ''), m.ITEM_NAME1) AS NAME, IFNULL(i.QTY, 0) AS QTY
            FROM siv_hdr h JOIN siv_items i ON i.SIV_NO = h.SIV_NO
            LEFT JOIN item_mst m ON m.ITEM_CODE = i.ITEM_CODE
           WHERE h.SIV_DATE BETWEEN ? AND ? AND IFNULL(i.STD_COST, 0) = 0 AND IFNULL(i.QTY, 0) <> 0

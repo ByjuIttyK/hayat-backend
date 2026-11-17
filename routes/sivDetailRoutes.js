@@ -64,7 +64,7 @@ module.exports = function (connection) {
       if (!h) return res.status(404).json({ error: 'SIV not found' });
 
       const [lines] = await db.query(
-        `SELECT s.SR_NO, s.ITEM_CODE, COALESCE(NULLIF(s.XL_ITEM_DESC, ''), i.ITEM_NAME1) AS ITEM_NAME,
+        `SELECT s.SR_NO, s.ITEM_CODE, i.ITEM_NAME1 AS ITEM_NAME,
                 IFNULL(s.QTY, 0) AS QTY, IFNULL(s.STD_COST, 0) AS STD_COST, s.JOB_NO, s.PANEL_NO
            FROM siv_items s LEFT JOIN item_mst i ON i.ITEM_CODE = s.ITEM_CODE
           WHERE s.SIV_NO = ?
@@ -138,7 +138,7 @@ module.exports = function (connection) {
     const db = connection.promise();
     try {
       const [lines] = await db.query(
-        `SELECT s.ITEM_CODE, MAX(COALESCE(NULLIF(s.XL_ITEM_DESC, ''), i.ITEM_NAME1)) AS ITEM_NAME,
+        `SELECT s.ITEM_CODE, MAX(i.ITEM_NAME1) AS ITEM_NAME,
                 SUM(IFNULL(s.QTY, 0)) AS QTY, MAX(IFNULL(s.STD_COST, 0)) AS STD_COST, MIN(CAST(s.SR_NO AS UNSIGNED)) AS ORD
            FROM siv_items s LEFT JOIN item_mst i ON i.ITEM_CODE = s.ITEM_CODE
           WHERE s.SIV_NO = ? GROUP BY s.ITEM_CODE ORDER BY ORD`, [sivNo]);
@@ -226,7 +226,7 @@ module.exports = function (connection) {
 
       // Issued to the job, item by item
       const [issued] = await db.query(
-        `SELECT i.ITEM_CODE, MAX(COALESCE(NULLIF(i.XL_ITEM_DESC, ''), m.ITEM_NAME1)) AS ITEM_NAME,
+        `SELECT i.ITEM_CODE, MAX(m.ITEM_NAME1) AS ITEM_NAME,
                 SUM(IFNULL(i.QTY, 0)) AS QTY, ${VAL} AS V
            FROM siv_hdr h JOIN siv_items i ON i.SIV_NO = h.SIV_NO
            LEFT JOIN item_mst m ON m.ITEM_CODE = i.ITEM_CODE

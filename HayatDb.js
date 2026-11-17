@@ -4099,36 +4099,58 @@ app.get("/api/srvitems/:srv", function (req, res) {
   );
 });
 
-
 app.get("/api/sivlst/:dys", function (req, res) {
-
-
   connection.query(
-    "select a.SIV_NO,DATE_FORMAT(a.SIV_DATE,'%d/%m/%y')  as SIV_DATE, a.COST_CODE," +
-    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO ,a.TOTAL_COST," +
+    "select a.SIV_NO, DATE_FORMAT(a.SIV_DATE,'%d/%m/%y') as SIV_DATE, a.SIV_TYPE, a.COST_CODE," +
+    " b.CUST_NAME, a.NARRATION, a.JOB_NO, a.PANEL_NO, a.TOTAL_COST," +
     " a.CREATED_BY," +
     " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
     " a.LAST_EDITED_BY," +
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from siv_hdr a " +
-    " left outer join job_card j on (a.job_no = j.job_no) " +
-    " left outer join cus_mst b  ON (j.CUST_CODE = b.CUST_CODE) " +
-    " where   a.SIV_DATE  >= CURDATE() - INTERVAL ? DAY " +
-    "  ORDER BY a.SIV_NO DESC",
-    [req.params.dys],
-
+    " left outer join job_card j on (a.JOB_NO = j.JOB_NO) " +
+    " left outer join cus_mst b  on (j.CUST_CODE = b.CUST_CODE) " +
+    " where a.SIV_DATE >= CURDATE() - INTERVAL ? DAY " +
+    "   and COALESCE(a.SIV_TYPE, '') <> 'B' " +       // old SIVs have SIV_TYPE NULL — keep them
+    " ORDER BY a.SIV_NO DESC",
+    [Number(req.params.dys) || 0],
     function (err, result) {
       if (err) {
-        throw err;
-      } else {
-        //console.log("Oracle LPOLST", result);
-        res.json(result);
-
+        console.error("sivlst error:", err);
+        return res.status(500).json({ error: err.message });
       }
+      res.json(result);
     }
   );
 });
 
+app.get("/api/sivlstboq/:dys", function (req, res) {
+  connection.query(
+    "select a.SIV_NO, DATE_FORMAT(a.SIV_DATE,'%d/%m/%y') as SIV_DATE, a.SIV_TYPE, a.COST_CODE," +
+    " COALESCE(c.CUST_NAME, b.CUST_NAME) as CUST_NAME," +
+    " a.JOB_NO, a.PANEL_NO, a.PANEL_QTY, a.NARRATION, a.TOTAL_COST," +
+    " a.CREATED_BY," +
+    " DATE_FORMAT(a.CREATED_ON,     '%Y-%m-%d %H:%i:%s') AS CREATED_ON," +
+    " a.LAST_EDITED_BY," +
+    " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
+    " from siv_hdr a " +
+    " left outer join job_card j on (a.JOB_NO = j.JOB_NO) " +
+    " left outer join cus_mst b  on (j.CUST_CODE = b.CUST_CODE) " +   // customer via job
+    " left outer join cus_mst c  on (a.CUST_CODE = c.CUST_CODE) " +   // customer from BOQ scan
+    " where a.SIV_DATE >= CURDATE() - INTERVAL ? DAY " +
+    "   and a.SIV_TYPE = 'B' " +                                     // BOQ-scanned SIVs only
+    " ORDER BY a.SIV_NO DESC",
+    [Number(req.params.dys) || 0],
+    function (err, result) {
+      if (err) {
+        console.error("sivlstboq error:", err);
+        return res.status(500).json({ error: err.message });
+      }
+      res.json(result);
+    }
+  );
+});
+//
 app.get("/api/sivhdr/:siv", function (req, res) {
 
   connection.execute(
@@ -5007,7 +5029,7 @@ app.get("/api/subcatlst/:catCode", function (req, res) {
   console.log("SUB CAT LIST == catCode ", req.params.catCode);
   connection.query(
     "select CAT_CODE, SUB_CAT_CODE, SUB_CAT_NAME from item_subcat " +
-    " where CAT_CODE = ? order by SUB_CAT_CODE",
+    " where CAT_CODE = ? order by CAT_CODE,SUB_CAT_CODE",
     [req.params.catCode],
     function (err, result) {
       if (err) {
@@ -8062,3 +8084,17 @@ app.use('/api', docFlowRoutes(connection));
 
 //
 app.use("/api", authMiddleware, require("./routes/jobSalesIncenAcRoutes")(connection));
+//
+app.use("/api", require("./routes/docFlowPanelsApi")(connection));
+//
+const sivBoqScanApi = require("./routes/sivBoqScanApi");
+app.use("/api", sivBoqScanApi(connection));
+//
+app.use("/api", require("./routes/subCatMstRoutes")(connection));
+// 
+const saveSivBoqRoutes = require('./routes/saveSivBoqRoutes');
+app.use('/api', saveSivBoqRoutes(connection));
+//
+const sivSalesExcRoutes = require("./routes/sivSalesExcRoutes");
+app.use("/api", sivSalesExcRoutes(connection));
+//
