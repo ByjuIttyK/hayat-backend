@@ -10,7 +10,13 @@
 //          lines    : BOM rows, each matched to item_mst by ARTICLE_CODE
 //                     (per-panel qty — the screen multiplies by Panel Qty)
 //
+//          A part no printed as "A / B" (e.g. relay + its base) becomes two
+//          lines, same qty, description and manufacturer.
+//          A line with no matching item carries SIMILAR: up to 10 items whose
+//          ARTICLE_CODE looks like its part no, for the user to pick from.
+//
 //   GET  /api/siv-cust/:code    → { CUST_CODE, CUST_NAME } (Cust Code blur)
+//   GET  /api/siv-boq-similar?part=...  → similar items for a typed part no
 //
 // Register in HayatDb.js:
 //   const sivBoqScanApi = require("./routes/sivBoqScanApi");
@@ -60,6 +66,36 @@ Rules:
 const clip = (v, n) => String(v ?? "").trim().slice(0, n);
 const keyExact = (s) => String(s ?? "").trim().toUpperCase();
 const keyLoose = (s) => keyExact(s).replace(/[\s\-./]/g, "");
+
+// "SRN-14-230V / SRN-14-SOK" → ["SRN-14-230V", "SRN-14-SOK"].
+// Split only when every piece is at least 4 characters, so codes that use a
+// slash inside them (e.g. "C10/3P", "6A/1") stay whole.
+const MIN_SPLIT_PART = 4;
+function splitPartNo(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s.includes("/")) return [s];
+  const pieces = s.split("/").map((p) => p.trim()).filter(Boolean);
+  if (pieces.length < 2 || pieces.some((p) => keyLoose(p).length < MIN_SPLIT_PART)) return [s];
+  return pieces;
+}
+
+// Similarity of two loose keys, 0..1: shared starting characters count most,
+// plus the share of 2-letter pairs they have in common.
+function similarity(a, b) {
+  if (!a || !b) return 0;
+  let pre = 0;
+  while (pre < a.length && pre < b.length && a[pre] === b[pre]) pre++;
+  const pairs = (s) => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const k = s.slice(i, i + 2); m.set(k, (m.get(k) || 0) + 1); } return m; };
+  const pa = pairs(a), pb = pairs(b);
+  let common = 0;
+  pa.forEach((n, k) => { common += Math.min(n, pb.get(k) || 0); });
+  const dice = (pa.size && pb.size) ? (2 * common) / (a.length - 1 + b.length - 1) : 0;
+  const prefix = pre / Math.max(a.length, b.length);
+  return Math.round((0.5 * prefix + 0.5 * dice) * 100) / 100;
+}
+
+const SIMILAR_MAX = 10;
+const LOOSE_SQL = "REPLACE(REPLACE(REPLACE(REPLACE(UPPER(TRIM(ARTICLE_CODE)),' ',''),'-',''),'.',''),'/','')";
 
 // Words that don't identify a company — dropped before the LIKE search.
 const NAME_NOISE = new Set([
@@ -216,6 +252,33 @@ module.exports = function (connection) {
     return pick;
   }
 
+  // ── Similar items for a part no with no match ─────────────────────────────
+  // Candidates: article codes that contain the part no, start with its first
+  // ~60 % (same family, e.g. SRN-14-…), or are contained in it. Ranked by
+  // similarity(), best SIMILAR_MAX returned.
+  async function similarItems(partNo) {
+    const key = keyLoose(partNo);
+    if (key.length < 3) return [];
+    const stem = key.slice(0, Math.max(3, Math.ceil(key.length * 0.6)));
+    const rows = await q(
+      `SELECT * FROM (
+         SELECT ITEM_CODE, ITEM_NAME1, ITEM_UNIT, TRIM(ARTICLE_CODE) AS ARTICLE_CODE, ${LOOSE_SQL} AS AK
+           FROM item_mst
+          WHERE LOC_CODE = '01' AND COALESCE(TRIM(ARTICLE_CODE), '') <> ''
+       ) t
+       WHERE t.AK LIKE ? OR t.AK LIKE ? OR (LENGTH(t.AK) >= 4 AND ? LIKE CONCAT('%', t.AK, '%'))
+       LIMIT 300`,
+      [`%${key}%`, `${stem}%`, key]
+    );
+    return rows
+      .map((r) => ({
+        ITEM_CODE: r.ITEM_CODE, ITEM_NAME1: r.ITEM_NAME1 || "", UOM: r.ITEM_UNIT || "",
+        ARTICLE_CODE: r.ARTICLE_CODE, SCORE: similarity(key, r.AK),
+      }))
+      .sort((a, b) => b.SCORE - a.SCORE || String(a.ARTICLE_CODE).localeCompare(String(b.ARTICLE_CODE)))
+      .slice(0, SIMILAR_MAX);
+  }
+
   // ── Items: item_mst.ARTICLE_CODE = part no (exact, then ignoring - . / space)
   async function matchItems(lines, warnings) {
     const parts = lines.map((l) => l.PART_NO).filter(Boolean);
@@ -263,6 +326,14 @@ module.exports = function (connection) {
         );
       }
     });
+
+    // Unmatched lines: offer similar items (one lookup per distinct part no).
+    const unmatched = Array.from(new Set(lines.filter((l) => l.MATCH === "NONE" && l.PART_NO).map((l) => l.PART_NO)));
+    const found = {};
+    for (const p of unmatched) {
+      try { found[p] = await similarItems(p); } catch (e) { found[p] = []; console.error("siv-boq-scan similar:", e.message); }
+    }
+    lines.forEach((l) => { l.SIMILAR = l.MATCH === "NONE" && l.PART_NO ? (found[l.PART_NO] || []) : []; });
   }
 
   // ── POST /siv-boq-scan ────────────────────────────────────────────────────
@@ -290,22 +361,30 @@ module.exports = function (connection) {
         customerName: clip(rh.customerName || rh.client, 100),
       };
 
+      let splitCount = 0;
       const lines = (Array.isArray(raw?.lines) ? raw.lines : [])
-        .map((l) => ({
-          DEVICE_TAG: clip(l.deviceTag, 30),
-          BOQ_QTY: Number(String(l.qty ?? "").replace(/[^\d.]/g, "")) || 0,
-          BOQ_ITEM_DESC: clip(l.description, 300),
-          PART_NO: clip(l.partNo, 30),
-          MANUFACTURER: clip(l.manufacturer, 40),
-          ITEM_CODE: "",
-          ITEM_NAME1: "",
-          UOM: "",
-          MATCH: "NONE",
-        }))
+        .flatMap((l) => {
+          const parts = splitPartNo(l.partNo);
+          if (parts.length > 1) splitCount++;
+          return parts.map((part) => ({
+            DEVICE_TAG: clip(l.deviceTag, 30),
+            BOQ_QTY: Number(String(l.qty ?? "").replace(/[^\d.]/g, "")) || 0,
+            BOQ_ITEM_DESC: clip(l.description, 300),
+            PART_NO: clip(part, 30),
+            MANUFACTURER: clip(l.manufacturer, 40),
+            ITEM_CODE: "",
+            ITEM_NAME1: "",
+            UOM: "",
+            MATCH: "NONE",
+            SPLIT: parts.length > 1,
+            SIMILAR: [],
+          }));
+        })
         .filter((l) => l.PART_NO || l.BOQ_ITEM_DESC);
 
       const warnings = [];
       if (!lines.length) warnings.push("No BOM lines were found in the document.");
+      if (splitCount) warnings.push(`${splitCount} BOQ row(s) had two part nos (A / B) — each was put on its own line.`);
 
       const customer = await findCustomer(header, warnings);
       await matchItems(lines, warnings);
@@ -314,6 +393,17 @@ module.exports = function (connection) {
     } catch (err) {
       console.error("siv-boq-scan:", err);
       res.status(500).json({ error: err.message || "BOQ scan failed" });
+    }
+  });
+
+  // ── GET /siv-boq-similar?part=... ─────────────────────────────────────────
+  // The picker's search box: similar items for whatever part no is typed.
+  router.get("/siv-boq-similar", async (req, res) => {
+    try {
+      res.json(await similarItems(String(req.query.part || "")));
+    } catch (err) {
+      console.error("siv-boq-similar:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
