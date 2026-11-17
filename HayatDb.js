@@ -3913,7 +3913,7 @@ app.get("/api/fpolst/:dys", function (req, res) {
     " a.LAST_EDITED_BY," +
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from fpo_net a left outer join  sup_mst b ON b.SUP_CODE = a.SUP_CODE  " +
-    "  WHERE  a.PUR_TYPE ='O' and a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
+    "  WHERE  a.FPO_DATE >= CURDATE() - INTERVAL ? DAY ORDER BY a.FPO_NO DESC",
 
     [req.params.dys],
 
@@ -4045,7 +4045,7 @@ app.get("/api/srvlstfp/:dys", function (req, res) {
     " b.SUP_NAME, a.NARRATION, a.po_no as LPO_NO, c.PJV_NO,a.INV_NO, DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') AS INV_DATE, a.INV_AMOUNT " +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " LEFT OUTER JOIN  purchase_hdr c on (a.srv_no = c.srv_no) " +
-    " where a.PRCH_NO is not null and  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
+    " where a.PUR_TYPE ='O' and   a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
     " a.SUP_CODE = b.SUP_CODE ORDER BY a.SRV_NO DESC",
     [req.params.dys],
 
