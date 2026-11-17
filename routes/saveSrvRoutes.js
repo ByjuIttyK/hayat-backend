@@ -21,6 +21,7 @@
  * (the local SRV screen doesn't send it, so its saves are unchanged):
  *   srv_hdr   CURR_CODE, CONVERT_RATE, INV_AMT_FC, FREIGHT_FOB, INV_AMT_LOCAL,
  *             EXP_AMOUNT, EFF_RATE                  ← netData.CurrCd … EffRate
+ *             PUR_TYPE = 'O' (Overseas)             ← netData.PurType, 'O' if not sent
  *   srv_items COST_FC (Rate F.C); COST = Rate Local (Rate F.C × Eff. Rate)
  *   lcst_trn  the SRV's expense lines are replaced: DELETE by VCHR_NO, then
  *             INSERT the lines on screen (lcst_trn has no unique key on
@@ -71,7 +72,7 @@ const ITEMS_UPSERT = `
 const HDR_FOREIGN_UPDATE = `
   UPDATE srv_hdr
      SET CURR_CODE=?, CONVERT_RATE=?, INV_AMT_FC=?, FREIGHT_FOB=?,
-         INV_AMT_LOCAL=?, EXP_AMOUNT=?, EFF_RATE=?
+         INV_AMT_LOCAL=?, EXP_AMOUNT=?, EFF_RATE=?, PUR_TYPE=?
    WHERE SRV_NO=?`;
 
 // Rate F.C is written as sent (not COALESCE'd), so a cleared rate is cleared.
@@ -126,6 +127,9 @@ module.exports = function (connection) {
           numOrNull(netData.InvAmtLcl),
           numOrNull(netData.ExpAmt),
           numOrNull(netData.EffRate),
+          // Foreign SRV is always an overseas purchase. Local SRVs never reach
+          // this update, so their PUR_TYPE is left as it is.
+          String(netData.PurType || 'O').trim().toUpperCase().charAt(0) || 'O',
         ]
       : null;
     // expense lines with a type and a non-zero amount

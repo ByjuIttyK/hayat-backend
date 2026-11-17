@@ -1186,139 +1186,6 @@ app.get("/api/adjdtl/:tp/:vchr", (req, res) => {
     res.json(rows);
   });
 });
-app.post("/api/save-frgnpurch", async (req, res) => {
-  try {
-    const { netData, expData, itemsData } = req.body; // Extract form data & grid rows from payload
-
-    if (!netData || !itemsData || !Array.isArray(itemsData) || itemsData.length === 0) {
-      return res.status(400).json({ message: "Invalid data format" });
-    }
-    console.log("PURCHASE FOREIGN=>**", netData, expData, itemsData);
-    // Start transaction
-    connection.getConnection((err, conn) => {
-      if (err) {
-        console.error("Error getting connection:", err);
-        return res.status(500).json({ message: "Error getting connection" });
-      }
-
-      conn.beginTransaction(async (err) => {
-        if (err) {
-          console.error("Transaction Error:", err);
-          conn.release(); // Release the connection back to the pool
-          return res.status(500).json({ message: "Transaction error", error: err });
-        }
-
-        try {
-          // ✅ Step 1: Insert/Update NGP_NET table
-          console.log("PjvNo, PjvDt==>", netData.PjvNo, netData.PjvDt);
-          const netQuery = `
-            INSERT INTO pur_frgn_hdr (PJV_NO, PJV_DATE,INV_NO, INV_DATE, PO_NO,SUP_CODE,
-                                      ACC_CODE,NARRATION,INV_AMOUNT_FRGN,INV_AMOUNT_LOCAL,
-                                      CURR_CODE, CONV_RATE,
-                                      DISCOUNT,VAT_AMOUNT) 
-            VALUES (?, ?, ?,?,?,?,?,?,?, ?,?,?,?,?) 
-            ON DUPLICATE KEY UPDATE 
-            PJV_DATE= VALUES(PJV_DATE),
-            INV_NO = VALUES(INV_NO),
-            INV_DATE = VALUES(INV_DATE),
-            PO_NO = VALUES(PO_NO),
-            SUP_CODE = VALUES(SUP_CODE),
-            ACC_CODE = VALUES(ACC_CODE),
-            NARRATION = VALUES(NARRATION),
-            INV_AMOUNT_FRGN = VALUES(INV_AMOUNT_FRGN),
-             INV_AMOUNT_LOCAL = VALUES(INV_AMOUNT_LOCAL),
-            CURR_CODE = VALUES(CURR_CODE),
-            CONV_RATE = VALUES(CONV_RATE),
-            DISCOUNT = VALUES(DISCOUNT),
-            VAT_AMOUNT = VALUES(VAT_AMOUNT);
-          `;
-
-          await new Promise((resolve, reject) => {
-            conn.query(
-              netQuery,
-              [netData.PjvNo, netData.PjvDt, netData.InvNo, netData.InvDt, netData.FpoNo,
-              netData.SupCd, netData.DrCd,
-              netData.Narration, netData.InvAmtFc, netData.InvAmtLcl, netData.CrrCd, netData.ConvRt,
-              netData.discAmt, netData.vatAmt],
-              (err, result) => {
-                if (err) {
-                  return reject(err);
-                }
-                console.log("NGP_NET Insert/Update:", result);
-                resolve(result);
-              }
-            );
-          });
-          // ✅ Step 2: Insert/Update G table
-          const LcstTrnQuery = `
-            INSERT INTO lcst_trn (VCHR_NO, GIT_TYPE,AMOUNT)
-            VALUES ? 
-            ON DUPLICATE KEY UPDATE 
-            AMOUNT = COALESCE(VALUES(AMOUNT), AMOUNT);
-            `;
-          const expvalues = expData.map(row => [
-            netData.PjvNo, row.expCode, row.amount
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(LcstTrnQuery, [expvalues], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("CST_TRN Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-          // ✅ Step 3: Insert/Update NGP_ITEMS table
-          const itemsQuery = `
-            INSERT INTO pur_frgn_items (PJV_NO, SR_NO, ITEM_CODE, QTY, COST_FC,UNIT_COST)
-            VALUES ? 
-            ON DUPLICATE KEY UPDATE 
-            ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE), 
-            QTY = COALESCE(VALUES(QTY), QTY), 
-            COST_FC = COALESCE(VALUES(COST_FC), COST_FC),
-            UNIT_COST = COALESCE(VALUES(UNIT_COST), UNIT_COST);
-            `;
-
-          const values = itemsData.map(row => [
-            netData.PjvNo, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST_FC, row.UNIT_COST
-          ]);
-
-          await new Promise((resolve, reject) => {
-            conn.query(itemsQuery, [values], (err, result) => {
-              if (err) {
-                return reject(err);
-              }
-              console.log("PUR_FRGN_ITEMS Insert/Update:", result);
-              resolve(result);
-            });
-          });
-
-          // ✅ Commit transaction if everything is successful
-          conn.commit((err) => {
-            if (err) {
-              console.error("Commit Error:", err);
-              return res.status(500).json({ message: "Commit error", error: err });
-            }
-            conn.release(); // Release the connection back to the pool
-            res.json({ message: "Data saved successfully!" });
-          });
-
-        } catch (error) {
-          console.error("Transaction Foreign Purchase Failed:", error);
-          conn.rollback(() => {
-            conn.release(); // Release the connection back to the pool
-            res.status(500).json({ message: "Transaction Foreign Purchase failed, rolled back", error });
-          });
-        }
-      });
-    });
-  } catch (error) {
-    console.error("Server Error Foreign Purchase:", error);
-    res.status(500).json({ message: "Internal Server Error :Foreign Purchase ", error });
-  }
-});
 ///
 
 
@@ -5355,7 +5222,7 @@ app.get("/api/purfrgnhdr/:vch", function (req, res) {
   connection.query(
     "select a.PJV_NO,DATE_FORMAT(a.PJV_DATE,'%d/%m/%Y') PJV_DATE, a.SUP_CODE," +
     " b.SUP_NAME, a.ACC_CODE,a.INV_AMOUNT_FRGN, a.INV_AMOUNT_LOCAL,a.CURR_CODE, a.CONV_RATE," +
-    " a.DISCOUNT,a.PO_NO,a.INV_NO, " +
+    " a.DISCOUNT,a.PO_NO,a.SRV_NO,a.INV_NO, " +
     " DATE_FORMAT(a.INV_DATE,'%d/%m/%Y') INV_DATE ,a.NARRATION ,a.VAT_AMOUNT " +
     " from pur_frgn_hdr a left outer join  sup_mst b on b.sup_code = a.SUP_CODE  WHERE  a.PJV_NO =?  ",
 
@@ -8098,3 +7965,7 @@ app.use('/api', saveSivBoqRoutes(connection));
 const sivSalesExcRoutes = require("./routes/sivSalesExcRoutes");
 app.use("/api", sivSalesExcRoutes(connection));
 //
+app.use("/api", require("./routes/pinvFrgnSrvApi")(connection));
+//
+const saveFrgnPurchRoutes = require('./routes/saveFrgnPurchRoutes');
+app.use('/api', saveFrgnPurchRoutes(connection));
