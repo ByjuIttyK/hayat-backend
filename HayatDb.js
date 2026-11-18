@@ -4372,9 +4372,9 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from fab_inv_hdr a    " +
     " left outer join cus_mst b on b.cust_code = a.cust_code " +
-    " where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY  ORDER BY a.INV_NO DESC",
+    "  ORDER BY a.INV_NO DESC",
     [req.params.dys],
-
+//where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY 
     function (err, results, fields) {
       if (err) {
         console.error("Error executing query:", err);
