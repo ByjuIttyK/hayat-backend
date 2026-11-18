@@ -46,15 +46,22 @@ async function postToTranAcc(payload, conn) {
   );
 
   let srNo = 1;
-  let totalDebit = 0;
-  let totalCredit = 0;
+  // Totals kept in fils (integers): adding floating-point amounts drifts in the
+  // last digits (2091.35 + 104.57 ≠ 2195.92 exactly), which tripped the
+  // balance check on vouchers whose Dr and Cr were in fact equal.
+  let totalDebitFils = 0;
+  let totalCreditFils = 0;
+  const toFils = (v) => Math.round((Number(v) || 0) * 100);
 
   // 3. Process rules and insert ledger entries
   for (const rule of rules) {
     console.log("Field name=>", rule.FIELD_NAME)
-    const amount = Number(payload[rule.FIELD_NAME]) || 0;
-    console.log("Field value", Number(payload[rule.FIELD_NAME]));
-    if (amount === 0) continue; // Skip zero-amount lines
+    // Each line rounded to 2 decimals — the precision tran_acc.AMOUNT stores —
+    // so the lines written are exactly the lines checked for balance.
+    const fils = toFils(payload[rule.FIELD_NAME]);
+    const amount = fils / 100;
+    console.log("Field value", payload[rule.FIELD_NAME], "→", amount);
+    if (fils === 0) continue; // Skip zero-amount lines
 
     // Resolve dynamic vs static GL account code
     const accCode = rule.ACC_CODE_FIELD ? payload[rule.ACC_CODE_FIELD] : rule.ACC_CODE;
@@ -64,8 +71,8 @@ async function postToTranAcc(payload, conn) {
     }
     const nar1 = rule.ACC_CODE_FIELD ? Narr1 : PartyName;
 
-    if (rule.DB_CR === 'D') totalDebit += amount;
-    if (rule.DB_CR === 'C') totalCredit += amount;
+    if (rule.DB_CR === 'D') totalDebitFils += fils;
+    if (rule.DB_CR === 'C') totalCreditFils += fils;
 
     await queryAsync(
       `INSERT INTO tran_acc 
@@ -88,9 +95,12 @@ async function postToTranAcc(payload, conn) {
   }
 
   // 4. Double-Entry Balance Check
-  if (Math.abs(totalDebit - totalCredit) > 0.001) {
-    console.log('not tally');
-    throw new Error(`Accounting Imbalance Error: Total Debits (${totalDebit.toFixed(2)}) != Total Credits (${totalCredit.toFixed(2)})`);
+  if (totalDebitFils !== totalCreditFils) {
+    const dr = (totalDebitFils / 100).toFixed(2);
+    const cr = (totalCreditFils / 100).toFixed(2);
+    const diff = ((totalDebitFils - totalCreditFils) / 100).toFixed(2);
+    console.log('not tally', dr, cr, diff);
+    throw new Error(`Accounting Imbalance Error: Total Debits (${dr}) != Total Credits (${cr}), difference ${diff}`);
   }
 }
 
