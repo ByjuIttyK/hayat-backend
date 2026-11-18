@@ -7969,3 +7969,5 @@ const saveFrgnPurchRoutes = require('./routes/saveFrgnPurchRoutes');
 app.use('/api', saveFrgnPurchRoutes(connection));
 //
 app.use("/api", require("./routes/pinvChecksRoutes")(connection));
+//
+app.use("/api", require("./routes/fpoExtraRoutes")(connection));
