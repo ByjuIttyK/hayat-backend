@@ -29,7 +29,7 @@
  *                    Dr  Dr.Code (Inventory – Foreign Purchase)  Net Amount
  *                                (Items Total − Discount)
  *                    Cr  Supplier                                Amount Local
- *                                (Inv.Amount F.C × Rate)
+ *                                ((Inv.Amount F.C + Freight F.C) × Rate)
  *                    Cr  each landed-cost expense a/c            its amount
  *                                (git_types.ACC_CODE by TYPE_CODE)
  *                    Dr  Purchase Discount 502-001-0-002         Discount
@@ -41,6 +41,18 @@
  *
  * GET /api/frgn-pjv-gl/:pjvNo → the voucher's tran_acc lines with account heads
  *   (the screen's "G/L Entry" button).
+ *
+ * Freight F.C (pur_frgn_hdr.FREIGHT_FC, same name as srv_hdr.FREIGHT_FC — freight billed by the
+ *   supplier in the invoice currency; renamed from FREIGHT_FOB, which wrongly suggested 'FOB'):
+ *   freight billed by the supplier in the invoice currency. It is part of
+ *   Amount Local (so of the supplier credit) and of the effective rate:
+ *     Eff.Rate = ((Inv.Amount F.C + Freight F.C) × Rate + expenses) ÷ Inv.Amount F.C
+ *   GET /api/frgn-pjv-freight/:pjvNo  → { freightFc }  saved freight of a voucher
+ *   GET /api/frgn-srv-freight/:srvNo  → { freightFc }  freight on the overseas SRV
+ *   Needs: ALTER TABLE pur_frgn_hdr RENAME COLUMN FREIGHT_FOB TO FREIGHT_FC;
+ *          ALTER TABLE srv_hdr      RENAME COLUMN FREIGHT_FOB TO FREIGHT_FC;
+ *   GET /api/frgn-currencies          → [{ CUR_CODE, CUR_NAME, DHS_CONV_RATE }] from nation_mst
+ *                                       (one row per currency code — several nations share a currency)
  */
 
 const express = require('express');
@@ -133,15 +145,15 @@ const HDR_INSERT = `
   INSERT INTO pur_frgn_hdr
     (PJV_NO, PJV_DATE, INV_NO, INV_DATE, PO_NO, SRV_NO, SUP_CODE,
      ACC_CODE, NARRATION, INV_AMOUNT_FRGN, INV_AMOUNT_LOCAL,
-     CURR_CODE, CONV_RATE, DISCOUNT, VAT_AMOUNT, PUR_TYPE, RND_OFF, EFF_RATE)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+     CURR_CODE, CONV_RATE, DISCOUNT, VAT_AMOUNT, PUR_TYPE, RND_OFF, EFF_RATE, FREIGHT_FC)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const HDR_UPSERT = `
   INSERT INTO pur_frgn_hdr
     (PJV_NO, PJV_DATE, INV_NO, INV_DATE, PO_NO, SRV_NO, SUP_CODE,
      ACC_CODE, NARRATION, INV_AMOUNT_FRGN, INV_AMOUNT_LOCAL,
-     CURR_CODE, CONV_RATE, DISCOUNT, VAT_AMOUNT, PUR_TYPE, RND_OFF, EFF_RATE)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     CURR_CODE, CONV_RATE, DISCOUNT, VAT_AMOUNT, PUR_TYPE, RND_OFF, EFF_RATE, FREIGHT_FC)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON DUPLICATE KEY UPDATE
     PJV_DATE         = VALUES(PJV_DATE),
     INV_NO           = VALUES(INV_NO),
@@ -159,7 +171,8 @@ const HDR_UPSERT = `
     VAT_AMOUNT       = VALUES(VAT_AMOUNT),
     PUR_TYPE         = VALUES(PUR_TYPE),
     RND_OFF          = VALUES(RND_OFF),
-    EFF_RATE         = VALUES(EFF_RATE)`;
+    EFF_RATE         = VALUES(EFF_RATE),
+    FREIGHT_FC      = VALUES(FREIGHT_FC)`;
 
 const ITEMS_UPSERT = `
   INSERT INTO pur_frgn_items (PJV_NO, SR_NO, ITEM_CODE, QTY, COST_FC, UNIT_COST)
@@ -201,6 +214,46 @@ module.exports = function (connection) {
     }
   });
 
+  // ── Freight F.C of a saved voucher / of an overseas SRV ─────────────────
+  router.get('/frgn-pjv-freight/:pjvNo', async (req, res) => {
+    try {
+      const rows = await q(connection, 'SELECT FREIGHT_FC AS F FROM pur_frgn_hdr WHERE PJV_NO = ? LIMIT 1',
+        [String(req.params.pjvNo || '').trim()]);
+      res.json({ freightFc: rows.length && rows[0].F != null ? Number(rows[0].F) : null });
+    } catch (err) {
+      console.error('[frgn-pjv-freight]', err);
+      res.status(500).json({ error: err.sqlMessage || err.message });
+    }
+  });
+  router.get('/frgn-srv-freight/:srvNo', async (req, res) => {
+    try {
+      const rows = await q(connection, 'SELECT FREIGHT_FC AS F FROM srv_hdr WHERE SRV_NO = ? LIMIT 1',
+        [String(req.params.srvNo || '').trim()]);
+      res.json({ freightFc: rows.length && rows[0].F != null ? Number(rows[0].F) : null });
+    } catch (err) {
+      console.error('[frgn-srv-freight]', err);
+      res.status(500).json({ error: err.sqlMessage || err.message });
+    }
+  });
+
+  // ── Currency list for the Currency dropdown (nation_mst) ────────────────
+  router.get('/frgn-currencies', async (req, res) => {
+    try {
+      const rows = await q(connection,
+        `SELECT TRIM(CUR_CODE) AS CUR_CODE,
+                MAX(CUR_NAME)      AS CUR_NAME,
+                MAX(DHS_CONV_RATE) AS DHS_CONV_RATE
+           FROM nation_mst
+          WHERE CUR_CODE IS NOT NULL AND TRIM(CUR_CODE) <> ''
+          GROUP BY TRIM(CUR_CODE)
+          ORDER BY TRIM(CUR_CODE)`, []);
+      res.json(rows);
+    } catch (err) {
+      console.error('[frgn-currencies]', err);
+      res.status(500).json({ error: err.sqlMessage || err.message });
+    }
+  });
+
   router.post('/save-frgnpurch', (req, res) => {
     const { netData, expData, itemsData } = req.body || {};
     if (!netData || !Array.isArray(itemsData) || itemsData.length === 0) {
@@ -229,6 +282,7 @@ module.exports = function (connection) {
       'O',                                   // PUR_TYPE — this screen is always Overseas
       null,                                  // RND_OFF  — set below from the figures
       null,                                  // EFF_RATE — set below
+      numOrNull(netData.FreightFc),          // FREIGHT_FC — freight in the invoice currency
     ];
 
     // Expense lines with a code and a non-zero amount.
@@ -246,17 +300,22 @@ module.exports = function (connection) {
 
     // ── Figures for the G/L (same arithmetic as the screen) ──
     const invAmtFc = numOrNull(netData.InvAmtFc) || 0;
+    const freightFc = numOrNull(netData.FreightFc) || 0;
     const convRt   = numOrNull(netData.ConvRt) || 0;
     const expTotal = expLines.reduce((s, e) => s + (Number(e[1]) || 0), 0);
-    const amtLocal = round2(invAmtFc * convRt);
-    const effRate  = ((invAmtFc || 1) * convRt + expTotal) / (invAmtFc || 1);
+    // Amount Local = (Inv.Amount F.C + Freight F.C) × Rate — what the supplier is owed
+    const amtLocal = round2((invAmtFc + freightFc) * convRt);
+    // Freight and expenses are spread over the items' F.C value
+    const effRate  = invAmtFc
+      ? ((invAmtFc + freightFc) * convRt + expTotal) / invAmtFc
+      : (convRt + expTotal);
     const itemsTot = round2(lines.reduce((s, r) => s + (numOrNull(r.QTY) || 0) * (numOrNull(r.COST_FC) || 0) * effRate, 0));
     const discount = round2(numOrNull(netData.discAmt ?? netData.DiscAmt) || 0);
     const netAmt   = round2(itemsTot - discount);
     // Dr side = Net Amount + Discount = Items Total; Cr side = Amount Local + expenses.
     // Whatever is left between them is the round off (+ = Dr, − = Cr).
     const rndOff   = round2(amtLocal + expTotal - itemsTot);
-    hdrRest[9]  = amtLocal;                // INV_AMOUNT_LOCAL — always Inv.Amount F.C × Rate
+    hdrRest[9]  = amtLocal;                // INV_AMOUNT_LOCAL — (Inv.Amount F.C + Freight F.C) × Rate
     hdrRest[15] = rndOff;                  // RND_OFF
     hdrRest[16] = Math.round(effRate * 10000) / 10000;   // EFF_RATE (decimal 12,4)
 
