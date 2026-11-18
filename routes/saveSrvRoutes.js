@@ -19,7 +19,7 @@
  *
  * Foreign SRV (SrvEntFP.tsx, 06-Nov-2026) — recognised by expData being sent
  * (the local SRV screen doesn't send it, so its saves are unchanged):
- *   srv_hdr   CURR_CODE, CONVERT_RATE, INV_AMT_FC, FREIGHT_FOB, INV_AMT_LOCAL,
+ *   srv_hdr   CURR_CODE, CONVERT_RATE, INV_AMT_FC, FREIGHT_FC, INV_AMT_LOCAL,
  *             EXP_AMOUNT, EFF_RATE                  ← netData.CurrCd … EffRate
  *             PUR_TYPE = 'O' (Overseas)             ← netData.PurType, 'O' if not sent
  *   srv_items COST_FC (Rate F.C); COST = Rate Local (Rate F.C × Eff. Rate)
@@ -27,6 +27,9 @@
  *             INSERT the lines on screen (lcst_trn has no unique key on
  *             VCHR_NO + GIT_TYPE, so an upsert would only add rows)
  * All inside the same transaction — a failure rolls the expenses back too.
+ *
+ * srv_items.STD_COST is written with the same value as COST (local and foreign SRV).
+ * Freight F.C column: srv_hdr.FREIGHT_FC (renamed from FREIGHT_FOB — see freight_rename.sql).
  */
 
 const express = require('express');
@@ -60,31 +63,33 @@ const HDR_UPDATE = `
    WHERE SRV_NO=?`;
 
 const ITEMS_UPSERT = `
-  INSERT INTO srv_items (SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, QTY, COST)
-  VALUES ?
-  ON DUPLICATE KEY UPDATE
-    SRV_DATE  = COALESCE(VALUES(SRV_DATE), SRV_DATE),
-    ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE),
-    QTY       = COALESCE(VALUES(QTY), QTY),
-    COST      = COALESCE(VALUES(COST), COST)`;
-
-// ── Foreign SRV ──────────────────────────────────────────────────────────
-const HDR_FOREIGN_UPDATE = `
-  UPDATE srv_hdr
-     SET CURR_CODE=?, CONVERT_RATE=?, INV_AMT_FC=?, FREIGHT_FOB=?,
-         INV_AMT_LOCAL=?, EXP_AMOUNT=?, EFF_RATE=?, PUR_TYPE=?
-   WHERE SRV_NO=?`;
-
-// Rate F.C is written as sent (not COALESCE'd), so a cleared rate is cleared.
-const ITEMS_UPSERT_FP = `
-  INSERT INTO srv_items (SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, QTY, COST, COST_FC)
+  INSERT INTO srv_items (SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, QTY, COST, STD_COST)
   VALUES ?
   ON DUPLICATE KEY UPDATE
     SRV_DATE  = COALESCE(VALUES(SRV_DATE), SRV_DATE),
     ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE),
     QTY       = COALESCE(VALUES(QTY), QTY),
     COST      = COALESCE(VALUES(COST), COST),
-    COST_FC   = VALUES(COST_FC)`;
+    STD_COST  = COALESCE(VALUES(STD_COST), STD_COST)`;
+
+// ── Foreign SRV ──────────────────────────────────────────────────────────
+const HDR_FOREIGN_UPDATE = `
+  UPDATE srv_hdr
+     SET CURR_CODE=?, CONVERT_RATE=?, INV_AMT_FC=?, FREIGHT_FC=?,
+         INV_AMT_LOCAL=?, EXP_AMOUNT=?, EFF_RATE=?, PUR_TYPE=?
+   WHERE SRV_NO=?`;
+
+// Rate F.C is written as sent (not COALESCE'd), so a cleared rate is cleared.
+const ITEMS_UPSERT_FP = `
+  INSERT INTO srv_items (SRV_NO, SRV_DATE, SR_NO, ITEM_CODE, QTY, COST, COST_FC, STD_COST)
+  VALUES ?
+  ON DUPLICATE KEY UPDATE
+    SRV_DATE  = COALESCE(VALUES(SRV_DATE), SRV_DATE),
+    ITEM_CODE = COALESCE(VALUES(ITEM_CODE), ITEM_CODE),
+    QTY       = COALESCE(VALUES(QTY), QTY),
+    COST      = COALESCE(VALUES(COST), COST),
+    COST_FC   = VALUES(COST_FC),
+    STD_COST  = COALESCE(VALUES(STD_COST), STD_COST)`;
 
 const LCST_INSERT = `
   INSERT INTO lcst_trn (VCHR_NO, GIT_TYPE, AMOUNT, ACC_CODE)
@@ -204,6 +209,7 @@ module.exports = function (connection) {
         const values = itemsData.map((row) => [
           srvNo, row.SRV_DATE || netData.SrvDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST,
           numOrNull(row.COST_FC),
+          row.COST,                                   // STD_COST = COST
         ]);
         await q(conn, ITEMS_UPSERT_FP, [values]);
 
@@ -218,6 +224,7 @@ module.exports = function (connection) {
       } else {
         const values = itemsData.map((row) => [
           srvNo, row.SRV_DATE || netData.SrvDt, row.SR_NO, row.ITEM_CODE, row.QTY, row.COST,
+          row.COST,                                   // STD_COST = COST
         ]);
         await q(conn, ITEMS_UPSERT, [values]);
       }
