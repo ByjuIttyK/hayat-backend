@@ -3877,7 +3877,6 @@ app.get("/api/pinvfrgnlst/:dys", function (req, res) {
   );
 });
 
-
 app.get("/api/srvlst/:dys", function (req, res) {
 
   connection.query(
@@ -3889,21 +3888,20 @@ app.get("/api/srvlst/:dys", function (req, res) {
     " DATE_FORMAT(a.LAST_EDITED_ON, '%Y-%m-%d %H:%i:%s') AS LAST_EDITED_ON " +
     " from srv_hdr a LEFT OUTER JOIN  sup_mst b  ON (a.SUP_CODE = b.SUP_CODE) " +
     " LEFT OUTER JOIN  purchase_hdr c on (a.srv_no = c.srv_no) " +
-    " where  a.SRV_DATE  >= CURDATE() - INTERVAL ? DAY and " +
-    " a.SUP_CODE = b.SUP_CODE ORDER BY a.SRV_NO DESC",
+    " where COALESCE(a.PUR_TYPE, 'L') <> 'O' " +            // NULL PUR_TYPE = local SRV
+    "   and a.SRV_DATE >= CURDATE() - INTERVAL ? DAY " +
+    " ORDER BY a.SRV_NO DESC",
     [req.params.dys],
 
     function (err, result) {
       if (err) {
-        throw err;
-      } else {
-        //   console.log("srv list", result);
-        res.json(result);
+        console.error("srvlst:", err);                       // throw err here would crash the backend
+        return res.status(500).json({ message: err.sqlMessage || err.message });
       }
+      res.json(result);
     }
   );
 });
-
 
 app.get("/api/srvlstfp/:dys", function (req, res) {
 
