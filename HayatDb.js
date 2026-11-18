@@ -3930,7 +3930,7 @@ app.get("/api/srvhdr/:srv", function (req, res) {
     "SELECT a.SRV_NO, DATE_FORMAT(a.SRV_DATE,'%d/%m/%y') SRV_DATE, a.SUP_CODE," +
     "       b.SUP_NAME, a.NARRATION, a.PO_NO AS LPO_NO, a.INV_NO, a.INV_DATE, a.INV_AMOUNT," +
     "       a.CURR_CODE, a.CONVERT_RATE," +
-    "       a.INV_AMT_FC, a.FREIGHT_FC, a.INV_AMT_LOCAL, a.EXP_AMOUNT, a.EFF_RATE" +
+    "       a.INV_AMT_FC, a.FREIGHT_FC as FREIGHT_FOB, a.INV_AMT_LOCAL, a.EXP_AMOUNT, a.EFF_RATE" +
     "  FROM srv_hdr a, sup_mst b" +
     " WHERE a.SUP_CODE = b.SUP_CODE AND a.SRV_NO = ?",
     [req.params.srv],
