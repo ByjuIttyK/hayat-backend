@@ -7,7 +7,8 @@
  *   app.use('/api', saveSretRoutes(connection));
  *
  * G/L posting (TRAN_TYPE '08') and invoice settlement (adj_dtl) use postSret()
- * from routes/sretPosting.js:  Dr Sales A/c (DR_CODE) / Cr Customer, Net Amount;
+ * from routes/sretPosting.js:  Dr Sales A/c (DR_CODE) Gross, Dr VAT on Sales VAT,
+ * Cr Customer Net;
  * adj_dtl settles the Inv.No (STLD_TYPE '06') with the Net Amount.
  *
  * Multi-user safety
@@ -157,6 +158,9 @@ module.exports = function (connection) {
           salesAcc: sretNet.AccCd,                        // Debit A/c on the screen
           invNo: sretNet.invNo,
           jobNo: sretNet.JobNo,
+          grossAmt: sretNet.grossAmt,                     // after discount
+          vatAmt: sretNet.vatAmt,
+          roundOff: sretNet.RoundOff,
           netAmt: sretNet.TotAmt,                         // Net Amount
           narration: sretNet.Narration1 ?? sretNet.Narration,
           divCode: null,

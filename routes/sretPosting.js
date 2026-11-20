@@ -3,7 +3,8 @@
 // Call postSret() INSIDE the save-sret transaction, after sret_hdr / sret items are written,
 // so the posting commits or rolls back together with the return.
 //
-//   Dr  Sales A/c   (header Debit A/c, e.g. 4100-2533)   Net Amount
+//   Dr  Sales A/c   (header Debit A/c, e.g. 4100-2533)   Gross Amount
+//   Dr  VAT on Sales (300-001-0-001)                    VAT Amount
 //   Cr  Customer    (Cust.Code)                         Net Amount
 //   adj_dtl: return 08/<SretNo> settles invoice 06/<InvNo> for Net Amount
 //
@@ -13,6 +14,7 @@
 
 const TRAN_TYPE = "08";      // Sales Return
 const INV_TYPE  = "06";      // Sales Invoice (STLD_TYPE of invoice settlements)
+const VAT_ACC   = "300-001-0-001";   // VAT on Sales A/c
 
 const r2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 const t  = (v) => String(v ?? "").trim();
@@ -42,7 +44,7 @@ async function unpostSret(conn, sretNo) {
 /**
  * @param conn  promise connection inside the save transaction
  * @param p     { sretNo, sretDate (yyyy-MM-dd), custCode, salesAcc, invNo, jobNo,
- *                netAmt, narration, divCode }
+ *                grossAmt, vatAmt, roundOff, netAmt, narration, divCode }
  */
 async function postSret(conn, p) {
   const sretNo   = t(p.sretNo);
@@ -66,20 +68,33 @@ async function postSret(conn, p) {
   const narr1 = t(p.narration) || `Sales Return ${sretNo}${invNo ? " against Inv " + invNo : ""}`;
   const narr2 = invNo ? `Inv No ${invNo}` : null;
 
-  // ── tran_acc: Dr Sales A/c, Cr Customer — both with the Net Amount ──
+  // ── tran_acc ──
+  //   Dr Sales A/c (4100-…)            Gross Amount (+ Round Off, so the voucher balances)
+  //   Dr VAT on Sales (300-001-0-001)  VAT Amount
+  //   Cr Customer                      Net Amount
+  const vat   = r2(p.vatAmt);
+  const round = r2(p.roundOff);
+  const gross = r2(p.grossAmt);
+  if (Math.abs(r2(gross + vat + round) - net) > 0.01) {
+    throw new Error(`Amounts don't agree: Gross ${gross} + VAT ${vat} + Round Off ${round} ≠ Net ${net}.`);
+  }
+  const salesDr = r2(net - vat);                 // = Gross + Round Off
+
   const ins = `INSERT INTO tran_acc
       (TRAN_TYPE, vchr_no, DATTE, SR_NO, ACC_CODE, AMOUNT, DB_CR,
        NARRATION1, NARRATION2, AMT_SETTLED, JOB_NO, REF_NO, DIV_CODE, MAIN_SR_NO)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+  const jobNo = t(p.jobNo) || null;
+  let srNo = 0;
+  const line = (acc, amt, dbcr, settled = 0) =>
+    conn.query(ins, [
+      TRAN_TYPE, sretNo, p.sretDate, ++srNo, acc, amt, dbcr,
+      narr1, narr2, settled, jobNo, invNo || null, divCode, mainSrNo,
+    ]);
 
-  await conn.query(ins, [
-    TRAN_TYPE, sretNo, p.sretDate, 1, salesAcc, net, "D",
-    narr1, narr2, 0, t(p.jobNo) || null, invNo || null, divCode, mainSrNo,
-  ]);
-  await conn.query(ins, [
-    TRAN_TYPE, sretNo, p.sretDate, 2, custCode, net, "C",
-    narr1, narr2, invNo ? net : 0, t(p.jobNo) || null, invNo || null, divCode, mainSrNo,
-  ]);
+  if (salesDr !== 0) await line(salesAcc, salesDr, "D");
+  if (vat !== 0)     await line(VAT_ACC, vat, "D");
+  await line(custCode, net, "C", invNo ? net : 0);
 
   // ── adj_dtl: settle the invoice with the Net Amount ──
   if (invNo) {
