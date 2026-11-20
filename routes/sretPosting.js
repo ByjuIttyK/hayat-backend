@@ -83,6 +83,16 @@ async function postSret(conn, p) {
 
   // ── adj_dtl: settle the invoice with the Net Amount ──
   if (invNo) {
+    // STLD_DATE = the settled invoice's own date (fab_inv_hdr.INV_DATE)
+    const [invRows] = await conn.query(
+      `SELECT INV_DATE FROM fab_inv_hdr WHERE INV_NO = ? LIMIT 1`,
+      [invNo]
+    );
+    if (!invRows.length || !invRows[0].INV_DATE) {
+      throw new Error(`Invoice ${invNo} not found in fab_inv_hdr — cannot settle it.`);
+    }
+    const invDate = invRows[0].INV_DATE;
+
     await conn.query(
       `INSERT INTO adj_dtl
          (SOURCE_DOC, SOURCE_TYPE, SOURCE_DATE, ACC_CODE,
@@ -90,7 +100,7 @@ async function postSret(conn, p) {
           DIV_CODE, MAIN_SR_NO, REF_NO)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [sretNo, TRAN_TYPE, p.sretDate, custCode,
-       invNo, INV_TYPE, net, "C", p.sretDate,
+       invNo, INV_TYPE, net, "C", invDate,
        divCode, mainSrNo, invNo]
     );
     // Invoice's customer (Dr) line now carries this settlement too
