@@ -80,6 +80,22 @@ async function nextSretNo(conn, width) {
 module.exports = function (connection) {
   const router = express.Router();
 
+  /** GET /api/sret-projdet/:invNo — fab_inv_hdr.PROJECT_DETAIL of an invoice (Sales Return screen). */
+  router.get('/sret-projdet/:invNo', (req, res) => {
+    const invNo = String(req.params.invNo || '').trim();
+    connection.query(
+      'SELECT PROJECT_DETAIL FROM fab_inv_hdr WHERE INV_NO = ? LIMIT 1',
+      [invNo],
+      (err, rows) => {
+        if (err) {
+          console.error('[sret-projdet]', err);
+          return res.status(500).json({ message: 'Could not read project details' });
+        }
+        res.json({ PROJECT_DETAIL: rows && rows[0] ? rows[0].PROJECT_DETAIL ?? '' : '' });
+      }
+    );
+  });
+
   router.post('/save-sret', (req, res) => {
     const { sretNet, sretItems } = req.body || {};
     if (!sretNet || !Array.isArray(sretItems) || sretItems.length === 0) {
