@@ -42,19 +42,21 @@ const asPromiseConn = (conn) => ({ query: (sql, params) => q(conn, sql, params).
 
 const isRetryable = (e) =>
   !!e && (e.code === 'ER_LOCK_DEADLOCK' || e.code === 'ER_LOCK_WAIT_TIMEOUT' || e.errno === 1213 || e.errno === 1205);
+const cut = (v, n) => { const s = String(v ?? '').trim(); return s ? s.slice(0, n) : null; };
 const isDup = (e) => !!e && (e.code === 'ER_DUP_ENTRY' || e.errno === 1062);
 
 class ConflictError extends Error {}
 
 const HDR_INSERT = `
   INSERT INTO sret_hdr
-    (SRET_NO, SRET_DATE, INV_NO, JOB_NO,CUST_CODE, DR_CODE, NARRATION1, NARRATION2, SMAN_CODE, DISCOUNT, AMOUNT)
-  VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?)`;
+    (SRET_NO, SRET_DATE, INV_NO, JOB_NO,CUST_CODE, DR_CODE, NARRATION1, NARRATION2, SMAN_CODE, DISCOUNT, AMOUNT,
+     PROJECT_DETAILS)
+  VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const HDR_UPDATE = `
   UPDATE sret_hdr
      SET SRET_DATE=?, INV_NO=?, JOB_NO=?,CUST_CODE=?, DR_CODE=?, NARRATION1=?, NARRATION2=?,
-         SMAN_CODE=?, DISCOUNT=?, AMOUNT=?
+         SMAN_CODE=?, DISCOUNT=?, AMOUNT=?, PROJECT_DETAILS=?
    WHERE SRET_NO=?`;
 
 const ITEMS_UPSERT = `
@@ -98,10 +100,12 @@ module.exports = function (connection) {
 
     const hdrFields = [
       sretNet.SretDt, sretNet.invNo ?? null,sretNet.JobNo ?? null, sretNet.CustCd ?? null, sretNet.AccCd ?? null,
-      // the screen sends Narration (not Narration1)
-      sretNet.Narration1 ?? sretNet.Narration ?? null, sretNet.Narration2 ?? null, sretNet.SmanCd ?? null,
+      // NARRATION1 is varchar(40)
+      cut(sretNet.Narration1 ?? sretNet.Narration, 40), sretNet.Narration2 ?? null, sretNet.SmanCd ?? null,
       sretNet.Discount ?? null, sretNet.TotAmt ?? null,
+      cut(sretNet.ProjectDetails, 200),   // PROJECT_DETAILS — filled from fab_inv_hdr in saveOnce if empty
     ];
+    const PROJ_IDX = hdrFields.length - 1;
 
     const claim = async (conn) => {
       let sretNo = clientSretNo;
@@ -120,6 +124,13 @@ module.exports = function (connection) {
 
     const saveOnce = async (conn) => {
       await begin(conn);
+
+      // Project details come from the invoice when the screen didn't send them
+      const invNo = String(sretNet.invNo ?? '').trim();
+      if (!hdrFields[PROJ_IDX] && invNo) {
+        const inv = await q(conn, 'SELECT PROJECT_DETAIL FROM fab_inv_hdr WHERE INV_NO = ? LIMIT 1', [invNo]);
+        hdrFields[PROJ_IDX] = cut(inv[0]?.PROJECT_DETAIL, 200);
+      }
 
       let sretNo;
       if (mode === 'ADD') {
@@ -162,7 +173,7 @@ module.exports = function (connection) {
           vatAmt: sretNet.vatAmt,
           roundOff: sretNet.RoundOff,
           netAmt: sretNet.TotAmt,                         // Net Amount
-          narration: sretNet.Narration1 ?? sretNet.Narration,
+          narration: hdrFields[5],                        // NARRATION1 as saved
           divCode: null,
         });
       } catch (e) {
