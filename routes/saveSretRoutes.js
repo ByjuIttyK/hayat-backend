@@ -6,7 +6,9 @@
  *   const saveSretRoutes = require('./routes/saveSretRoutes');
  *   app.use('/api', saveSretRoutes(connection));
  *
- * G/L posting uses postToTranAcc() from services/glPostingService.js.
+ * G/L posting (TRAN_TYPE '08') and invoice settlement (adj_dtl) use postSret()
+ * from routes/sretPosting.js:  Dr Sales A/c (DR_CODE) / Cr Customer, Net Amount;
+ * adj_dtl settles the Inv.No (STLD_TYPE '06') with the Net Amount.
  *
  * Multi-user safety
  *   ADD  — the header is claimed with a plain INSERT. If the Return No is
@@ -21,7 +23,7 @@
  */
 
 const express = require('express');
-const { postToTranAcc } = require('../services/glPostingService');
+const { postSret } = require('./sretPosting');
 
 const MAX_ATTEMPTS = 4;
 const MAX_CLAIMS = 10;
@@ -34,6 +36,8 @@ const begin    = (conn) => new Promise((ok, ko) => conn.beginTransaction((e) => 
 const commit   = (conn) => new Promise((ok, ko) => conn.commit((e) => (e ? ko(e) : ok())));
 const rollback = (conn) => new Promise((ok) => conn.rollback(() => ok()));
 const sleep    = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Same connection (same transaction), in the [rows] shape sretPosting.js expects. */
+const asPromiseConn = (conn) => ({ query: (sql, params) => q(conn, sql, params).then((r) => [r]) });
 
 const isRetryable = (e) =>
   !!e && (e.code === 'ER_LOCK_DEADLOCK' || e.code === 'ER_LOCK_WAIT_TIMEOUT' || e.errno === 1213 || e.errno === 1205);
@@ -93,7 +97,8 @@ module.exports = function (connection) {
 
     const hdrFields = [
       sretNet.SretDt, sretNet.invNo ?? null,sretNet.JobNo ?? null, sretNet.CustCd ?? null, sretNet.AccCd ?? null,
-      sretNet.Narration1 ?? null, sretNet.Narration2 ?? null, sretNet.SmanCd ?? null,
+      // the screen sends Narration (not Narration1)
+      sretNet.Narration1 ?? sretNet.Narration ?? null, sretNet.Narration2 ?? null, sretNet.SmanCd ?? null,
       sretNet.Discount ?? null, sretNet.TotAmt ?? null,
     ];
 
@@ -142,18 +147,24 @@ module.exports = function (connection) {
       ]);
       await q(conn, ITEMS_UPSERT, [values]);
 
-      await postToTranAcc({
-        ModuleName: 'SALRET',
-        InvNo: sretNo,
-        Date: sretNet.SretDt,
-        Narration: sretNet.Narration1 || '',
-        SupCode: sretNet.CustCd,
-        GrossAmt: sretNet.grossAmt,
-        VatAmt: sretNet.vatAmt,
-        DiscAmt: sretNet.Discount,
-        NetAmt: sretNet.TotAmt,
-        JobNo: sretNet.JobNo || null,
-      }, conn);
+      // tran_acc (08): Dr Sales A/c / Cr Customer + adj_dtl settlement of the Inv.No — all Net Amount.
+      // A posting error (e.g. no Debit A/c) is shown to the user as-is.
+      try {
+        await postSret(asPromiseConn(conn), {
+          sretNo,
+          sretDate: sretNet.SretDt,                       // yyyy-MM-dd from the screen
+          custCode: sretNet.CustCd,
+          salesAcc: sretNet.AccCd,                        // Debit A/c on the screen
+          invNo: sretNet.invNo,
+          jobNo: sretNet.JobNo,
+          netAmt: sretNet.TotAmt,                         // Net Amount
+          narration: sretNet.Narration1 ?? sretNet.Narration,
+          divCode: null,
+        });
+      } catch (e) {
+        if (isRetryable(e) || e.code) throw e;            // DB errors keep their normal handling
+        throw new ConflictError(e.message);
+      }
 
       await commit(conn);
       return sretNo;
