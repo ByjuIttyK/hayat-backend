@@ -12,6 +12,10 @@
 //   E  encashment — days sold from the annual balance, up to the available balance; reduces the balance
 //   A  advance against future leave — amount (or days × rate); balance not touched
 //   Rate = current basic salary (payroll_mst.BASIC_SAL) × 12 / 365, kept on the voucher as paid.
+//   21-Nov-2026: leave salary basis (routes/leaveSalBasis.js) — each payable leave carries both
+//     days / dueDays    applied basis (leave days, actual once resumed)
+//     availDays / dueAvail  available basis (earned since the last resumption / date of joining, up to the leave start)
+//   the screen defaults to available days; a voucher may pay up to the larger of the two, less days already paid.
 //
 // G/L posting (tran_acc, TRAN_TYPE = LS_TRAN_TYPE, voucher no = LS_NO):
 //   Dr DR_ACC_CODE   AMOUNT        (L, E: leave salary provision / expense;  A: employee advance a/c)
@@ -28,6 +32,7 @@
 //   DELETE /leave-sal-pay/:no
 const express = require("express");
 const { engine } = require("./leaveApi");
+const { availableDays } = require("./leaveSalBasis");
 
 // ---- G/L posting: tran type and tran_acc column names — match these to the Salary JV insert (tran type 15)
 const LS_TRAN_TYPE = 16;
@@ -127,14 +132,17 @@ module.exports = function (connection) {
     const bal = engine.leaveBalance(emp, leaves, dt, pays.filter((p) => p.LS_TYPE === "E"));
     const advPaid = r2(pays.filter((p) => p.LS_TYPE === "A").reduce((t, p) => t + Number(p.AMOUNT), 0));
     const advAdj = r2(pays.filter((p) => p.LS_TYPE === "L").reduce((t, p) => t + Number(p.ADV_ADJ), 0));
+    const encs = pays.filter((p) => p.LS_TYPE === "E");
     const payable = leaves.filter((l) => l.IS_ANNUAL === "Y").map((l) => {
       const days = Number(l.STATUS === "S" ? l.ACT_DAYS : l.DAYS) || 0;
       const lp = pays.filter((p) => p.LS_TYPE === "L" && p.LEAVE_NO === l.LEAVE_NO);
       const paidDays = r2(lp.reduce((t, p) => t + Number(p.DAYS), 0));
       const paidAmt = r2(lp.reduce((t, p) => t + Number(p.AMOUNT), 0));
+      const av = availableDays(engine, emp, leaves, l, encs);
       return {
         LEAVE_NO: l.LEAVE_NO, LEAVE_NAME: l.LEAVE_NAME, STATUS: l.STATUS, FROM_DT: l.FROM_DT, TO_DT: l.TO_DT,
         RESUME_DT: l.RESUME_DT, days: r2(days), paidDays, paidAmt, dueDays: r2(days - paidDays),
+        availDays: av.days, availFrom: av.from, availTo: av.to, availSource: av.source, dueAvail: r2(av.days - paidDays),
       };
     }).reverse();                                                       // latest leave first
     return { emp, basic, rate, bal, openAdvance: r2(advPaid - advAdj), payable, pays };
@@ -230,8 +238,11 @@ module.exports = function (connection) {
       const lv = c.payable.find((l) => l.LEAVE_NO === v.LEAVE_NO);
       if (!lv) throw fail(400, `${v.LEAVE_NO} is not an approved / resumed annual leave of ${c.emp.EMP_NAME}`);
       if (!(v.DAYS > 0)) throw fail(400, "Enter the days paid");
-      if (v.DAYS > lv.dueDays + 0.001) {
-        throw fail(400, `Only ${lv.dueDays} day${lv.dueDays === 1 ? "" : "s"} of ${v.LEAVE_NO} are unpaid (${lv.days} days, ${lv.paidDays} already paid)`);
+      // either basis: up to the larger of leave days and available days, less what is already paid for this leave
+      const maxDue = r2(Math.max(lv.dueDays, lv.dueAvail));
+      if (v.DAYS > maxDue + 0.001) {
+        throw fail(400, `Only ${Math.max(maxDue, 0)} day${maxDue === 1 ? "" : "s"} of ${v.LEAVE_NO} are unpaid `
+          + `(${lv.days} leave days, ${lv.availDays} available days, ${lv.paidDays} already paid)`);
       }
       v.AMOUNT = r2(v.DAYS * v.DAILY_RATE);
       if (v.ADV_ADJ < 0) throw fail(400, "Advance adjusted cannot be negative");

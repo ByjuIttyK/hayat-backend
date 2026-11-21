@@ -40,6 +40,11 @@
 //                  accruals, or on exit)
 //   leave salary = daily rate × paid days;  value of the balance left on exit = days × daily rate
 //                  (a negative balance on exit is an amount to recover)
+// 21-Nov-2026: GET /leave/salary/:no?basis=AVAIL|APPL  (routes/leaveSalBasis.js)
+//   AVAIL (default) paid days = leave earned since the last resumption of an annual leave (or the opening-balance
+//                   date with its opening, or the date of joining) up to the day before this leave, less encashments
+//                   in that period; no advance-leave days
+//   APPL            paid days = actual / applied days as above (the earlier rule)
 // Payments are made by a separate Leave Salary Payment voucher (routes/leaveSalPayApi.js, table leave_sal_pay):
 //   L for a leave (any time, also after resuming), E encashment (days sold — they reduce the annual balance,
 //   Leave Ledger row "ENC"), A advance against future leave (balance not touched; adjusted on a later L voucher).
@@ -50,6 +55,7 @@
 //   in a closed month can still be resumed in an open one.
 const express = require("express");
 const { assertPayRangeOpen } = require("./payrollPeriod");
+const { availableDays, basisOf } = require("./leaveSalBasis");
 
 const STATUSES = ["A", "L", "R", "T", "X"];
 const ADMIN_USERS = ["admin"];
@@ -591,12 +597,16 @@ module.exports = function (connection) {
       const emp = await empOf(a.EMP_CODE);
       const leaves = (await leavesOf([a.EMP_CODE])).filter((l) => l.LEAVE_NO !== no);
       const pays = await paysOf([a.EMP_CODE]);
-      const before = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1), pays.filter((p) => p.LS_TYPE === "E"));
+      const encs = pays.filter((p) => p.LS_TYPE === "E");
+      const before = leaveBalance(emp, leaves, addDays(a.FROM_DT, -1), encs);
       const resumed = a.STATUS === "S";
       const days = Number(resumed ? a.ACT_DAYS : a.DAYS) || 0;
-      // advance leave: every day taken is paid; days beyond the available balance take the balance negative
-      const paidDays = r2(days);
-      const advanceDays = r2(Math.max(Math.min(days, days - before.available), 0));
+      const basis = basisOf(req.query.basis);
+      const avail = availableDays({ leaveBalance }, emp, leaves, a, encs);
+      // AVAIL: the leave earned since the last resumption / joining;  APPL: every day taken is paid, days beyond the
+      // available balance are advance leave and take the balance negative
+      const paidDays = basis === "AVAIL" ? avail.days : r2(days);
+      const advanceDays = basis === "AVAIL" ? 0 : r2(Math.max(Math.min(days, days - before.available), 0));
       const rates = await ratesOf(a.EMP_CODE);
       const total = r2(rates.dailyBasic * paidDays);                  // basic daily rate × paid days
       const lines = rates.lines.map((l) => ({ ...l, days: paidDays, amount: total }));
@@ -607,6 +617,7 @@ module.exports = function (connection) {
       const openAdvance = r2(pays.filter((p) => p.LS_TYPE === "A").reduce((t, p) => t + Number(p.AMOUNT), 0)
         - pays.filter((p) => p.LS_TYPE === "L").reduce((t, p) => t + Number(p.ADV_ADJ), 0));
       res.json({
+        basis, avail, leaveDays: days,
         appl: a, emp, before, days, daysBasis: resumed ? "actual (resumed)" : "applied", paidDays, advanceDays,
         lines, monthly: rates.basic, dailyFull: rates.dailyBasic, total,
         balanceAfter: after,

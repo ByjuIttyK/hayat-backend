@@ -4374,7 +4374,7 @@ app.get("/api/fabinvlist/:dys", function (req, res) {
     " left outer join cus_mst b on b.cust_code = a.cust_code " +
     "  ORDER BY a.INV_NO DESC",
     [req.params.dys],
-//where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY 
+    //where  a.INV_DATE >= CURDATE() - INTERVAL ? DAY 
     function (err, results, fields) {
       if (err) {
         console.error("Error executing query:", err);
@@ -7347,11 +7347,11 @@ app.get("/api/fabdo-prjrefs/:custCode", (req, res) => {
   });
 });
 
-    app.get('/api/quot-lov', (req, res) => {
-        const q = String(req.query.q || '').trim();
-        const like = `%${q}%`;
+app.get('/api/quot-lov', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const like = `%${q}%`;
 
-        const sql = `
+  const sql = `
             SELECT h.QUOT_NO,
                    DATE_FORMAT(h.QUOT_DATE, '%d/%m/%Y') AS QUOT_DATE,
                    h.CUST_CODE,
@@ -7363,14 +7363,14 @@ app.get("/api/fabdo-prjrefs/:custCode", (req, res) => {
              ORDER BY h.QUOT_DATE DESC, h.QUOT_NO DESC
              LIMIT 500`;
 
-        connection.query(sql, [q, like, like], (err, rows) => {
-            if (err) {
-                console.error('quot-lov error:', err);
-                return res.status(500).json({ message: 'Query error' });
-            }
-            res.json(rows);
-        });
-    });
+  connection.query(sql, [q, like, like], (err, rows) => {
+    if (err) {
+      console.error('quot-lov error:', err);
+      return res.status(500).json({ message: 'Query error' });
+    }
+    res.json(rows);
+  });
+});
 
 //Jv Routes
 const jvRoutes = require('./JvExcelEntryRoutes');
@@ -7971,3 +7971,9 @@ app.use('/api', saveFrgnPurchRoutes(connection));
 app.use("/api", require("./routes/pinvChecksRoutes")(connection));
 //
 app.use("/api", require("./routes/fpoExtraRoutes")(connection));
+//
+const ticketLedgerApi = require("./routes/ticketLedgerApi");
+app.use("/api", ticketLedgerApi(connection));
+//
+const ticketIssueApi = require("./routes/ticketIssueApi");
+app.use("/api", ticketIssueApi(connection));

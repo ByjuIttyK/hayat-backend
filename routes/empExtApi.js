@@ -49,6 +49,11 @@ const HR_FIELDS = [
   { k: "TICKET_CLASS", t: "c", set: ["E", "B"] },
   { k: "TICKET_EVERY_YRS", t: "n" },
   { k: "LAST_TICKET_DT", t: "d" },
+  // air ticket ledger (unit = one-way ticket, return = 2)
+  { k: "TKT_TYPE", t: "c", set: ["1", "2"], def: "2" },
+  { k: "TKT_OP_BAL", t: "n", def: 0 },
+  { k: "TKT_OP_DATE", t: "d" },
+  { k: "TKT_FARE", t: "n", def: 0 },
   { k: "GRATUITY_START_DT", t: "d" },
   { k: "ACCOMMODATION", t: "yn" },
   { k: "FAMILY_IN_UAE", t: "yn" },
@@ -66,6 +71,7 @@ const LABEL = {
   CONFIRM_DT: "Confirmation date", EXIT_DT: "Exit date", CONTRACT_START_DT: "Contract start",
   CONTRACT_END_DT: "Contract end", LEAVE_OPBAL_DT: "Leave balance as on", LAST_LEAVE_DT: "Last leave",
   LAST_RESUME_DT: "Resumed on", LAST_TICKET_DT: "Last ticket", GRATUITY_START_DT: "Gratuity start",
+  TKT_OP_DATE: "Ticket O/P balance as on",
 };
 
 const isYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -159,6 +165,12 @@ module.exports = function (connection) {
     const iban = get(PAY_FIELDS, pv, "IBAN");
     if (iban && iban.startsWith("AE") && !/^AE\d{21}$/.test(iban)) {
       return res.status(400).json({ message: "UAE IBAN must be AE followed by 21 digits" });
+    }
+    // air ticket ledger: an opening balance needs the date the ledger starts from
+    const tktBal = get(HR_FIELDS, hv, "TKT_OP_BAL");
+    if (tktBal > 99) return res.status(400).json({ message: "Ticket O/P balance: 0 to 99 one-way tickets" });
+    if (get(HR_FIELDS, hv, "TICKET_ELIGIBLE") === "Y" && tktBal > 0 && !get(HR_FIELDS, hv, "TKT_OP_DATE")) {
+      return res.status(400).json({ message: "Ticket O/P balance as on date is required" });
     }
     const routing = get(PAY_FIELDS, pv, "ROUTING_CODE");
     if (routing && !/^\d{9}$/.test(routing)) return res.status(400).json({ message: "Routing code must be 9 digits" });
