@@ -7977,3 +7977,7 @@ app.use("/api", ticketLedgerApi(connection));
 //
 const ticketIssueApi = require("./routes/ticketIssueApi");
 app.use("/api", ticketIssueApi(connection));
+//
+app.use(require("./routes/cusEinvReviewRoutes")(connection));
+//
+app.use(require("./routes/cusEinvLinkRoutes")(connection));

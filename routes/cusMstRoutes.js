@@ -4,7 +4,7 @@
 //
 //   GET  /api/cus-dd/salesmen  → [{ SMAN_CODE, SMAN_NAME }]      from sman_mst
 //   GET  /api/cus-dd/nations   → [{ NATION_CODE, NATION_NAME }]  from nation_mst
-//   POST /api/save-customer    → insert / update cus_mst
+//   POST /api/save-customer    → insert / update cus_mst (incl. e-Invoice columns)
 //
 // Register in HayatDb.js (one line, replaces cusDropLists and the old
 // app.post("/api/save-customer") block):
@@ -27,9 +27,17 @@ const CUS_SAVE_COLS = [
     "PAYMENT_TERMS", "CR_LIMIT", "CR_TERMS", "VAT_REG_NO",
     "SMAN_CODE", "NATION_CODE", "CUS_QUOTE_LIMIT",
     "CUS_LICENSE_FILE", "CUS_LICENSE_EXPIRY", "CUS_LIC_EXP_ALLOW", "BLOCK_DO",
+    // ── e-Invoice (CusEinvSection) ──
+    "TIN", "PEPPOL_ID", "EINV_SCOPE",
+    "CITY", "EMIRATE_CODE", "COUNTRY_ISO",
+    "LIC_TYPE", "LIC_NO", "LIC_AUTHORITY",
 ];
 const CUS_DATE_COLS = new Set(["CUS_LICENSE_EXPIRY"]);
 const CUS_NUM_COLS = new Set(["CR_LIMIT", "CUS_QUOTE_LIMIT"]);
+// Blank → default for these code columns
+const CUS_DEFAULTS = { EINV_SCOPE: "Y", COUNTRY_ISO: "AE" };
+const CUS_UPPER_COLS = new Set(["COUNTRY_ISO", "EMIRATE_CODE"]);
+const TRN_RE = /^1[0-9A-Za-z]{12}03$/;
 
 // '' / undefined → NULL for dates, 0 for amounts; text stays as typed.
 const cusVal = (col, v) => {
@@ -41,7 +49,10 @@ const cusVal = (col, v) => {
         const n = Number(v);
         return Number.isFinite(n) ? n : 0;
     }
-    return v === undefined || v === null ? "" : String(v);
+    let s = v === undefined || v === null ? "" : String(v);
+    if (CUS_UPPER_COLS.has(col)) s = s.trim().toUpperCase();
+    if (s.trim() === "" && CUS_DEFAULTS[col]) return CUS_DEFAULTS[col];
+    return s;
 };
 
 module.exports = (connection) => {
@@ -86,6 +97,14 @@ module.exports = (connection) => {
         const b = req.body || {};
         const code = String(b.CUST_CODE || "").trim();
         if (!code) return res.status(400).json({ error: "Customer Code is required" });
+
+        // e-Invoice: TIN / Peppol ID follow a valid TRN (first 10 digits) if the
+        // screen sent them blank - same rule as CusEinvSection.
+        const trn = String(b.VAT_REG_NO || "").trim();
+        if (TRN_RE.test(trn)) {
+            if (!String(b.TIN || "").trim()) b.TIN = trn.slice(0, 10);
+            if (!String(b.PEPPOL_ID || "").trim()) b.PEPPOL_ID = trn.slice(0, 10);
+        }
 
         const values = CUS_SAVE_COLS.map(c => (c === "CUST_CODE" ? code : cusVal(c, b[c])));
         const updates = CUS_SAVE_COLS
