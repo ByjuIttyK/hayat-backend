@@ -7982,4 +7982,6 @@ app.use(require("./routes/cusEinvReviewRoutes")(connection));
 //
 app.use(require("./routes/cusEinvLinkRoutes")(connection));
 //
-app.use(require("./routes/einvFabInvRoutes")(connection))
+app.use(require("./routes/einvFabInvRoutes")(connection));
+//
+app.use("/api", require("./routes/tranAccQueryRoutes")(connection));
