@@ -310,8 +310,8 @@ module.exports = function (connection) {
         await conn.query(
           `INSERT INTO pdc_isu
              (TRAN_TYPE, VCHR_NO, VCHR_DATE, CHQ_NO, CHQ_DATE,
-              PDC_CODE, SUP_CODE, CHQ_BANK, AMOUNT, NARRATION)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              PDC_CODE, SUP_CODE, CHQ_BANK, AMOUNT, NARRATION, MAIN_SR_NO)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             vchrData.TranType,
             vchrNo,
@@ -323,6 +323,9 @@ module.exports = function (connection) {
             chq.ChqBank,
             chq.Amount,
             chq.Narration,
+            // Cheque Sr.No. from the Cheques grid — the order they were keyed
+            // and the order they print in. decimal(4,0), so whole numbers only.
+            Number(chq.MainSrNo) > 0 ? Math.trunc(Number(chq.MainSrNo)) : null,
           ]
         );
       }
