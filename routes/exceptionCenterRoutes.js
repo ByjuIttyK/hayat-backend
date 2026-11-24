@@ -337,3 +337,6 @@ module.exports = function (connection) {
 
   return router;
 };
+
+// Shared with homeTilesApi.js (Exception Centre tile on the home page)
+module.exports.CHECKS = CHECKS;
