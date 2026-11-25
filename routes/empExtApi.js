@@ -40,7 +40,8 @@ const HR_FIELDS = [
   { k: "MOHRE_PERSON_CODE", t: "s", max: 20 },
   { k: "VISA_SPONSOR", t: "s", max: 80 },
   { k: "LEAVE_DAYS_PA", t: "n", def: 30 },
-  { k: "LEAVE_OPBAL", t: "n", def: 0 },
+ // { k: "LEAVE_OPBAL", t: "n", def: 0 },
+  { k: "LEAVE_OPBAL", t: "n", def: 0, neg: true },
   { k: "LEAVE_OPBAL_DT", t: "d" },
   { k: "LAST_LEAVE_DT", t: "d" },
   { k: "LAST_RESUME_DT", t: "d" },
@@ -88,7 +89,7 @@ function norm(f, raw) {
     case "n": {
       if (blank) return f.def ?? null;
       const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0) fail(`${f.k}: invalid number`);
+      if (!Number.isFinite(n) || (n < 0 && !f.neg)) fail(`${f.k}: invalid number`);
       return n;
     }
     case "yn":
@@ -216,7 +217,7 @@ module.exports = function (connection) {
         await q(conn, "COMMIT");
         res.json({ ok: true, message: "Employment, HR and bank details saved" });
       } catch (e) {
-        await q(conn, "ROLLBACK").catch(() => {});
+        await q(conn, "ROLLBACK").catch(() => { });
         if (e.code === "ER_NO_REFERENCED_ROW_2") {
           return res.status(400).json({ message: "Reports To: that employee code does not exist" });
         }
