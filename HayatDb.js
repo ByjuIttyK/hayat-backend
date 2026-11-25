@@ -7988,3 +7988,6 @@ app.use("/api", require("./routes/tranAccQueryRoutes")(connection));
 //
 //
 app.use("/api", authMiddleware, require("./routes/homeTilesApi")(connection));
+//
+const quotCostEstRoutes = require("./routes/quotCostEstRoutes");
+app.use("/api", quotCostEstRoutes(connection));
