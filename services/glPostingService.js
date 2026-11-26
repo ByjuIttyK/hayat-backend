@@ -37,6 +37,19 @@ async function postToTranAcc(payload, conn) {
     throw new Error(`No GL posting setup found for Module: ${ModuleName}`);
   }
 
+  // Optional line order: the caller may pass FieldOrder, a list of FIELD_NAMEs
+  // in the order the lines should get SR_NO 1, 2, 3 … Rules not in the list
+  // keep their table order and come after the listed ones. Modules that don't
+  // pass FieldOrder post exactly as before (acc_posting_setup order).
+  const order = Array.isArray(payload.FieldOrder) ? payload.FieldOrder : null;
+  if (order && order.length) {
+    const pos = (f) => {
+      const i = order.indexOf(f);
+      return i === -1 ? order.length : i;
+    };
+    rules.sort((a, b) => pos(a.FIELD_NAME) - pos(b.FIELD_NAME)); // stable sort
+  }
+
   const tranType = rules[0].TRAN_TYPE;
 
   // 2. Clear old GL records for this voucher to support updates safely

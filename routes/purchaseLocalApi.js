@@ -133,6 +133,8 @@ module.exports = function (connection) {
 
           // Round Off on the total after VAT (+ / −), 2 decimals
           const rndOff = Math.round((Number(String(netData.RndOff ?? 0).replace(/,/g, "")) || 0) * 100) / 100;
+          // Courier charges (no VAT) — Dr 601-002-0-001, already inside NetAmt (Cr Supplier)
+          const courierChg = Math.round((Number(String(netData.CourierChg ?? 0).replace(/,/g, "")) || 0) * 100) / 100;
 
           // ── Step 1: purchase_hdr ──
           // ADD = plain INSERT, so a number clash throws ER_DUP_ENTRY instead of
@@ -140,8 +142,9 @@ module.exports = function (connection) {
           // confirmed to exist and locked above).
           const insertPart = `
             INSERT INTO purchase_hdr (PJV_NO, PJV_DATE, SUP_CODE, SRV_NO,NARRATION,
-                                      INV_NO, INV_DATE, PO_NO, INV_AMOUNT, DISCOUNT, VAT_PERC, VAT_AMOUNT, RND_OFF)
-            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+                                      INV_NO, INV_DATE, PO_NO, INV_AMOUNT, DISCOUNT, VAT_PERC, VAT_AMOUNT, RND_OFF,
+                                      COURIER_CHG)
+            VALUES (?, ?, ?, ?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
           const upsertPart = `
             ON DUPLICATE KEY UPDATE
               PJV_DATE   = VALUES(PJV_DATE),
@@ -155,15 +158,17 @@ module.exports = function (connection) {
               DISCOUNT   = VALUES(DISCOUNT),
               VAT_PERC   = VALUES(VAT_PERC),
               VAT_AMOUNT = VALUES(VAT_AMOUNT),
-              RND_OFF    = VALUES(RND_OFF)`;
+              RND_OFF    = VALUES(RND_OFF),
+              COURIER_CHG = VALUES(COURIER_CHG)`;
           const netQuery = mode === "ADD" ? insertPart : insertPart + upsertPart;
 
           const hdrResult = await q(conn, netQuery, [
-            pjvNo, netData.PjvDt, netData.SupCd,netData.SrvNo,
+            pjvNo, netData.PjvDt, netData.SupCd, netData.SrvNo,
             netData.Narration, netData.InvNo, netData.InvDt, netData.LpoNo,
             netData.AMOUNT, netData.discAmt, netData.VatPct,
             netData.VatAmt, // was netData.vatAmt — the screen sends VatAmt, so VAT_AMOUNT was saving NULL
             rndOff,
+            courierChg,
           ]);
           console.log(`purchase_hdr ${mode}:`, pjvNo, hdrResult.affectedRows);
 
@@ -218,6 +223,11 @@ module.exports = function (connection) {
             RndOff: rndOff,
             JobNo: netData.JobNo || null,
             PanelNo: netData.PanelNo || null,
+            CourierChg: courierChg,
+            CourierAcc: netData.CourierAcc || "601-002-0-001",
+            // tran_acc SR_NO order: debits first, supplier credit last.
+            // Zero-amount lines are skipped, so the numbers never leave a gap.
+            FieldOrder: ["GrossAmt", "CourierChg", "VatAmt", "RndOff", "DiscAmt", "NetAmt"],
           };
           await postToTranAcc(glPayload, conn);
 
