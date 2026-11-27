@@ -44,6 +44,7 @@ const HR_FIELDS = [
   { k: "LEAVE_OPBAL", t: "n", def: 0, neg: true },
   { k: "LEAVE_OPBAL_DT", t: "d" },
   { k: "LAST_LEAVE_DT", t: "d" },
+  { k: "LAST_LEAVE_END_DT", t: "d" },          // 27-Nov-2026: last day of the last annual leave
   { k: "LAST_RESUME_DT", t: "d" },
   { k: "TICKET_ELIGIBLE", t: "yn" },
   { k: "TICKET_SECTOR", t: "s", max: 40, upper: true },
@@ -71,6 +72,7 @@ const LABEL = {
   BIRTH_DT: "Date of birth", APPT_DT: "Appointment date", PROBATION_END_DT: "Probation end",
   CONFIRM_DT: "Confirmation date", EXIT_DT: "Exit date", CONTRACT_START_DT: "Contract start",
   CONTRACT_END_DT: "Contract end", LEAVE_OPBAL_DT: "Leave balance as on", LAST_LEAVE_DT: "Last leave",
+  LAST_LEAVE_END_DT: "Leave end date",
   LAST_RESUME_DT: "Resumed on", LAST_TICKET_DT: "Last ticket", GRATUITY_START_DT: "Gratuity start",
   TKT_OP_DATE: "Ticket O/P balance as on",
 };
@@ -82,10 +84,19 @@ function norm(f, raw) {
   const fail = (m) => { throw Object.assign(new Error(m), { status: 400 }); };
   const blank = raw == null || String(raw).trim() === "";
   switch (f.t) {
-    case "d":
+    case "d": {
       if (blank) return null;
-      if (!isYmd(String(raw))) fail(`${LABEL[f.k] || f.k}: invalid date`);
-      return String(raw);
+      let s = String(raw).trim();
+      // also take dd/MM/yyyy (as loaded) and ISO date-times (a Date sent as JSON)
+      const dmy = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (dmy) s = `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+      else if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+        const d = new Date(s);
+        if (!isNaN(d)) s = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      }
+      if (!isYmd(s)) fail(`${LABEL[f.k] || f.k}: invalid date`);
+      return s;
+    }
     case "n": {
       if (blank) return f.def ?? null;
       const n = Number(raw);
@@ -173,6 +184,12 @@ module.exports = function (connection) {
     if (get(HR_FIELDS, hv, "TICKET_ELIGIBLE") === "Y" && tktBal > 0 && !get(HR_FIELDS, hv, "TKT_OP_DATE")) {
       return res.status(400).json({ message: "Ticket O/P balance as on date is required" });
     }
+    // last leave: started ≤ ended < resumed (yyyy-mm-dd strings compare as dates)
+    const lvSt = get(HR_FIELDS, hv, "LAST_LEAVE_DT");
+    const lvEn = get(HR_FIELDS, hv, "LAST_LEAVE_END_DT");
+    const lvRs = get(HR_FIELDS, hv, "LAST_RESUME_DT");
+    if (lvSt && lvEn && lvEn < lvSt) return res.status(400).json({ message: "Leave end date is before the last leave start date" });
+    if (lvEn && lvRs && lvRs <= lvEn) return res.status(400).json({ message: "Resumed on date must be after the leave end date" });
     const routing = get(PAY_FIELDS, pv, "ROUTING_CODE");
     if (routing && !/^\d{9}$/.test(routing)) return res.status(400).json({ message: "Routing code must be 9 digits" });
 
@@ -187,12 +204,14 @@ module.exports = function (connection) {
           [...ev, code]);
         if (upd.affectedRows === 0) throw Object.assign(new Error(`Employee ${code} not found`), { status: 404 });
 
-        // hr_mst — one row per employee
+        // hr_mst — one row per employee. A field the screen did not send (e.g. a new column the
+        // frontend hook does not know yet) is left as it is on an existing row, not blanked.
         const hrCols = HR_FIELDS.map((f) => f.k);
+        const hrUpd = hrCols.filter((c) => Object.prototype.hasOwnProperty.call(b, c));
         await q(conn,
           `INSERT INTO hr_mst (EMP_CODE, ${hrCols.join(", ")}, CREATED_BY)
            VALUES (?, ${hrCols.map(() => "?").join(", ")}, ?)
-           ON DUPLICATE KEY UPDATE ${hrCols.map((c) => `${c} = VALUES(${c})`).join(", ")}, MODIFIED_BY = ?`,
+           ON DUPLICATE KEY UPDATE ${hrUpd.map((c) => `${c} = VALUES(${c}), `).join("")}MODIFIED_BY = ?`,
           [code, ...hv, user, user]);
 
         // payroll_mst — normally created with the employee; insert a row if it is missing
