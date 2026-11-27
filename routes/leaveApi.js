@@ -6,9 +6,13 @@
 //
 // Annual leave balance is worked out, not stored:
 //   start   = hr_mst.LEAVE_OPBAL_DT (with LEAVE_OPBAL as opening) else emp_mst.APPT_DT (opening 0)
-//   earned  = one credit on each completed month from start:
-//               first 12 months of service (from APPT_DT): min(2, LEAVE_DAYS_PA/12) — UAE 2 days/month
-//               after that: LEAVE_DAYS_PA / 12
+//   earned  = one credit on each completed month from start, by the company's first-year rule
+//             (company.LEAVE_FIRST_YEAR, 27-Nov-2026):
+//               FULL (blank / default — Al Hayat): LEAVE_DAYS_PA / 12 from the first month (30 days = 2.5/month)
+//               UAE: first 12 months of service (from APPT_DT): min(2, LEAVE_DAYS_PA/12) — UAE law 2 days/month;
+//                    after that LEAVE_DAYS_PA / 12
+//             ALTER TABLE company ADD COLUMN LEAVE_FIRST_YEAR VARCHAR(4) NULL;   -- 'UAE' or blank (= FULL)
+//             (until the column exists the rule is FULL)
 //   taken   = leave types with IS_ANNUAL = 'Y': resumed (S) -> ACT_DAYS, approved (A) -> DAYS
 //             (leaves starting before the opening-balance date are already inside the opening)
 //   balance = opening + earned - taken          (as on a date)
@@ -87,7 +91,8 @@ const spanOf = (l) => {
 };
 
 // ---------------------------------------------------------------- the leave engine (pure, no database)
-// emp:    { APPT_DT, LEAVE_OPBAL, LEAVE_OPBAL_DT, LEAVE_DAYS_PA }  (dates yyyy-mm-dd or null)
+// emp:    { APPT_DT, LEAVE_OPBAL, LEAVE_OPBAL_DT, LEAVE_DAYS_PA, LEAVE_RULE }  (dates yyyy-mm-dd or null)
+//         LEAVE_RULE 'UAE' = 2 days/month in the first year of service; anything else (FULL) = days/12 throughout
 // leaves: [{ LEAVE_NO, LEAVE_TYPE, LEAVE_NAME, IS_ANNUAL, STATUS, FROM_DT, TO_DT, RESUME_DT, DAYS, ACT_DAYS }]
 // encs:   [{ LS_NO, LS_DT, DAYS }]  leave salary encashments (leave_sal_pay type E) — they reduce the balance
 // Returns the dated events (opening, monthly credits, leaves, encashments) up to `upTo`.
@@ -102,7 +107,8 @@ function leaveEvents(emp, leaves, upTo, encs = []) {
 
   if (start && daysPa > 0) {
     const after1 = daysPa / 12;
-    const first = Math.min(2, after1);
+    // first-year rate: UAE law 2 days/month, or (company rule FULL) the same days/12 from month 1
+    const first = emp.LEAVE_RULE === "UAE" ? Math.min(2, after1) : after1;
     for (let k = 1; ; k++) {
       const d = addMonths(start, k);
       if (d > upTo) break;
@@ -290,9 +296,23 @@ module.exports = function (connection) {
      WHERE a.STATUS IN ('A','S') AND a.EMP_CODE IN (?)
      ORDER BY a.FROM_DT`;
 
+  // company first-year leave rule: 'UAE' or 'FULL' (blank / column not added yet = FULL). Cached a minute.
+  let ruleCache = { v: null, at: 0 };
+  const leaveRule = async () => {
+    if (ruleCache.v && Date.now() - ruleCache.at < 60000) return ruleCache.v;
+    let v = "FULL";
+    try {
+      const r = await q("SELECT LEAVE_FIRST_YEAR FROM company LIMIT 1");
+      if (String(r[0]?.LEAVE_FIRST_YEAR || "").trim().toUpperCase() === "UAE") v = "UAE";
+    } catch (e) { /* column not added yet — FULL */ }
+    ruleCache = { v, at: Date.now() };
+    return v;
+  };
+
   const empOf = async (code, db = null) => {
     const rows = db ? await qc(db, `${EMP_SQL} WHERE e.EMP_CODE = ?`, [code]) : await q(`${EMP_SQL} WHERE e.EMP_CODE = ?`, [code]);
     if (!rows.length) throw fail(404, `Employee ${code} not found`);
+    rows[0].LEAVE_RULE = await leaveRule();
     return rows[0];
   };
   const leavesOf = async (codes, db = null) => {
@@ -679,6 +699,8 @@ module.exports = function (connection) {
           ${withSal ? "LEFT JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE" : ""}
          WHERE e.EMP_CATG IN (?) AND e.EMP_STATUS IN (?)
          ORDER BY e.EMP_CODE`, [catgs, statuses]);
+      const rule = await leaveRule();
+      emps.forEach((e) => { e.LEAVE_RULE = rule; });
       const leaves = await leavesOf(emps.map((e) => e.EMP_CODE));
       const byEmp = new Map();
       leaves.forEach((l) => { if (!byEmp.has(l.EMP_CODE)) byEmp.set(l.EMP_CODE, []); byEmp.get(l.EMP_CODE).push(l); });
