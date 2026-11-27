@@ -561,12 +561,16 @@ module.exports = function (connection) {
             [rd, act, remarks, user, no]);
           if (cur.IS_ANNUAL === "Y") {
             // last annual leave on the employee master (only if this one is the latest)
+            // leave end (hr_mst.LAST_LEAVE_END_DT, 27-Nov-2026): the planned To date, or the day before
+            // resuming if the employee came back early — so it is always before the resumption date
+            const endDt = lastDay < cur.TO_DT ? lastDay : cur.TO_DT;
             await qc(db,
-              `INSERT INTO hr_mst (EMP_CODE, LAST_LEAVE_DT, LAST_RESUME_DT, CREATED_BY) VALUES (?, ?, ?, ?)
+              `INSERT INTO hr_mst (EMP_CODE, LAST_LEAVE_DT, LAST_LEAVE_END_DT, LAST_RESUME_DT, CREATED_BY) VALUES (?, ?, ?, ?, ?)
                ON DUPLICATE KEY UPDATE
-                 LAST_RESUME_DT = IF(LAST_LEAVE_DT IS NULL OR LAST_LEAVE_DT <= VALUES(LAST_LEAVE_DT), VALUES(LAST_RESUME_DT), LAST_RESUME_DT),
-                 LAST_LEAVE_DT  = IF(LAST_LEAVE_DT IS NULL OR LAST_LEAVE_DT <= VALUES(LAST_LEAVE_DT), VALUES(LAST_LEAVE_DT), LAST_LEAVE_DT)`,
-              [cur.EMP_CODE, cur.FROM_DT, rd, user]);
+                 LAST_RESUME_DT    = IF(LAST_LEAVE_DT IS NULL OR LAST_LEAVE_DT <= VALUES(LAST_LEAVE_DT), VALUES(LAST_RESUME_DT), LAST_RESUME_DT),
+                 LAST_LEAVE_END_DT = IF(LAST_LEAVE_DT IS NULL OR LAST_LEAVE_DT <= VALUES(LAST_LEAVE_DT), VALUES(LAST_LEAVE_END_DT), LAST_LEAVE_END_DT),
+                 LAST_LEAVE_DT     = IF(LAST_LEAVE_DT IS NULL OR LAST_LEAVE_DT <= VALUES(LAST_LEAVE_DT), VALUES(LAST_LEAVE_DT), LAST_LEAVE_DT)`,
+              [cur.EMP_CODE, cur.FROM_DT, endDt, rd, user]);
           }
           await syncOnLeave(db);
           const diff = act - Number(cur.DAYS);
