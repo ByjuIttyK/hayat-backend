@@ -46,6 +46,8 @@ const HR_FIELDS = [
   { k: "LAST_LEAVE_DT", t: "d" },
   { k: "LAST_LEAVE_END_DT", t: "d" },          // 27-Nov-2026: last day of the last annual leave
   { k: "LAST_RESUME_DT", t: "d" },
+  { k: "LAST_LEAVE_SAL_DT", t: "d" },          // 27-Nov-2026: date the last leave salary was paid
+  { k: "LEAVE_SAL_UNPAID", t: "n", def: 0 },   // 27-Nov-2026: leave salary still unpaid on that date (AED)
   { k: "TICKET_ELIGIBLE", t: "yn" },
   { k: "TICKET_SECTOR", t: "s", max: 40, upper: true },
   { k: "TICKET_CLASS", t: "c", set: ["E", "B"] },
@@ -72,7 +74,7 @@ const LABEL = {
   BIRTH_DT: "Date of birth", APPT_DT: "Appointment date", PROBATION_END_DT: "Probation end",
   CONFIRM_DT: "Confirmation date", EXIT_DT: "Exit date", CONTRACT_START_DT: "Contract start",
   CONTRACT_END_DT: "Contract end", LEAVE_OPBAL_DT: "Leave balance as on", LAST_LEAVE_DT: "Last leave",
-  LAST_LEAVE_END_DT: "Leave end date",
+  LAST_LEAVE_END_DT: "Leave end date", LAST_LEAVE_SAL_DT: "Last leave salary paid on",
   LAST_RESUME_DT: "Resumed on", LAST_TICKET_DT: "Last ticket", GRATUITY_START_DT: "Gratuity start",
   TKT_OP_DATE: "Ticket O/P balance as on",
 };
@@ -190,6 +192,8 @@ module.exports = function (connection) {
     const lvRs = get(HR_FIELDS, hv, "LAST_RESUME_DT");
     if (lvSt && lvEn && lvEn < lvSt) return res.status(400).json({ message: "Leave end date is before the last leave start date" });
     if (lvEn && lvRs && lvRs <= lvEn) return res.status(400).json({ message: "Resumed on date must be after the leave end date" });
+    if (get(HR_FIELDS, hv, "LEAVE_SAL_UNPAID") > 0 && !get(HR_FIELDS, hv, "LAST_LEAVE_SAL_DT"))
+      return res.status(400).json({ message: "Leave salary unpaid amount needs the Last Leave Sal. Paid On date" });
     const routing = get(PAY_FIELDS, pv, "ROUTING_CODE");
     if (routing && !/^\d{9}$/.test(routing)) return res.status(400).json({ message: "Routing code must be 9 digits" });
 

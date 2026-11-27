@@ -84,9 +84,11 @@ module.exports = function (connection) {
     try {
       const [emps] = await db.query(
         `SELECT e.EMP_CODE, e.EMP_NAME, ${D("e.APPT_DT")}, ${D("e.EXIT_DT")},
-                p.BASIC_SAL, COALESCE(a.ALLOW_AMT, 0) AS ALLOW_AMT
+                p.BASIC_SAL, COALESCE(a.ALLOW_AMT, 0) AS ALLOW_AMT,
+                ${D("h.LAST_LEAVE_SAL_DT")}, COALESCE(h.LEAVE_SAL_UNPAID, 0) AS LEAVE_SAL_UNPAID
            FROM emp_mst e
            JOIN payroll_mst p ON p.EMP_CODE = e.EMP_CODE
+           LEFT JOIN hr_mst h ON h.EMP_CODE = e.EMP_CODE
            LEFT JOIN (SELECT emp_code, SUM(amount) AS ALLOW_AMT
                         FROM emp_allow_mst GROUP BY emp_code) a ON a.emp_code = e.EMP_CODE
           WHERE e.EMP_CATG = ?
@@ -121,19 +123,69 @@ module.exports = function (connection) {
       const rows = emps.map((e) => {
         const p = prevMap[e.EMP_CODE];
         const o = obMap[e.EMP_CODE];
+        const { LAST_LEAVE_SAL_DT: lsPaid, LEAVE_SAL_UNPAID: lsUnpaid, ...emp } = e;
+        // Leave salary paid-till (start of the accrual): previous run / opening balance as before.
+        // 27-Nov-2026: the Employee Master's Last Leave Sal. Paid On (hr_mst.LAST_LEAVE_SAL_DT) is used
+        // instead when it is later — not after the as-on date, not before joining. Blank → date of joining.
+        // With that date, Earlier Unpaid = the master's Leave Sal. Unpaid on Paid Date (hr_mst.LEAVE_SAL_UNPAID).
+        let lsFrom = p ? p.LS_FROM_DT : o ? o.LS_PAID_TILL : null;
+        let bfBal = p ? n(p.BF_BAL) : o ? n(o.LS_BF_BAL) : 0;
+        let lsNote = "";
+        if (type === "L" && isIso(lsPaid) && lsPaid <= asOn && (!e.APPT_DT || lsPaid >= e.APPT_DT)
+            && (!lsFrom || lsPaid > lsFrom)) {
+          lsFrom = lsPaid;
+          bfBal = r2(lsUnpaid);
+          lsNote = `LS paid ${dmy(lsPaid)}${bfBal ? `, unpaid ${bfBal.toFixed(2)}` : ""} (Emp. master)`;
+        }
+        const openSrc = p ? `Run ${dmy(p.PREV_AS_ON)}${p.PREV_STATUS === "P" ? "" : " (draft)"}` : o ? `Op.bal ${dmy(o.AS_ON_DT)}` : "";
         return {
-          ...e,
+          ...emp,
           BASIC_SAL: n(e.BASIC_SAL),
           ALLOW_AMT: n(e.ALLOW_AMT),
+          // leave salary with no earlier run / opening balance: the screen works the opening out
           OPENING: p ? n(p.CLOSING) : o ? n(o.OP_AMT) : 0,
+          OPEN_CALC: type === "L" && !p && !o,
           UNPAID_DAYS: p ? n(p.UNPAID_DAYS) : o ? n(o.UNPAID_DAYS) : 0,
-          LS_FROM_DT: p ? p.LS_FROM_DT : o ? o.LS_PAID_TILL : null,
-          BF_BAL: p ? n(p.BF_BAL) : o ? n(o.LS_BF_BAL) : 0,
+          LS_FROM_DT: lsFrom,
+          BF_BAL: bfBal,
           SETTLED: 0,
-          OPEN_SRC: p ? `Run ${dmy(p.PREV_AS_ON)}${p.PREV_STATUS === "P" ? "" : " (draft)"}` : o ? `Op.bal ${dmy(o.AS_ON_DT)}` : "",
+          OPEN_SRC: [openSrc, lsNote].filter(Boolean).join(" · "),
         };
       });
-      res.json({ success: true, rows });
+      // 27-Nov-2026 (Leave salary): the provision account(s) in the books on the day before the period,
+      // so the screen can compare them with the opening it works out. Account = the category's
+      // (emp_catg_mst.LS_PROV_AC — payroll_mst has no provision accounts); balance = Cr − Dr of
+      // tran_acc before the From date.
+      let book = null;
+      if (type === "L") {
+        const [[cat]] = await db.query("SELECT LS_PROV_AC FROM emp_catg_mst WHERE catg_code = ?", [catg]);
+        const catAc = cat && cat.LS_PROV_AC ? String(cat.LS_PROV_AC).trim() : "";
+        const accs = catAc ? [catAc] : [];
+        const asOf = new Date(Date.parse(fromDt + "T00:00:00Z") - 86400000).toISOString().slice(0, 10);
+        if (accs.length) {
+          const [heads] = await db.query("SELECT ACC_CODE, ACC_HEAD FROM acc_mst WHERE ACC_CODE IN (?)", [accs]);
+          const [bals] = await db.query(
+            `SELECT ACC_CODE, SUM(CASE WHEN DB_CR = 'C' THEN AMOUNT ELSE -AMOUNT END) AS BAL
+               FROM tran_acc WHERE ACC_CODE IN (?) AND DATTE < ? GROUP BY ACC_CODE`,
+            [accs, fromDt]
+          );
+          const headMap = Object.fromEntries(heads.map((h) => [h.ACC_CODE, h.ACC_HEAD]));
+          const balMap = Object.fromEntries(bals.map((b) => [b.ACC_CODE, r2(b.BAL)]));
+          const accounts = accs.map((a) => ({ code: a, head: headMap[a] || "", balance: balMap[a] || 0 }));
+          // the category's account also used by other categories → its balance is not this category's alone
+          const [others] = catAc && accs.includes(catAc)
+            ? await db.query("SELECT catg_code FROM emp_catg_mst WHERE LS_PROV_AC = ? AND catg_code <> ?", [catAc, catg])
+            : [[]];
+          book = {
+            asOf, accounts,
+            total: r2(accounts.reduce((s, a) => s + a.balance, 0)),
+            sharedWith: others.map((o) => o.catg_code),
+          };
+        } else {
+          book = { asOf, accounts: [], total: null, sharedWith: [] };
+        }
+      }
+      res.json({ success: true, rows, book });
     } catch (e) {
       console.error("eosb-prov/source", e);
       fail(res, 500, e.message);
@@ -284,22 +336,17 @@ module.exports = function (connection) {
       if (!expAc)
         throw new Error(`Set the ${TYPE_NAME[type]} expense account on Employee Category ${h.EMP_CATG}`);
 
-      // provision (Cr) account: employee's own account in payroll_mst, else the category's
+      // provision (Cr) account: the category's (emp_catg_mst) — payroll_mst holds no provision accounts
       const [rows] = await conn.query(
-        `SELECT d.EMP_CODE, e.EMP_NAME, d.PROVISION,
-                ${type === "G" ? "p.GRAT_PROV_AC" : "p.LS_PROV_AC"} AS EMP_PROV_AC
+        `SELECT d.EMP_CODE, e.EMP_NAME, d.PROVISION
            FROM eosb_prov_dtl d
            LEFT JOIN emp_mst e ON e.EMP_CODE = d.EMP_CODE
-           LEFT JOIN payroll_mst p ON p.EMP_CODE = d.EMP_CODE
           WHERE d.PROV_TYPE = ? AND d.PROV_NO = ? AND d.PROVISION <> 0 ORDER BY d.SR_NO`,
         [type, provNo]
       );
       if (!rows.length) throw new Error("No provision amounts to post");
-      const noAc = rows.filter((r) => !(r.EMP_PROV_AC || catgProvAc)).map((r) => r.EMP_CODE);
-      if (noAc.length)
-        throw new Error(
-          `${TYPE_NAME[type]} provision account missing for ${noAc.join(", ")} – set it in Employee Master (payroll) or on Category ${h.EMP_CATG}`
-        );
+      if (!catgProvAc)
+        throw new Error(`Set the ${TYPE_NAME[type]} provision account on Employee Category ${h.EMP_CATG}`);
 
       const tranType = TRAN_TYPE[type];
       const [[v]] = await conn.query(
@@ -326,7 +373,7 @@ module.exports = function (connection) {
           narr1, narr2.slice(0, 80), refNo, user, per ? per.TODAY : null, per ? per.NOWT : null,
         ];
         lines.push(line(expAc, charge ? "D" : "C"));
-        lines.push(line(r.EMP_PROV_AC || catgProvAc, charge ? "C" : "D"));
+        lines.push(line(catgProvAc, charge ? "C" : "D"));
       });
       await conn.query(TA_INSERT, [lines]);
 
